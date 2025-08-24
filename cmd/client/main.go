@@ -17,6 +17,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -99,7 +100,16 @@ func main() {
 
 	// Apply sensible defaults when missing (so auto-install can work)
 	if cfg["bizhawk_download_url"] == "" {
-		cfg["bizhawk_download_url"] = "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-win-x64.zip"
+		switch goos := runtime.GOOS; goos {
+		case "windows":
+			cfg["bizhawk_download_url"] = "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-win-x64.zip"
+		case "linux":
+			cfg["bizhawk_download_url"] = "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-linux-x64.tar.gz"
+		default:
+			err := fmt.Errorf("no default BizHawk download URL for OS: %s", goos)
+			log.Printf("%v", err)
+			os.Exit(1)
+		}
 	}
 	if cfg["bizhawk_path"] == "" {
 		cfg["bizhawk_path"] = filepath.Join("BizHawk-2.10-win-x64", "EmuHawk.exe")
