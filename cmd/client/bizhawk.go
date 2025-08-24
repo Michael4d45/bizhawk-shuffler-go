@@ -119,6 +119,8 @@ func EnsureBizHawkInstalled(httpClient *http.Client, cfg map[string]string) erro
 			if err := DownloadAndExtractZip(httpClient, bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
 				log.Printf("warning: failed to download BizhawkFiles.zip: %v", err)
 			}
+		} else {
+			log.Printf("no server configured, skipping BizhawkFiles.zip download")
 		}
 		log.Printf("BizHawk installed into %s", installDir)
 		// persist the computed path in cfg (caller should save cfg)

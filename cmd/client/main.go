@@ -31,7 +31,10 @@ import (
 func main() {
 	var serverURL string
 	var verbose bool
-	flag.StringVar(&serverURL, "server", "", "server ws url (e.g. ws://host:port/ws)")
+	// Accept either websocket (ws:// or wss://) or http(s) base URL so
+	// the same flag can be used for websocket connections and HTTP API
+	// downloads (e.g. http://host:port or ws://host:port/ws).
+	flag.StringVar(&serverURL, "server", "", "server URL (ws://, wss://, http:// or https://) e.g. ws://host:port/ws or http://host:port")
 	flag.BoolVar(&verbose, "v", false, "enable verbose logging to stdout and file")
 	flag.Parse()
 
@@ -52,27 +55,66 @@ func main() {
 		cfg = map[string]string{}
 	}
 
+	// If an existing config provides a websocket URL, normalize it to an
+	// HTTP base (no path) so code that appends API paths (e.g. /api/...) will
+	// work. We modify the in-memory cfg only; writing back to disk happens
+	// later when persisting defaults or changes.
+	if s, ok := cfg["server"]; ok && s != "" {
+		if u, err := url.Parse(s); err == nil {
+			switch u.Scheme {
+			case "ws":
+				u.Scheme = "http"
+			case "wss":
+				u.Scheme = "https"
+			}
+			u.Path = ""
+			u.RawQuery = ""
+			u.Fragment = ""
+			cfg["server"] = u.String()
+		}
+	}
+
 	reader := bufio.NewReader(os.Stdin)
 
-	// Prompt for serverURL until a valid value is provided.
+	// Prompt for serverURL until a valid value is provided. Accept ws/wss or http/https.
 	for serverURL == "" {
 		if s, ok := cfg["server"]; ok && s != "" {
 			serverURL = s
 			break
 		}
-		fmt.Print("Server WS URL (ws://host:port/ws): ")
+		fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
 		line, _ := reader.ReadString('\n')
 		serverURL = strings.TrimSpace(line)
 		if serverURL == "" {
 			fmt.Println("server URL cannot be empty")
 			continue
 		}
-		if !(strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://")) {
-			fmt.Println("server URL must start with ws:// or wss://")
+		if !(strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://")) {
+			fmt.Println("server URL must start with ws://, wss://, http:// or https://")
 			serverURL = ""
 			continue
 		}
-		cfg["server"] = serverURL
+		// Normalize and store the HTTP base in cfg as the authoritative server address
+		// so other code can append paths like /api/BizhawkFiles.zip or /save/... reliably.
+		u, err := url.Parse(serverURL)
+		if err != nil {
+			fmt.Printf("invalid server URL: %v\n", err)
+			serverURL = ""
+			continue
+		}
+		// If the user supplied ws/wss, convert scheme to http/https for cfg storage
+		switch u.Scheme {
+		case "ws":
+			u.Scheme = "http"
+		case "wss":
+			u.Scheme = "https"
+		}
+		// Clear any path, query, or fragment for cfg storage (we want base URL)
+		u.Path = ""
+		u.RawQuery = ""
+		u.Fragment = ""
+		cfg["server"] = u.String()
+		// Keep serverURL as originally provided so websocket code can use it later
 	}
 
 	// Prompt for player name until non-empty
@@ -142,18 +184,65 @@ func main() {
 		log.Printf("persisted config after BizHawk install: %s", cfgFile)
 	}
 
-	// ensure websocket path is present
-	u, err := url.Parse(serverURL)
-	if err != nil {
-		log.Fatalf("invalid server url %q: %v", serverURL, err)
+	// Build websocket URL (wsURL) and an HTTP base URL (serverHTTP).
+	// Prefer using cfg["server"] (normalized to http/https base) for HTTP operations
+	// so callers can append API paths reliably. For websocket, use the original
+	// serverURL if it was provided as ws:// or wss://; otherwise derive from cfg.
+	var wsURL string
+	// Determine serverHTTP base (from cfg if present)
+	serverHTTP := ""
+	if s, ok := cfg["server"]; ok && s != "" {
+		serverHTTP = s
 	}
-	if u.Path == "" || u.Path == "/" {
-		u.Path = "/ws"
-	} else if !strings.HasSuffix(u.Path, "/ws") {
-		// if user provided a URL with other path, append /ws
-		u.Path = strings.TrimRight(u.Path, "/") + "/ws"
+	// If user passed a ws/wss directly on the flag, use it for websocket.
+	if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") {
+		u, err := url.Parse(serverURL)
+		if err != nil {
+			log.Fatalf("invalid server url %q: %v", serverURL, err)
+		}
+		if u.Path == "" || u.Path == "/" {
+			u.Path = "/ws"
+		} else if !strings.HasSuffix(u.Path, "/ws") {
+			u.Path = strings.TrimRight(u.Path, "/") + "/ws"
+		}
+		wsURL = u.String()
+		// Ensure serverHTTP is populated (convert ws->http) if it wasn't already
+		if serverHTTP == "" {
+			hu := *u
+			switch hu.Scheme {
+			case "ws":
+				hu.Scheme = "http"
+			case "wss":
+				hu.Scheme = "https"
+			}
+			hu.Path = ""
+			hu.RawQuery = ""
+			hu.Fragment = ""
+			serverHTTP = hu.String()
+		}
+	} else {
+		// serverURL wasn't a websocket; derive wsURL from serverHTTP (cfg)
+		if serverHTTP == "" {
+			log.Fatalf("no server configured for websocket and -server flag not provided")
+		}
+		hu, err := url.Parse(serverHTTP)
+		if err != nil {
+			log.Fatalf("invalid configured server %q: %v", serverHTTP, err)
+		}
+		switch hu.Scheme {
+		case "http":
+			hu.Scheme = "ws"
+		case "https":
+			hu.Scheme = "wss"
+		}
+		// ensure websocket path is present
+		if hu.Path == "" || hu.Path == "/" {
+			hu.Path = "/ws"
+		} else if !strings.HasSuffix(hu.Path, "/ws") {
+			hu.Path = strings.TrimRight(hu.Path, "/") + "/ws"
+		}
+		wsURL = hu.String()
 	}
-	wsURL := u.String()
 
 	// create a cancellable context before attempting network actions so
 	// that retries can be aborted via signals or other cancellation.
@@ -265,26 +354,7 @@ func main() {
 	var ipcReadyMu sync.Mutex
 	ipcReady := false
 
-	// build an HTTP base URL from the provided server URL (scheme + host[:port])
-	// we want serverHTTP to be like http://host:port (no path)
-	serverHTTP := ""
-	if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") {
-		// reuse parsed u from above but ensure scheme is http/https and clear path
-		hu := *u
-		switch hu.Scheme {
-		case "ws":
-			hu.Scheme = "http"
-		case "wss":
-			hu.Scheme = "https"
-		}
-		hu.Path = ""
-		hu.RawQuery = ""
-		hu.Fragment = ""
-		serverHTTP = hu.String()
-	} else {
-		// fallback: assume http
-		serverHTTP = serverURL
-	}
+	// serverHTTP is already determined above (from cfg or derived from ws URL)
 
 	// helper: fetch server state (/state.json) and return running bool and player's current game
 	fetchServerState := func() (running bool, playerGame string) {

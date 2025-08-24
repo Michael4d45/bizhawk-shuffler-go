@@ -63,12 +63,32 @@ func main() {
 	host := flag.String("host", "127.0.0.1", "host to bind")
 	port := flag.Int("port", 8080, "port to bind")
 	flag.Parse()
-	addr = fmt.Sprintf("%s:%d", *host, *port)
 
 	root, _ := os.Getwd()
 	stateFile := filepath.Join(root, "state.json")
 
 	s := NewServer(stateFile)
+
+	// If the user didn't explicitly change the --host flag (it remains the
+	// default), prefer a persisted host value from the saved state if present.
+	chosenHost := *host
+	if chosenHost == "127.0.0.1" && s.state.Host != "" {
+		chosenHost = s.state.Host
+	}
+
+	// If the user supplied a host different from the persisted value, save it
+	// into the state so future runs remember it.
+	if s.state.Host != chosenHost {
+		s.mu.Lock()
+		s.state.Host = chosenHost
+		s.state.UpdatedAt = time.Now()
+		s.mu.Unlock()
+		if err := s.saveState(); err != nil {
+			log.Printf("warning: failed to persist host to state: %v", err)
+		}
+	}
+
+	addr = fmt.Sprintf("%s:%d", chosenHost, *port)
 
 	http.HandleFunc("/ws", s.handleWS)
 	http.HandleFunc("/", s.handleAdmin)
@@ -571,6 +591,61 @@ func (s *Server) handleBizhawkFilesZip(w http.ResponseWriter, r *http.Request) {
 	if _, err := os.Stat(dir); os.IsNotExist(err) {
 		http.Error(w, "BizhawkFiles not found", http.StatusNotFound)
 		return
+	}
+
+	// If the zip doesn't exist, build it atomically to ./web/BizhawkFiles.zip so
+	// subsequent requests can be served directly. We write to a temp file first
+	// and then rename.
+	if fi, err := os.Stat(zipPath); err != nil || fi.IsDir() {
+		// attempt to create containing dir for zip (should already exist)
+		if err := os.MkdirAll(filepath.Dir(zipPath), 0755); err != nil {
+			log.Printf("failed to ensure web dir for zip: %v", err)
+		} else {
+			// create temp file in same dir for atomic rename
+			tmp, err := os.CreateTemp(filepath.Dir(zipPath), "BizhawkFiles-*.zip.tmp")
+			if err != nil {
+				log.Printf("failed to create temp zip file: %v", err)
+			} else {
+				tmpName := tmp.Name()
+				// close the temp file as zipDir will write to it by name
+				tmp.Close()
+				if err := func() error {
+					f, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_TRUNC, 0644)
+					if err != nil {
+						return err
+					}
+					defer f.Close()
+					if err := zipDir(dir, f); err != nil {
+						return err
+					}
+					// ensure data is flushed
+					if err := f.Sync(); err != nil {
+						// best-effort
+					}
+					return nil
+				}(); err != nil {
+					log.Printf("failed to build BizhawkFiles.zip to temp: %v", err)
+					// attempt to remove temp
+					_ = os.Remove(tmpName)
+				} else {
+					// atomic rename into place
+					if err := os.Rename(tmpName, zipPath); err != nil {
+						log.Printf("failed to rename temp zip into place: %v", err)
+						// cleanup temp
+						_ = os.Remove(tmpName)
+					}
+				}
+			}
+		}
+
+		// If zip was successfully created by the block above, serve it directly to
+		// avoid re-zipping the directory for this request.
+		if fi, err := os.Stat(zipPath); err == nil && !fi.IsDir() {
+			w.Header().Set("Content-Type", "application/zip")
+			w.Header().Set("Content-Disposition", "attachment; filename=BizhawkFiles.zip")
+			http.ServeFile(w, r, zipPath)
+			return
+		}
 	}
 
 	// set headers for streaming zip

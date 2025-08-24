@@ -139,6 +139,10 @@ type ServerState struct {
 	// "sync"  - all players play the same game and swap simultaneously (no saves uploaded/downloaded)
 	// "save"  - players play different games and perform save upload/download orchestration on swap
 	Mode string `json:"mode,omitempty"`
+	// Host is an optional persisted listen host (e.g. "0.0.0.0" or "127.0.0.1").
+	// If present, the server can use this value when a --host flag isn't
+	// provided on the command line.
+	Host string `json:"host,omitempty"`
 	// NextSwapAt is the unix epoch seconds when the next scheduled swap will occur.
 	// It is updated by the server scheduler and persisted so the UI can display it.
 	NextSwapAt      int64 `json:"next_swap_at,omitempty"`
