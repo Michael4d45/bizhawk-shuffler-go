@@ -19,11 +19,12 @@
   <script defer src="https://unpkg.com/alpinejs@3.12.0/dist/cdn.min.js"></script>
 </head>
 
-<body x-data="app()" x-init="init()" class="text-white font-inter h-full flex flex-col">
+  <body x-data="app()" x-init="init()" class="text-white font-inter h-full flex flex-col">
   <!-- Main -->
   <main class="mx-auto px-6 py-8 flex-1 grid gap-6 lg:grid-cols-3">
-    <!-- Sidebar (Session, Games, Saves) -->
-    <div class="space-y-6">
+  <!-- Sidebar (Session, Games, Saves) -->
+  <!-- changed to flex column so expanded accordion panels can grow to fill available vertical space -->
+  <div class="flex flex-col gap-6 h-full">
       <!-- Session -->
       <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
         <div class="flex justify-between items-center">
@@ -85,9 +86,16 @@
       </section>
 
       <!-- Games -->
-      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
-        <h2 class="text-sm text-gray-400">Games</h2>
-        <div class="mt-2 space-y-2 max-h-60 overflow-auto">
+      <section
+        :class="showGamesExpanded ? 'flex-1 flex flex-col bg-card border border-white/10 p-4 rounded-lg shadow' : 'bg-card border border-white/10 p-4 rounded-lg shadow'"
+        class="transition-all">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm text-gray-400">Games</h2>
+          <button @click="toggleSection('games')"
+            class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"> <span x-text="showGamesExpanded ? 'Collapse' : 'Expand'"></span>
+          </button>
+        </div>
+        <div :class="showGamesExpanded ? 'mt-2 flex-1 overflow-auto space-y-2' : 'mt-2 space-y-2 max-h-60 overflow-auto'">
           <template x-for="g in gamesList" :key="g">
             <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
               <label class="flex items-center gap-2">
@@ -117,9 +125,16 @@
       </section>
 
       <!-- Saves -->
-      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
-        <h2 class="text-sm text-gray-400">Saves</h2>
-        <div class="mt-2 text-sm max-h-40 overflow-auto space-y-2">
+      <section
+        :class="showSavesExpanded ? 'flex-1 flex flex-col bg-card border border-white/10 p-4 rounded-lg shadow' : 'bg-card border border-white/10 p-4 rounded-lg shadow'"
+        class="transition-all">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm text-gray-400">Saves</h2>
+          <button @click="toggleSection('saves')"
+            class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"> <span x-text="showSavesExpanded ? 'Collapse' : 'Expand'"></span>
+          </button>
+        </div>
+        <div :class="showSavesExpanded ? 'mt-2 flex-1 overflow-auto text-sm space-y-2' : 'mt-2 text-sm max-h-40 overflow-auto space-y-2'">
           <template x-for="(files, player) in saves" :key="player">
             <div>
               <strong x-text="player"></strong>
@@ -281,6 +296,9 @@
   <script>
     function app() {
       return {
+        // accordion state: only one of games or saves can be expanded at once
+        showGamesExpanded: false,
+        showSavesExpanded: false,
         loaded: false,
         state: { running: false, games: [], players: {} },
         showCatalog: false,
@@ -782,6 +800,20 @@
           } catch (e) {
             this.log("ws start error: " + e.message);
           }
+        },
+        // toggle accordion sections; ensure mutual exclusivity
+        toggleSection(name) {
+          if (name === 'games') {
+            this.showGamesExpanded = !this.showGamesExpanded;
+            if (this.showGamesExpanded) this.showSavesExpanded = false;
+          } else if (name === 'saves') {
+            this.showSavesExpanded = !this.showSavesExpanded;
+            if (this.showSavesExpanded) this.showGamesExpanded = false;
+          }
+          // small timeout to allow layout changes then refresh scrollable lists if needed
+          setTimeout(() => {
+            // nothing heavy here; future hooks could recalc virtual lists
+          }, 100);
         },
       };
     }

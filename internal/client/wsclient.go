@@ -26,6 +26,10 @@ type WSClient struct {
 	handler   func(types.Command)
 
 	wg sync.WaitGroup
+	// track the active websocket connection so Stop() can close it and
+	// unblock any blocking Read/Write calls.
+	connMu sync.Mutex
+	conn   *websocket.Conn
 }
 
 // NewWSClient creates a client for wsURL. The returned client is not started
@@ -51,6 +55,13 @@ func (w *WSClient) Stop() {
 	if w.cancel != nil {
 		w.cancel()
 	}
+	// close the active connection to ensure the reader goroutine unblocks
+	w.connMu.Lock()
+	if w.conn != nil {
+		_ = w.conn.Close()
+		w.conn = nil
+	}
+	w.connMu.Unlock()
 	w.wg.Wait()
 }
 
@@ -92,6 +103,11 @@ func (w *WSClient) run() {
 		}
 		log.Printf("websocket connected to server")
 
+		// record active connection so Stop() can close it
+		w.connMu.Lock()
+		w.conn = conn
+		w.connMu.Unlock()
+
 		// writer
 		writeDone := make(chan struct{})
 		go func() {
@@ -126,6 +142,12 @@ func (w *WSClient) run() {
 
 		// close connection and wait for writer to finish
 		_ = conn.Close()
+		// clear recorded connection
+		w.connMu.Lock()
+		if w.conn == conn {
+			w.conn = nil
+		}
+		w.connMu.Unlock()
 		select {
 		case <-writeDone:
 		case <-time.After(1 * time.Second):

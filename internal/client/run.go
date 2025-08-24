@@ -1,19 +1,15 @@
 package client
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
 	"errors"
-	"flag"
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
-	"path/filepath"
 	"strings"
 	"sync"
 	"syscall"
@@ -30,98 +26,12 @@ var ErrNotFound = errors.New("not found")
 // cmd/client/main.go contents but is refactored into an internal package so
 // the command's main remains tiny.
 func Run(args []string) error {
-	var serverURL string
-	var verbose bool
-	fs := flag.NewFlagSet("client", flag.ContinueOnError)
-	fs.StringVar(&serverURL, "server", "", "server URL (ws://, wss://, http:// or https://)")
-	fs.BoolVar(&verbose, "v", false, "enable verbose logging to stdout and file")
-	if err := fs.Parse(args); err != nil {
-		return err
-	}
-
-	logFile, err := InitLogging(verbose)
+	serverURL, cfg, cfgFile, logFile, httpClient, err := Bootstrap(args)
 	if err != nil {
-		return fmt.Errorf("failed to init logging: %w", err)
+		return err
 	}
 	defer func() { _ = logFile.Close() }()
 
-	cfgFile := filepath.Join(".", "client_config.json")
-	cfg, err := LoadConfig(cfgFile)
-	if err != nil {
-		return fmt.Errorf("failed to load config: %w", err)
-	}
-	if len(cfg) > 0 {
-		log.Printf("loaded config from %s", cfgFile)
-	}
-
-	// normalize stored server url
-	cfg.NormalizeServer()
-
-	reader := bufio.NewReader(os.Stdin)
-
-	for serverURL == "" {
-		if s, ok := cfg["server"]; ok && s != "" {
-			serverURL = s
-			break
-		}
-		fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
-		line, _ := reader.ReadString('\n')
-		serverURL = strings.TrimSpace(line)
-		if serverURL == "" {
-			fmt.Println("server URL cannot be empty")
-			continue
-		}
-		if !(strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://")) {
-			fmt.Println("server URL must start with ws://, wss://, http:// or https://")
-			serverURL = ""
-			continue
-		}
-		u, err := url.Parse(serverURL)
-		if err != nil {
-			fmt.Printf("invalid server URL: %v\n", err)
-			serverURL = ""
-			continue
-		}
-		switch u.Scheme {
-		case "ws":
-			u.Scheme = "http"
-		case "wss":
-			u.Scheme = "https"
-		}
-		u.Path = ""
-		u.RawQuery = ""
-		u.Fragment = ""
-		cfg["server"] = u.String()
-	}
-
-	for {
-		if n, ok := cfg["name"]; ok && strings.TrimSpace(n) != "" {
-			break
-		}
-		fmt.Print("Player name: ")
-		line, _ := reader.ReadString('\n')
-		name := strings.TrimSpace(line)
-		if name == "" {
-			fmt.Println("player name cannot be empty")
-			continue
-		}
-		cfg["name"] = name
-		break
-	}
-
-	if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
-		_ = os.WriteFile(cfgFile, jb, 0644)
-		log.Printf("wrote initial config to %s", cfgFile)
-	}
-
-	if err := cfg.EnsureDefaults(); err != nil {
-		return fmt.Errorf("EnsureDefaults: %w", err)
-	}
-	if err := cfg.Save(cfgFile); err == nil {
-		log.Printf("persisted default config to %s", cfgFile)
-	}
-
-	httpClient := &http.Client{Timeout: 0}
 	// EnsureBizHawkInstalled and LaunchBizHawk currently accept map[string]string
 	// so convert Config to that shape for now.
 	cfgMap := map[string]string{}
@@ -139,55 +49,9 @@ func Run(args []string) error {
 		log.Printf("persisted config after BizHawk install: %s", cfgFile)
 	}
 
-	var wsURL string
-	serverHTTP := ""
-	if s, ok := cfg["server"]; ok && s != "" {
-		serverHTTP = s
-	}
-	if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") {
-		u, err := url.Parse(serverURL)
-		if err != nil {
-			return fmt.Errorf("invalid server url %q: %w", serverURL, err)
-		}
-		if u.Path == "" || u.Path == "/" {
-			u.Path = "/ws"
-		} else if !strings.HasSuffix(u.Path, "/ws") {
-			u.Path = strings.TrimRight(u.Path, "/") + "/ws"
-		}
-		wsURL = u.String()
-		if serverHTTP == "" {
-			hu := *u
-			switch hu.Scheme {
-			case "ws":
-				hu.Scheme = "http"
-			case "wss":
-				hu.Scheme = "https"
-			}
-			hu.Path = ""
-			hu.RawQuery = ""
-			hu.Fragment = ""
-			serverHTTP = hu.String()
-		}
-	} else {
-		if serverHTTP == "" {
-			return fmt.Errorf("no server configured for websocket and -server flag not provided")
-		}
-		hu, err := url.Parse(serverHTTP)
-		if err != nil {
-			return fmt.Errorf("invalid configured server %q: %w", serverHTTP, err)
-		}
-		switch hu.Scheme {
-		case "http":
-			hu.Scheme = "ws"
-		case "https":
-			hu.Scheme = "wss"
-		}
-		if hu.Path == "" || hu.Path == "/" {
-			hu.Path = "/ws"
-		} else if !strings.HasSuffix(hu.Path, "/ws") {
-			hu.Path = strings.TrimRight(hu.Path, "/") + "/ws"
-		}
-		wsURL = hu.String()
+	wsURL, serverHTTP, err := BuildWSAndHTTP(serverURL, cfg)
+	if err != nil {
+		return err
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -202,33 +66,10 @@ func Run(args []string) error {
 	defer wsClient.Stop()
 
 	writeJSON := func(cmd types.Command) error {
-		// keep the small timeout behavior
-		done := make(chan error, 1)
-		go func() {
-			done <- wsClient.Send(cmd)
-		}()
-		select {
-		case err := <-done:
-			return err
-		case <-time.After(2 * time.Second):
-			return fmt.Errorf("send queue full or no connection")
-		case <-ctx.Done():
-			return ctx.Err()
-		}
+		return WriteJSONWithTimeout(ctx, wsClient, cmd, 2*time.Second)
 	}
 
-	// incoming commands channel (buffered to avoid blocking the WS reader)
-	cmdCh := make(chan types.Command, 64)
-	wsClient.RegisterHandler(func(cmd types.Command) {
-		select {
-		case cmdCh <- cmd:
-		default:
-			log.Printf("incoming command dropped: %v", cmd.Cmd)
-		}
-	})
-
-	hello := types.Command{Cmd: types.CmdHello, Payload: map[string]string{"name": cfg["name"]}, ID: fmt.Sprintf("%d", time.Now().UnixNano())}
-	_ = writeJSON(hello)
+	// controller loop will register the ws handler and send the initial hello
 
 	bipc := internal.NewBizhawkIPC("127.0.0.1", 55355)
 	if err := bipc.Start(ctx); err != nil {
@@ -287,33 +128,7 @@ func Run(args []string) error {
 		return running, playerGame
 	}
 
-	go func() {
-		for line := range bipc.Incoming() {
-			if line == internal.MsgDisconnected || line == "__BIZHAWK_IPC_DISCONNECTED__" {
-				log.Printf("bizhawk ipc: disconnected detected from readLoop")
-				cancel()
-				break
-			}
-			log.Printf("lua: %s", line)
-			if strings.HasPrefix(line, "HELLO") {
-				log.Printf("received HELLO from lua, sending sync")
-				ipcReadyMu.Lock()
-				ipcReady = true
-				ipcReadyMu.Unlock()
-				running, playerGame := fetchServerState()
-				if playerGame == "" {
-					log.Printf("no current game for player from server state; sending empty game")
-				}
-				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := bipc.SendSync(ctx2, playerGame, running, time.Now().Unix()); err != nil {
-					log.Printf("SendSync failed: %v", err)
-				}
-				cancel2()
-			}
-		}
-		log.Printf("bizhawk ipc incoming channel closed or handler exited")
-		cancel()
-	}()
+	StartIPCGoroutine(ctx, bipc, cfg["name"], fetchServerState, &ipcReadyMu, &ipcReady, cancel)
 
 	dl := internal.NewDownloader(serverHTTP, "./roms")
 
@@ -344,27 +159,21 @@ func Run(args []string) error {
 
 	var bhCmd *exec.Cmd
 	var bhMu sync.Mutex
-	bh, err := LaunchBizHawk(ctx, cfg, httpClient)
+	bh, err := StartBizHawk(ctx, cfg, httpClient)
 	if err != nil {
-		return fmt.Errorf("failed to launch BizHawk: %w", err)
-	} else {
-		bhCmd = bh
-		if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
-			_ = os.WriteFile(cfgFile, jb, 0644)
-			log.Printf("persisted config after launching BizHawk")
-		}
-		if bhCmd != nil {
-			log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
-			go func() {
-				err := bhCmd.Wait()
-				if err != nil {
-					log.Printf("BizHawk exited with error: %v", err)
-				} else {
-					log.Printf("BizHawk exited")
-				}
-				cancel()
-			}()
-		}
+		return err
+	}
+	bhCmd = bh
+	if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
+		_ = os.WriteFile(cfgFile, jb, 0644)
+		log.Printf("persisted config after launching BizHawk")
+	}
+	if bhCmd != nil {
+		log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
+		MonitorProcess(bhCmd, func(err error) {
+			_ = err // MonitorProcess already logs; propagate cancellation
+			cancel()
+		})
 	}
 
 	go func() {
@@ -373,39 +182,16 @@ func Run(args []string) error {
 			return
 		case s := <-sigs:
 			log.Printf("signal: %v", s)
-			bhMu.Lock()
-			if bhCmd != nil && bhCmd.Process != nil {
-				log.Printf("sending SIGTERM to BizHawk pid=%d", bhCmd.Process.Pid)
-				_ = bhCmd.Process.Signal(syscall.SIGTERM)
-				time.AfterFunc(3*time.Second, func() {
-					bhMu.Lock()
-					defer bhMu.Unlock()
-					if bhCmd != nil && bhCmd.ProcessState == nil {
-						log.Printf("killing BizHawk pid=%d", bhCmd.Process.Pid)
-						_ = bhCmd.Process.Kill()
-					}
-				})
-			}
-			bhMu.Unlock()
+			// TerminateProcess acquires the provided mutex internally. Do not
+			// hold the mutex here or we'll deadlock when TerminateProcess
+			// attempts to lock the same mutex (non-reentrant).
+			log.Printf("terminating BizHawk due to signal")
+			TerminateProcess(&bhCmd, &bhMu, 3*time.Second)
 			cancel()
 		}
 	}()
-	// construct controller with dependencies
-	controller := NewController(cfg, bipc, dl, writeJSON, uploadSave, downloadSave, &ipcReadyMu, &ipcReady)
-
-	readDone := make(chan struct{})
-	go func() {
-		defer close(readDone)
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case cmd := <-cmdCh:
-				log.Printf("server->client cmd: %s", cmd.Cmd)
-				controller.Handle(ctx, cmd)
-			}
-		}
-	}()
+	// construct controller and read loop
+	readDone := RunControllerLoop(ctx, cfg, wsClient, bipc, dl, writeJSON, uploadSave, downloadSave, &ipcReadyMu, &ipcReady)
 
 	select {
 	case <-ctx.Done():
