@@ -30,10 +30,25 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -o dist/bizhawk-server-windows-amd64.exe ./cmd/server
           GOOS=linux   GOARCH=amd64 go build -o dist/bizhawk-server-linux-amd64 ./cmd/server
           GOOS=darwin  GOARCH=amd64 go build -o dist/bizhawk-server-macos-amd64 ./cmd/server
+          # Copy bundled server runtime files (web/) into dist so they are included in the release zips
+          if [ -d web ]; then
+            # Create a server-web directory inside dist to preserve the web directory structure
+            rm -rf dist/server-web || true
+            mkdir -p dist/server-web
+            cp -r web/* dist/server-web/
+          fi
+
           cd dist
-          zip -j bizhawk-server-windows-amd64.zip bizhawk-server-windows-amd64.exe
-          zip -j bizhawk-server-linux-amd64.zip bizhawk-server-linux-amd64
-          zip -j bizhawk-server-macos-amd64.zip bizhawk-server-macos-amd64
+          # Create zip files that include the binary and the server web assets if present
+          if [ -d server-web ]; then
+            zip -r bizhawk-server-windows-amd64.zip bizhawk-server-windows-amd64.exe server-web
+            zip -r bizhawk-server-linux-amd64.zip bizhawk-server-linux-amd64 server-web
+            zip -r bizhawk-server-macos-amd64.zip bizhawk-server-macos-amd64 server-web
+          else
+            zip -j bizhawk-server-windows-amd64.zip bizhawk-server-windows-amd64.exe
+            zip -j bizhawk-server-linux-amd64.zip bizhawk-server-linux-amd64
+            zip -j bizhawk-server-macos-amd64.zip bizhawk-server-macos-amd64
+          fi
           cd ..
 
       - name: Create GitHub Release and Upload Assets

@@ -30,10 +30,16 @@ jobs:
           GOOS=windows GOARCH=amd64 go build -o dist/bizhawk-client-windows-amd64.exe ./cmd/client
           GOOS=linux   GOARCH=amd64 go build -o dist/bizhawk-client-linux-amd64 ./cmd/client
           GOOS=darwin  GOARCH=amd64 go build -o dist/bizhawk-client-macos-amd64 ./cmd/client
+          # Copy bundled runtime files (if present) into dist so they are included in the release zips
+          if [ -f server.lua ]; then
+            cp server.lua dist/
+          fi
+
           cd dist
-          zip -j bizhawk-client-windows-amd64.zip bizhawk-client-windows-amd64.exe
-          zip -j bizhawk-client-linux-amd64.zip bizhawk-client-linux-amd64
-          zip -j bizhawk-client-macos-amd64.zip bizhawk-client-macos-amd64
+          # Include the server.lua in the zips alongside the binaries
+          zip -j bizhawk-client-windows-amd64.zip bizhawk-client-windows-amd64.exe server.lua || zip -j bizhawk-client-windows-amd64.zip bizhawk-client-windows-amd64.exe
+          zip -j bizhawk-client-linux-amd64.zip bizhawk-client-linux-amd64 server.lua || zip -j bizhawk-client-linux-amd64.zip bizhawk-client-linux-amd64
+          zip -j bizhawk-client-macos-amd64.zip bizhawk-client-macos-amd64 server.lua || zip -j bizhawk-client-macos-amd64.zip bizhawk-client-macos-amd64
           cd ..
 
       - name: Create GitHub Release and Upload Assets
