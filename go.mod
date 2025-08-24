@@ -1,4 +1,4 @@
-module github.com/yourname/bizshuffle
+module github.com/michael4d45/bizshuffle
 
 go 1.21
 

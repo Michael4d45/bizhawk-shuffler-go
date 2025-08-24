@@ -1,0 +1,88 @@
+package server
+
+import (
+	"encoding/json"
+	"fmt"
+	"net/http"
+	"time"
+
+	"github.com/michael4d45/bizshuffle/internal/types"
+)
+
+// apiGames: GET returns games, POST accepts JSON body {"games":[...]}
+func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.mu.Lock()
+		resp := map[string]any{"main_games": s.state.MainGames, "games": s.state.Games}
+		s.mu.Unlock()
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(resp)
+		return
+	}
+	if r.Method == http.MethodPost {
+		var raw map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&raw); err != nil {
+			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.mu.Lock()
+		if mg, ok := raw["main_games"]; ok {
+			b, _ := json.Marshal(mg)
+			var entries []types.GameEntry
+			if err := json.Unmarshal(b, &entries); err == nil {
+				s.state.MainGames = entries
+			}
+		}
+		if g, ok := raw["games"]; ok {
+			b, _ := json.Marshal(g)
+			var games []string
+			if err := json.Unmarshal(b, &games); err == nil {
+				s.state.Games = games
+			}
+		}
+		s.state.UpdatedAt = time.Now()
+		s.mu.Unlock()
+		s.saveState()
+		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{"games": s.state.Games, "main_games": s.state.MainGames}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		w.Write([]byte("ok"))
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+// apiInterval: GET/POST to view or set interval seconds
+func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodGet {
+		s.mu.Lock()
+		minv := s.state.MinIntervalSecs
+		maxv := s.state.MaxIntervalSecs
+		s.mu.Unlock()
+		json.NewEncoder(w).Encode(map[string]any{"min_interval_secs": minv, "max_interval_secs": maxv})
+		return
+	}
+	if r.Method == http.MethodPost {
+		var b struct {
+			MinInterval int `json:"min_interval_secs"`
+			MaxInterval int `json:"max_interval_secs"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+		s.mu.Lock()
+		if b.MinInterval != 0 {
+			s.state.MinIntervalSecs = b.MinInterval
+		}
+		if b.MaxInterval != 0 {
+			s.state.MaxIntervalSecs = b.MaxInterval
+		}
+		s.state.UpdatedAt = time.Now()
+		s.mu.Unlock()
+		s.saveState()
+		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		w.Write([]byte("ok"))
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
