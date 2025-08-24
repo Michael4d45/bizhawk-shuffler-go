@@ -1,0 +1,764 @@
+<!doctype html>
+<html lang="en" class="h-full bg-background">
+
+<head>
+  <meta charset="utf-8" />
+  <title>BizShuffle Admin</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
+  <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
+  <script>
+    tailwind.config = {
+      theme: {
+        extend: {
+          colors: { background: "#0f1724", card: "#071122" },
+        },
+      },
+    };
+  </script>
+  <script defer src="https://unpkg.com/alpinejs@3.12.0/dist/cdn.min.js"></script>
+</head>
+
+<body x-data="app()" x-init="init()" class="text-white font-inter h-full flex flex-col">
+  <!-- Main -->
+  <main class="mx-auto px-6 py-8 flex-1 grid gap-6 lg:grid-cols-3">
+    <!-- Sidebar (Session, Games, Saves) -->
+    <div class="space-y-6">
+      <!-- Session -->
+      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
+        <div class="flex justify-between items-center">
+          <div>
+            <p class="text-sm text-gray-400">Session</p>
+            <p class="text-lg font-bold" :class="state.running ? 'text-green-400' : 'text-red-400'"
+              x-text="state.running ? 'Running' : 'Stopped'"></p>
+            <p class="text-xs text-gray-500" x-text="'Updated: ' + lastUpdated"></p>
+          </div>
+          <div class="text-right">
+            <p class="text-sm text-gray-400">Next swap</p>
+            <p class="text-lg font-bold" x-text="nextSwapDisplay"></p>
+          </div>
+        </div>
+
+        <div class="mt-3">
+          <label class="block text-sm text-gray-300 mb-1">Mode</label>
+          <select x-model="state.mode" @change="setMode(state.mode)" class="px-2 py-1 rounded bg-slate-700">
+            <option value="sync">Sync swap (all same game)</option>
+            <option value="save">Save swap (per-player saves)</option>
+          </select>
+        </div>
+
+        <div class="mt-4 flex flex-wrap gap-2">
+          <template x-for="btn in sessionButtons" :key="btn.label">
+            <button @click="trigger(btn.path)" :disabled="loadingAction === btn.path"
+              class="px-3 py-1 rounded font-semibold transition" :class="btn.class">
+              <span x-show="loadingAction !== btn.path" x-text="btn.label"></span>
+              <span x-show="loadingAction === btn.path" class="inline-flex items-center gap-1">
+                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
+                  viewBox="0 0 24 24">
+                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
+                </svg>
+                Working...
+              </span>
+            </button>
+          </template>
+        </div>
+
+        <!-- Interval -->
+        <div class="mt-6">
+          <label class="block text-sm text-gray-300 mb-1">Swap interval (secs)</label>
+          <p class="text-sm text-gray-400 mb-2" x-text="intervalDisplay"></p>
+
+          <div class="flex flex-wrap items-center gap-3">
+            <input x-model.number="interval.min" type="number" placeholder="min"
+              class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white" />
+            <input x-model.number="interval.max" type="number" placeholder="max"
+              class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white" />
+            <button @click="saveInterval()" :disabled="!intervalValid"
+              class="px-4 py-1 rounded font-semibold transition"
+              :class="intervalValid ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
+              Save
+            </button>
+          </div>
+          <p class="text-xs text-red-400 mt-2" x-show="intervalError" x-text="intervalError"></p>
+        </div>
+      </section>
+
+      <!-- Games -->
+      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
+        <h2 class="text-sm text-gray-400">Games</h2>
+        <div class="mt-2 space-y-2 max-h-60 overflow-auto">
+          <template x-for="g in gamesList" :key="g">
+            <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
+              <label class="flex items-center gap-2">
+                <input type="checkbox" :value="g" x-model="selectedGames" />
+                <span x-text="g"></span>
+              </label>
+              <div class="flex gap-2">
+                <button @click="swapAll(g)" :disabled="loadingAction === 'swapAll:' + g"
+                  class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
+                  Swap All
+                </button>
+              </div>
+            </div>
+          </template>
+        </div>
+        <div class="mt-3 flex gap-2">
+          <button @click="refreshGamesFromFiles()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            Refresh
+          </button>
+          <button @click="saveGames()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            Save
+          </button>
+          <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            Catalog
+          </button>
+        </div>
+      </section>
+
+      <!-- Saves -->
+      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
+        <h2 class="text-sm text-gray-400">Saves</h2>
+        <div class="mt-2 text-sm max-h-40 overflow-auto space-y-2">
+          <template x-for="(files, player) in saves" :key="player">
+            <div>
+              <strong x-text="player"></strong>
+              <ul class="ml-4 list-disc text-gray-400">
+                <template x-for="s in files" :key="s.file">
+                  <li>
+                    <a class="hover:underline"
+                      :href="`/save/${encodeURIComponent(s.player)}/${encodeURIComponent(s.file)}`" x-text="s.file"></a>
+                    <span class="text-xs text-gray-500" x-text="`(${s.size} bytes)`"></span>
+                  </li>
+                </template>
+              </ul>
+            </div>
+          </template>
+        </div>
+        <button @click="loadSaves()" class="mt-3 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+          Refresh Saves
+        </button>
+      </section>
+    </div>
+
+    <div class="space-y-6 col-span-2">
+      <!-- Players -->
+      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
+        <div class="flex justify-between items-center mb-3">
+          <div>
+            <h2 class="text-sm text-gray-400">Players</h2>
+            <p class="text-xs text-gray-500">
+              Connected clients & current game
+            </p>
+          </div>
+          <button @click="refreshState()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            Refresh
+          </button>
+        </div>
+        <ul class="space-y-2">
+          <template x-for="(p, name) in state.players" :key="name">
+            <li class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-800/40 p-3 rounded">
+              <!-- Left side: player info -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-baseline gap-3">
+                  <strong class="truncate max-w-[10rem] sm:max-w-[14rem]" x-text="name"></strong>
+                  <div class="text-xs text-gray-400 truncate" x-text="p.current_game || '-'"></div>
+                </div>
+
+                <div class="mt-1 flex flex-wrap items-center gap-2">
+                  <span class="text-xs px-2 py-0.5 rounded-full"
+                    :class="p.connected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'"
+                    x-text="p.connected ? 'Connected' : 'Offline'"></span>
+                  <span class="text-xs px-2 py-0.5 rounded-full"
+                    :class="p.has_files ? 'bg-green-600/10 text-green-300' : 'bg-yellow-600/10 text-yellow-300'"
+                    x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
+                  <span class="text-xs text-gray-400" x-text="p.ephemeral ? ('status: ' + p.ephemeral) : ''"></span>
+                </div>
+              </div>
+
+              <!-- Right side: controls -->
+              <div class="flex items-center gap-2 min-w-0">
+                <select x-model="p.selectedGame" class="bg-slate-700 rounded text-sm max-w-[10rem] truncate">
+                  <option value="">--</option>
+                  <template x-for="g in gamesList" :key="g">
+                    <option :value="g" x-text="g"></option>
+                  </template>
+                </select>
+
+                <button @click="swapPlayer(name, p.selectedGame)"
+                  :disabled="!p.selectedGame || loadingAction === 'swap:' + name"
+                  class="px-2 py-1 rounded text-xs font-semibold transition whitespace-nowrap"
+                  :class="p.selectedGame ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
+                  Swap
+                </button>
+              </div>
+            </li>
+          </template>
+        </ul>
+      </section>
+      <!-- Logs -->
+      <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
+        <h2 class="text-sm text-gray-400">Logs</h2>
+        <div class="mt-2 bg-[#02101a] p-3 rounded h-96 overflow-auto text-sm space-y-1">
+          <template x-for="log in logs" :key="log.id">
+            <div>
+              <span class="text-gray-500" x-text="log.time"></span>
+              <span class="ml-2" x-text="log.message"></span>
+            </div>
+          </template>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Toast -->
+  <div x-show="toast" x-transition class="fixed bottom-4 right-4 bg-slate-800 text-white px-4 py-2 rounded shadow"
+    x-text="toast"></div>
+
+  <!-- Catalog Modal -->
+  <div x-show="showCatalog" x-transition class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-card rounded-lg w-11/12 max-w-3xl p-4">
+      <div class="flex justify-between items-center mb-3">
+        <h3 class="text-lg font-bold">Main Games (Catalog)</h3>
+        <div class="flex gap-2">
+          <button @click="showCatalog = false" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Close</button>
+        </div>
+      </div>
+      <p class="text-xs text-gray-500 mb-2">Catalog of game files and any extra files clients should also download.</p>
+      <div class="space-y-2 max-h-72 overflow-auto mb-3">
+        <template x-for="(g, idx) in mainGames" :key="idx">
+          <div class="bg-slate-800/40 p-2 rounded flex items-start justify-between gap-2">
+            <div class="flex-1">
+              <div class="text-sm font-medium" x-text="g.file"></div>
+              <div class="text-xs text-gray-400"
+                x-text="g.extra_files && g.extra_files.length ? ('extra: ' + g.extra_files.join(', ')) : 'no extra files'">
+              </div>
+            </div>
+            <div class="flex gap-2">
+              <button @click="removeMainEntry(idx)"
+                class="px-2 py-1 rounded bg-red-600 hover:bg-red-500 text-xs">Remove</button>
+            </div>
+          </div>
+        </template>
+      </div>
+
+      <div class="border-t border-white/5 pt-3">
+        <div class="flex items-center gap-2">
+          <div class="flex-1">
+            <label class="block text-xs text-gray-400 mb-1">Primary file</label>
+            <select x-model="newMain.primary" class="w-full bg-slate-700 rounded px-2 py-1 text-sm">
+              <option value="">-- select file --</option>
+              <template x-for="f in availableFiles()" :key="f">
+                <option :value="f" x-text="f"></option>
+              </template>
+            </select>
+          </div>
+          <div class="w-36">
+            <label class="block text-xs text-gray-400 mb-1">Extras</label>
+            <select x-model="newMain.extras" multiple class="w-full bg-slate-700 rounded px-2 py-1 text-sm">
+              <template x-for="f in availableFiles(true)" :key="f">
+                <option :value="f" x-text="f"></option>
+              </template>
+            </select>
+          </div>
+        </div>
+        <div class="mt-2 flex gap-2">
+          <button @click="addMainEntry()" :disabled="!newMain.primary"
+            class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Add</button>
+          <button @click="saveMainGames(); showCatalog = false"
+            class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Save Catalog</button>
+          <button @click="refreshFilesList(); refreshMainGames()"
+            class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Refresh Files</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    function app() {
+      return {
+        loaded: false,
+        state: { running: false, games: [], players: {} },
+        showCatalog: false,
+        // main catalog and available files under /files
+        mainGames: [],
+        files: [],
+        newMain: { primary: "", extras: [] },
+        saves: {},
+        logs: [],
+        interval: { min: null, max: null },
+        loadingAction: null,
+        toast: "",
+        selectedGames: [],
+        ws: null, // store websocket instance
+        sessionButtons: [
+          { label: "Start", path: "/api/start", class: "bg-green-500 text-black" },
+          { label: "Pause", path: "/api/pause", class: "bg-slate-700" },
+          { label: "Do Swap", path: "/api/do_swap", class: "bg-slate-700" },
+          { label: "Toggle Swaps", path: "/api/toggle_swaps", class: "bg-slate-700" },
+          { label: "Clear Saves", path: "/api/clear_saves", class: "bg-orange-500 text-black" },
+          { label: "Reset", path: "/api/reset", class: "bg-slate-700" },
+        ],
+        get lastUpdated() {
+          return this.state.updated_at
+            ? new Date(this.state.updated_at).toLocaleString()
+            : "--";
+        },
+        get intervalDisplay() {
+          return this.state.min_interval_secs && this.state.max_interval_secs
+            ? `${this.state.min_interval_secs} - ${this.state.max_interval_secs}`
+            : "--";
+        },
+        // now is kept up-to-date each second so UI getters can compute relative times
+        now: Math.floor(Date.now() / 1000),
+        get nextSwapDisplay() {
+          if (!this.state.next_swap_at) return "--";
+          const diff = this.state.next_swap_at - this.now; // seconds until swap
+          if (diff <= 0) return "Due";
+          // Format as H:MM:SS or M:SS depending on length
+          const hrs = Math.floor(diff / 3600);
+          const mins = Math.floor((diff % 3600) / 60);
+          const secs = diff % 60;
+          const pad = (n) => (n < 10 ? '0' + n : '' + n);
+          if (hrs > 0) return `${hrs}:${pad(mins)}:${pad(secs)}`;
+          return `${mins}:${pad(secs)}`;
+        },
+        get intervalValid() {
+          return (
+            this.interval.min > 0 &&
+            this.interval.max > 0 &&
+            this.interval.min <= this.interval.max
+          );
+        },
+        // unified games list used for displaying options in the UI.
+        // Prefer the catalog (mainGames) so the full list is always visible.
+        // Use `files` as a fallback, and finally `state.games` if nothing else exists.
+        get gamesList() {
+          if (this.mainGames && this.mainGames.length) return this.mainGames.map(e => e.file).filter(Boolean);
+          if (this.files && this.files.length) return this.files.slice();
+          if (this.state && Array.isArray(this.state.games)) return this.state.games.slice();
+          return [];
+        },
+        get intervalError() {
+          if (!this.interval.min || !this.interval.max)
+            return "Both values required";
+          if (this.interval.min <= 0 || this.interval.max <= 0)
+            return "Values must be positive";
+          if (this.interval.min > this.interval.max)
+            return "Min cannot be greater than Max";
+          return "";
+        },
+        async init() {
+          if (this.loaded) return;
+          this.loaded = true;
+          await this.refreshFilesList();
+          await this.refreshMainGames();
+          this.loadSaves();
+          this.startWS();
+          // load server mode
+          this.fetchMode();
+          await this.refreshState();
+          // keep server state refreshed periodically
+          setInterval(() => this.refreshState(), 5000);
+          // tick local clock every second so countdowns update in UI
+          setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
+        },
+        log(msg) {
+          this.logs.unshift({
+            id: Date.now() + Math.random(), // unique key
+            time: new Date().toLocaleTimeString(),
+            message: msg,
+          });
+          if (this.logs.length > 200) this.logs.pop();
+        },
+        async refreshState() {
+          try {
+            const r = await fetch("/state.json");
+            this.state = await r.json();
+            // If server provided a main_games catalog, import it into UI
+            if (this.state.main_games && Array.isArray(this.state.main_games)) {
+              // normalize entries: ensure {file, extra_files}
+              this.mainGames = this.state.main_games.map(e => ({ file: e.file, extra_files: e.extra_files || [] }));
+            }
+            // If server didn't provide an active games list, populate from mainGames or local files
+            if (!this.state.games || this.state.games.length === 0) {
+              if (this.mainGames && this.mainGames.length) {
+                this.state.games = this.mainGames.map(e => e.file).filter(Boolean);
+              } else {
+                this.state.games = this.state.games && this.state.games.length ? this.state.games : (this.files || []);
+              }
+            }
+            // Keep the checkboxes in sync with the active games
+            this.selectedGames = Array.isArray(this.state.games) ? this.state.games.slice() : [];
+            // normalize players map into UI-friendly shape
+            if (this.state.players && typeof this.state.players === 'object') {
+              const uiPlayers = {};
+              for (const [name, p] of Object.entries(this.state.players)) {
+                uiPlayers[name] = {
+                  name: name,
+                  current_game: p.current_game || p.current || p.Current || '',
+                  connected: p.connected || false,
+                  has_files: p.has_files || p.hasFiles || false,
+                  selectedGame: '',
+                  ephemeral: (this.state.ephemeral && this.state.ephemeral[name]) ? this.state.ephemeral[name] : ''
+                };
+              }
+              this.state.players = uiPlayers;
+            }
+            this.interval.min = this.state.min_interval_secs || 0;
+            this.interval.max = this.state.max_interval_secs || 0;
+          } catch (e) {
+            this.log("state fetch error: " + e.message);
+          }
+        },
+
+        async fetchMode() {
+          try {
+            const r = await fetch('/api/mode');
+            if (!r.ok) return;
+            const js = await r.json();
+            if (js && js.mode) this.state.mode = js.mode;
+          } catch (e) {
+            this.log('mode fetch err: ' + e.message);
+          }
+        },
+
+        async setMode(mode) {
+          try {
+            await fetch('/api/mode', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mode}) });
+            this.toast = 'Mode updated';
+            setTimeout(() => this.toast = '', 1500);
+          } catch (e) {
+            this.log('mode set err: ' + e.message);
+          }
+        },
+        async trigger(path) {
+          this.loadingAction = path;
+          try {
+            const r = await fetch(path, { method: "POST" });
+            if (r.ok) {
+              const contentType = r.headers.get("content-type");
+              if (contentType && contentType.includes("application/json")) {
+                // The server may return either a full state JSON (new state)
+                // or an action result like {status: "partial_failure", results: ..., download_results: ...}.
+                const body = await r.json();
+                // Heuristic: if body has players or updated_at, treat it as full state and replace.
+                if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
+                  this.state = body;
+                  this.interval.min = this.state.min_interval_secs || 0;
+                  this.interval.max = this.state.max_interval_secs || 0;
+                } else {
+                  // Action-style response. Keep the UI state intact and log results.
+                  // Backwards-compat: some endpoints return {status: 'partial_failure', results: [...], download_results: [...]}
+                  if (body.status) {
+                    if (body.status === 'partial_failure') {
+                      this.log(`${path} partial failure`);
+                      // Prefer the newer key swap_results but fall back to results
+                      const results = body.swap_results || body.results || [];
+                      const dl = body.download_results || [];
+                      this.log(`swap results: ${JSON.stringify(results)}`);
+                      if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
+                    } else if (body.status === 'ok') {
+                      this.log(`${path} OK`);
+                    } else {
+                      this.log(`${path} status: ${body.status}`);
+                    }
+                  } else {
+                    // unknown action response; just log it
+                    this.log(`${path} response: ${JSON.stringify(body)}`);
+                  }
+                  // After handling an action response, refresh the canonical state from server
+                  await this.refreshState();
+                }
+              } else {
+                this.log(`${path} OK`);
+                await this.refreshState();
+              }
+              this.toast = "Action successful";
+            } else {
+              this.log(`${path} FAIL`);
+              this.toast = "Action failed";
+            }
+            setTimeout(() => (this.toast = ""), 2000);
+          } catch (e) {
+            this.log("err " + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async loadSaves() {
+          try {
+            const r = await fetch("/saves/list.json");
+            const list = await r.json();
+            this.saves = list.reduce((acc, s) => {
+              acc[s.player] = acc[s.player] || [];
+              acc[s.player].push(s);
+              return acc;
+            }, {});
+          } catch (e) {
+            this.log("saves load error: " + e.message);
+          }
+        },
+        async refreshGamesFromFiles() {
+          try {
+            const r = await fetch("/files/list.json");
+            const raw = await r.json();
+            // raw may be an array of strings or objects {name,size}
+            this.state.games = (raw || []).map(f => {
+              if (!f) return '';
+              if (typeof f === 'string') return f;
+              return f.name || f.Name || f.Name?.toString() || '';
+            }).filter(Boolean);
+          } catch (e) {
+            this.log("refresh games err: " + e.message);
+          }
+        },
+        async refreshFilesList() {
+          try {
+            const r = await fetch('/files/list.json');
+            const raw = await r.json();
+            // normalize to array of filename strings (server returns {name,size})
+            this.files = (raw || []).map(f => {
+              if (!f) return '';
+              if (typeof f === 'string') return f;
+              return f.name || f.Name || '';
+            }).filter(Boolean);
+          } catch (e) {
+            this.log('files list error: ' + e.message);
+          }
+        },
+        async refreshMainGames() {
+          try {
+            const r = await fetch('/api/games');
+            if (r.ok) {
+              const body = await r.json();
+              // body may be legacy array or new object; normalize
+              if (Array.isArray(body)) {
+                this.mainGames = [];
+                this.state.games = body;
+                // sync selected games to match the server-provided games
+                this.selectedGames = Array.isArray(this.state.games) ? this.state.games.slice() : [];
+              } else {
+                this.mainGames = body.main_games || [];
+                this.state.games = body.games || this.state.games;
+                // sync selected games if body provided games
+                if (Array.isArray(body.games)) this.selectedGames = body.games.slice();
+              }
+            }
+          } catch (e) {
+            this.log('refresh main games err: ' + e.message);
+          }
+        },
+
+        // availableFiles(allowUsedInPrimaryOnly=false)
+        // returns filenames from this.files that are not already used as a primary file
+        // or extra file in the catalog. If allowUsedInPrimaryOnly is true, then
+        // the primary file may be included but extras will exclude any files used
+        // as a primary elsewhere.
+        availableFiles(allowExtras) {
+          // Build a set of files used as primary or extras anywhere in the catalog
+          const usedAnywhere = new Set();
+          for (const e of this.mainGames) {
+            if (e.file) usedAnywhere.add(e.file);
+            if (e.extra_files) for (const ex of e.extra_files) usedAnywhere.add(ex);
+          }
+          if (allowExtras) {
+            // For extras dropdown: exclude any file used anywhere (primary or extra)
+            // and also exclude the currently selected primary so it's not chosen as its own extra.
+            return this.files.filter(f => {
+              if (!f) return false;
+              if (this.newMain && this.newMain.primary && f === this.newMain.primary) return false;
+              return !usedAnywhere.has(f);
+            });
+          }
+          // For primary dropdown: exclude files already used anywhere as primary or extra
+          return this.files.filter(f => f && !usedAnywhere.has(f));
+        },
+
+        addMainEntry() {
+          if (!this.newMain.primary) return;
+          const entry = { file: this.newMain.primary, extra_files: Array.isArray(this.newMain.extras) ? this.newMain.extras.slice() : [] };
+          // ensure not duplicating primary
+          if (this.mainGames.some(e => e.file === entry.file)) {
+            this.log('file already in catalog');
+            return;
+          }
+          this.mainGames.push(entry);
+          this.newMain.primary = '';
+          this.newMain.extras = [];
+        },
+
+        removeMainEntry(idx) {
+          this.mainGames.splice(idx, 1);
+        },
+
+        async saveMainGames() {
+          try {
+            const payload = { main_games: this.mainGames, games: this.state.games };
+            const res = await fetch('/api/games', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+            if (res.ok) {
+              this.log('main games saved');
+              await this.refreshMainGames();
+            } else {
+              this.log('save main games failed');
+            }
+          } catch (e) {
+            this.log('save main err: ' + e.message);
+          }
+        },
+        async saveGames() {
+          try {
+            const res = await fetch("/api/games", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ games: this.selectedGames }),
+            });
+            if (res.ok) this.log("games saved");
+            await this.refreshState();
+          } catch (e) {
+            this.log("save games err " + e.message);
+          }
+        },
+        async saveInterval() {
+          if (!this.intervalValid) {
+            this.log("Invalid interval values");
+            return;
+          }
+          try {
+            const res = await fetch("/api/interval", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                min_interval_secs: this.interval.min,
+                max_interval_secs: this.interval.max,
+              }),
+            });
+            if (res.ok) {
+              const state = await res.json();
+              this.state = state;
+              this.interval.min = this.interval.min || 0;
+              this.interval.max = this.interval.max || 0;
+              this.log("interval saved");
+            }
+          } catch (e) {
+            this.log("save interval err " + e.message);
+          }
+        },
+        async swapPlayer(player, game) {
+          if (!game) return;
+          this.loadingAction = "swap:" + player;
+          try {
+            const res = await fetch("/api/swap_player", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ player, game }),
+            });
+            if (res.ok) {
+              const contentType = res.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                const body = await res.json();
+                if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
+                  this.state = body;
+                } else {
+                  // action-style response
+                  if (body.status) {
+                    this.log(`/api/swap_player status: ${body.status}`);
+                    const results = body.swap_results || body.results || [];
+                    if (results.length) this.log(`swap_player results: ${JSON.stringify(results)}`);
+                    const dl = body.download_results || [];
+                    if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
+                  } else {
+                    this.log(`/api/swap_player response: ${JSON.stringify(body)}`);
+                  }
+                  await this.refreshState();
+                }
+              } else {
+                await this.refreshState();
+              }
+            }
+          } catch (e) {
+            this.log("swap_player err " + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async swapAll(game) {
+          if (!game) return;
+          this.loadingAction = "swapAll:" + game;
+          try {
+            const res = await fetch("/api/swap_all_to_game", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ game }),
+            });
+            if (res.ok) {
+              const contentType = res.headers.get('content-type');
+              if (contentType && contentType.includes('application/json')) {
+                const body = await res.json();
+                if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
+                  this.state = body;
+                } else {
+                  if (body.status) {
+                    this.log(`/api/swap_all_to_game status: ${body.status}`);
+                    const results = body.swap_results || body.results || [];
+                    if (results.length) this.log(`swap_all results: ${JSON.stringify(results)}`);
+                    const dl = body.download_results || [];
+                    if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
+                  } else {
+                    this.log(`/api/swap_all_to_game response: ${JSON.stringify(body)}`);
+                  }
+                  await this.refreshState();
+                }
+              } else {
+                await this.refreshState();
+              }
+            }
+          } catch (e) {
+            this.log("swap_all err " + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        startWS() {
+          if (this.ws && this.ws.readyState <= 1) {
+            // already open or connecting
+            return;
+          }
+          try {
+            this.ws = new WebSocket(
+              (location.protocol === "https:" ? "wss://" : "ws://") +
+              location.host +
+              "/ws"
+            );
+            this.ws.onopen = () => this.log("ws open");
+            this.ws.onclose = () => {
+              this.log("ws closed");
+              setTimeout(() => this.startWS(), 3000);
+            };
+            this.ws.onmessage = (ev) => {
+              try {
+                const d = JSON.parse(ev.data);
+                if (d.cmd === "state_update" || d.cmd === "ephemeral") {
+                  this.refreshState();
+                } else if (d.cmd === "games_update") {
+                  // server pushed updated games/main_games; refresh UI state and available files
+                  this.refreshFilesList();
+                  this.refreshMainGames();
+                  this.refreshState();
+                } else {
+                  this.log("msg " + ev.data);
+                }
+              } catch (e) {
+                this.log(ev.data);
+              }
+            };
+          } catch (e) {
+            this.log("ws start error: " + e.message);
+          }
+        },
+      };
+    }
+  </script>
+</body>
+
+</html>

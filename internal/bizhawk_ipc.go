@@ -1,0 +1,339 @@
+package internal
+
+import (
+	"bufio"
+	"context"
+	"errors"
+	"fmt"
+	"net"
+	"strconv"
+	"strings"
+	"sync"
+	"time"
+)
+
+// Message types from Lua/BizHawk side
+const (
+	msgACK   = "ACK"
+	msgNACK  = "NACK"
+	msgHELLO = "HELLO"
+	msgPING  = "PING"
+	msgPONG  = "PONG"
+	// sentinel used to notify consumers that the IPC connection was lost
+	// exported so callers can react when the Lua side disconnects.
+	MsgDisconnected = "__BIZHAWK_IPC_DISCONNECTED__"
+)
+
+// Pending command waiting for ack
+type pendingCmd struct {
+	id       string
+	ch       chan error
+	sentAt   time.Time
+	attempts int
+	line     string
+}
+
+// BizhawkIPC provides a small bridge to the Lua script listening on a TCP port
+type BizhawkIPC struct {
+	addr     string
+	mu       sync.Mutex
+	conn     net.Conn
+	reader   *bufio.Reader
+	pending  map[string]*pendingCmd
+	incoming chan string
+	closed   bool
+}
+
+// NewBizhawkIPC creates an instance targeting host:port
+func NewBizhawkIPC(host string, port int) *BizhawkIPC {
+	return &BizhawkIPC{
+		addr:     fmt.Sprintf("%s:%d", host, port),
+		pending:  make(map[string]*pendingCmd),
+		incoming: make(chan string, 16),
+	}
+}
+
+// Start connects and starts background readers and resender
+func (b *BizhawkIPC) Start(ctx context.Context) error {
+	if err := b.connect(); err != nil {
+		// initial connect failed; the readLoop has reconnect logic so
+		// start background goroutines anyway and let them retry.
+		// Return nil so callers don't assume a persistent failure.
+		// Log the error so it's visible.
+		fmt.Printf("initial IPC connect failed, will retry: %v\n", err)
+	}
+	go b.readLoop(ctx)
+	go b.resendLoop(ctx)
+	return nil
+}
+
+func (b *BizhawkIPC) connect() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn != nil {
+		return nil
+	}
+	c, err := net.DialTimeout("tcp", b.addr, 2*time.Second)
+	if err != nil {
+		return err
+	}
+	b.conn = c
+	b.reader = bufio.NewReader(c)
+	return nil
+}
+
+func (b *BizhawkIPC) Close() error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.closed = true
+	if b.conn != nil {
+		_ = b.conn.Close()
+		b.conn = nil
+	}
+
+	// notify any pending commands that the IPC is closing so callers
+	// waiting for ACK/NACK don't block indefinitely.
+	for id, pc := range b.pending {
+		select {
+		case pc.ch <- errors.New("ipc closed"):
+		default:
+		}
+		delete(b.pending, id)
+	}
+
+	close(b.incoming)
+	return nil
+}
+
+func (b *BizhawkIPC) sendLine(line string) error {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.conn == nil {
+		return errors.New("not connected")
+	}
+	_, err := b.conn.Write([]byte(line + "\n"))
+	return err
+}
+
+// SendCommand sends a command and waits for ACK or NACK or timeout
+func (b *BizhawkIPC) SendCommand(ctx context.Context, parts ...string) error {
+	id := strconv.FormatInt(time.Now().UnixNano(), 10)
+	line := "CMD|" + id + "|" + strings.Join(parts, "|")
+
+	pc := &pendingCmd{id: id, ch: make(chan error, 1), sentAt: time.Now(), attempts: 0, line: line}
+	b.mu.Lock()
+	b.pending[id] = pc
+	b.mu.Unlock()
+
+	// send immediately
+	if err := b.sendLine(line); err != nil {
+		b.mu.Lock()
+		delete(b.pending, id)
+		b.mu.Unlock()
+		return err
+	}
+	pc.sentAt = time.Now()
+	pc.attempts++
+
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-pc.ch:
+		return err
+	case <-time.After(5 * time.Second):
+		return errors.New("timeout waiting for ACK")
+	}
+}
+
+// readLoop reads incoming lines and dispatches them
+func (b *BizhawkIPC) readLoop(ctx context.Context) {
+	for {
+		b.mu.Lock()
+		r := b.reader
+		b.mu.Unlock()
+		if r == nil {
+			// try reconnect
+			if err := b.connect(); err != nil {
+				select {
+				case <-ctx.Done():
+					return
+				case <-time.After(1 * time.Second):
+					continue
+				}
+			}
+			r = b.reader
+		}
+		line, err := r.ReadString('\n')
+		if err != nil {
+			// connection closed; clear conn and retry
+			b.mu.Lock()
+			if b.conn != nil {
+				b.conn.Close()
+			}
+			b.conn = nil
+			b.reader = nil
+
+			// notify any pending commands that the IPC disconnected so callers
+			// waiting for ACK/NACK don't block indefinitely.
+			for id, pc := range b.pending {
+				select {
+				case pc.ch <- errors.New("ipc disconnected"):
+				default:
+				}
+				delete(b.pending, id)
+			}
+
+			b.mu.Unlock()
+			// notify listeners that the IPC connection was lost so callers can react
+			b.mu.Lock()
+			closed := b.closed
+			b.mu.Unlock()
+			if !closed {
+				select {
+				case b.incoming <- MsgDisconnected:
+				default:
+				}
+			}
+			select {
+			case <-ctx.Done():
+				return
+			case <-time.After(1 * time.Second):
+				continue
+			}
+		}
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		// dispatch
+		b.handleLine(line)
+	}
+}
+
+func (b *BizhawkIPC) handleLine(line string) {
+	parts := strings.Split(line, "|")
+	if len(parts) == 0 {
+		return
+	}
+	switch parts[0] {
+	case msgACK:
+		if len(parts) >= 2 {
+			id := parts[1]
+			b.mu.Lock()
+			if pc, ok := b.pending[id]; ok {
+				pc.ch <- nil
+				delete(b.pending, id)
+			}
+			b.mu.Unlock()
+		}
+	case msgNACK:
+		if len(parts) >= 2 {
+			id := parts[1]
+			reason := ""
+			if len(parts) >= 3 {
+				reason = strings.Join(parts[2:], "|")
+			}
+			b.mu.Lock()
+			if pc, ok := b.pending[id]; ok {
+				pc.ch <- fmt.Errorf("nack: %s", reason)
+				delete(b.pending, id)
+			}
+			b.mu.Unlock()
+		}
+	case msgHELLO:
+		// Lua said HELLO, we might want to send a SYNC later. Push incoming event.
+		select {
+		case b.incoming <- line:
+		default:
+		}
+	case msgPING:
+		// reply PONG
+		if len(parts) >= 2 {
+			ts := parts[1]
+			_ = b.sendLine("PONG|" + ts)
+		}
+	default:
+		// forward other messages to incoming channel
+		select {
+		case b.incoming <- line:
+		default:
+		}
+	}
+}
+
+// resendLoop retries pending commands periodically
+func (b *BizhawkIPC) resendLoop(ctx context.Context) {
+	ticker := time.NewTicker(1 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			now := time.Now()
+			b.mu.Lock()
+			for id, pc := range b.pending {
+				if pc.attempts >= 3 {
+					pc.ch <- errors.New("max attempts reached")
+					delete(b.pending, id)
+					continue
+				}
+				if now.Sub(pc.sentAt) > 2*time.Second {
+					// resend the stored original line
+					if pc.line != "" {
+						_ = b.sendLine(pc.line)
+						pc.sentAt = now
+						pc.attempts++
+					} else {
+						pc.ch <- errors.New("no original line to resend")
+						delete(b.pending, id)
+					}
+				}
+			}
+			b.mu.Unlock()
+		}
+	}
+}
+
+// SendSync sends a SYNC command with game, state (running|stopped), and startAt epoch
+func (b *BizhawkIPC) SendSync(ctx context.Context, game string, running bool, startAt int64) error {
+	state := "stopped"
+	if running {
+		state = "running"
+	}
+	return b.SendCommand(ctx, "SYNC", game, state, strconv.FormatInt(startAt, 10))
+}
+
+// Incoming returns the channel with raw lines from Lua for processing
+func (b *BizhawkIPC) Incoming() <-chan string { return b.incoming }
+
+// convenience helpers to match previous code
+func (b *BizhawkIPC) SendSwap(ctx context.Context, at int64, game string) error {
+	return b.SendCommand(ctx, "SWAP", strconv.FormatInt(at, 10), game)
+}
+
+func (b *BizhawkIPC) SendStart(ctx context.Context, at int64, game string) error {
+	return b.SendCommand(ctx, "START", strconv.FormatInt(at, 10), game)
+}
+
+func (b *BizhawkIPC) SendSave(ctx context.Context, path string) error {
+	return b.SendCommand(ctx, "SAVE", path)
+}
+
+func (b *BizhawkIPC) SendPause(ctx context.Context, at *int64) error {
+	if at == nil {
+		return b.SendCommand(ctx, "PAUSE")
+	}
+	return b.SendCommand(ctx, "PAUSE", strconv.FormatInt(*at, 10))
+}
+
+func (b *BizhawkIPC) SendResume(ctx context.Context, at *int64) error {
+	if at == nil {
+		return b.SendCommand(ctx, "RESUME")
+	}
+	return b.SendCommand(ctx, "RESUME", strconv.FormatInt(*at, 10))
+}
+
+func (b *BizhawkIPC) SendMessage(ctx context.Context, msg string) error {
+	return b.SendCommand(ctx, "MSG", msg)
+}

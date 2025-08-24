@@ -1,0 +1,47 @@
+name: Release Go Server
+
+on:
+  push:
+    tags:
+      - "v*" # runs only when you push a tag like v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+
+      - name: Build binaries
+        run: |
+          set -e
+          mkdir -p dist
+          # Build server package (cmd/server)
+          GOOS=windows GOARCH=amd64 go build -o dist/bizhawk-server-windows-amd64.exe ./cmd/server
+          GOOS=linux   GOARCH=amd64 go build -o dist/bizhawk-server-linux-amd64 ./cmd/server
+          GOOS=darwin  GOARCH=amd64 go build -o dist/bizhawk-server-macos-amd64 ./cmd/server
+          cd dist
+          zip -j bizhawk-server-windows-amd64.zip bizhawk-server-windows-amd64.exe
+          zip -j bizhawk-server-linux-amd64.zip bizhawk-server-linux-amd64
+          zip -j bizhawk-server-macos-amd64.zip bizhawk-server-macos-amd64
+          cd ..
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/bizhawk-server-windows-amd64.zip
+            dist/bizhawk-server-linux-amd64.zip
+            dist/bizhawk-server-macos-amd64.zip
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

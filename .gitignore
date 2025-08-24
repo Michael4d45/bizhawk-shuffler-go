@@ -1,0 +1,25 @@
+# Binaries
+/bin/
+/*.exe
+/*.dll
+/*.so
+/*.dylib
+
+# Build
+/build/
+
+# IDE
+.vscode/
+
+# Config
+config.yaml
+client_config.json
+
+# Mac
+.DS_Store
+
+# Logs
+*.log
+
+# Files
+web/BizhawkFiles/*
