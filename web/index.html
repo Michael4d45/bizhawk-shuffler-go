@@ -191,6 +191,10 @@
                   :class="p.selectedGame ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
                   Swap
                 </button>
+                <button @click="removePlayer(name)"
+                  class="px-2 py-1 rounded text-xs font-semibold transition bg-red-600 hover:bg-red-500">
+                  Remove
+                </button>
               </div>
             </li>
           </template>
@@ -715,6 +719,29 @@
             }
           } catch (e) {
             this.log("swap_all err " + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async removePlayer(player) {
+          if (!player) return;
+          if (!confirm(`Remove player '${player}' from session? This will disconnect them.`)) return;
+          this.loadingAction = 'remove:' + player;
+          try {
+            const res = await fetch('/api/remove_player', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ player })
+            });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              this.log(`remove_player: ${player}`);
+              await this.refreshState();
+            } else {
+              this.log(`/api/remove_player failed for ${player}`);
+            }
+          } catch (e) {
+            this.log('remove_player err ' + e.message);
           } finally {
             this.loadingAction = null;
           }

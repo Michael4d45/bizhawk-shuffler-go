@@ -90,6 +90,7 @@ func main() {
 	http.HandleFunc("/api/games", s.apiGames)
 	http.HandleFunc("/api/interval", s.apiInterval)
 	http.HandleFunc("/api/swap_player", s.apiSwapPlayer)
+	http.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	http.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
 	http.HandleFunc("/save/upload", s.handleSaveUpload)
 	http.HandleFunc("/save/", s.handleSaveServe)
@@ -828,6 +829,53 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	json.NewEncoder(w).Encode(map[string]string{"result": res})
+}
+
+// apiRemovePlayer: POST {player: ...}
+func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var b struct {
+		Player string `json:"player"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if b.Player == "" {
+		http.Error(w, "missing player", http.StatusBadRequest)
+		return
+	}
+
+	// remove player from state and close any connection
+	s.mu.Lock()
+	// remove from state.Players
+	delete(s.state.Players, b.Player)
+	// if there's a ws client for this player, close it and remove from maps
+	if cl, ok := s.players[b.Player]; ok {
+		// find websocket.Conn that maps to this wsClient in s.conns and close it
+		for c, client := range s.conns {
+			if client == cl {
+				// remove from conns map and close connection
+				delete(s.conns, c)
+				// close underlying websocket; best-effort
+				_ = c.Close()
+				break
+			}
+		}
+		delete(s.players, b.Player)
+	}
+	s.state.UpdatedAt = time.Now()
+	s.mu.Unlock()
+
+	// persist and broadcast update to remaining clients
+	s.saveState()
+	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
 }
 
 // apiSwapAllToGame: POST {game:...}
