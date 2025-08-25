@@ -5,7 +5,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"net"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync"
@@ -60,10 +62,18 @@ func (b *BizhawkIPC) Start(ctx context.Context) error {
 		// start background goroutines anyway and let them retry.
 		// Return nil so callers don't assume a persistent failure.
 		// Log the error so it's visible.
-		fmt.Printf("initial IPC connect failed, will retry: %v\n", err)
+		log.Printf("bizhawk ipc: initial connect failed, will retry: %v", err)
 	}
-	go b.readLoop(ctx)
-	go b.resendLoop(ctx)
+	go func() {
+		log.Printf("bizhawk ipc: starting readLoop goroutine")
+		b.readLoop(ctx)
+		log.Printf("bizhawk ipc: readLoop goroutine exited")
+	}()
+	go func() {
+		log.Printf("bizhawk ipc: starting resendLoop goroutine")
+		b.resendLoop(ctx)
+		log.Printf("bizhawk ipc: resendLoop goroutine exited")
+	}()
 	return nil
 }
 
@@ -73,8 +83,10 @@ func (b *BizhawkIPC) connect() error {
 	if b.conn != nil {
 		return nil
 	}
+	log.Printf("bizhawk ipc: attempting connect to %s; goroutines=%d pending=%d", b.addr, runtime.NumGoroutine(), len(b.pending))
 	c, err := net.DialTimeout("tcp", b.addr, 2*time.Second)
 	if err != nil {
+		log.Printf("bizhawk ipc: connect error: %v", err)
 		return err
 	}
 	b.conn = c
@@ -101,7 +113,9 @@ func (b *BizhawkIPC) Close() error {
 		delete(b.pending, id)
 	}
 
+	// closing incoming so consumers will see range() end
 	close(b.incoming)
+	log.Printf("bizhawk ipc: closed and incoming channel closed")
 	return nil
 }
 
@@ -111,8 +125,13 @@ func (b *BizhawkIPC) sendLine(line string) error {
 	if b.conn == nil {
 		return errors.New("not connected")
 	}
-	_, err := b.conn.Write([]byte(line + "\n"))
-	return err
+	n, err := b.conn.Write([]byte(line + "\n"))
+	if err != nil {
+		log.Printf("bizhawk ipc: sendLine error writing %d bytes: %v", n, err)
+		return err
+	}
+	log.Printf("bizhawk ipc: sendLine wrote %d bytes: %q", n, line)
+	return nil
 }
 
 // SendCommand sends a command and waits for ACK or NACK or timeout
@@ -130,6 +149,7 @@ func (b *BizhawkIPC) SendCommand(ctx context.Context, parts ...string) error {
 		b.mu.Lock()
 		delete(b.pending, id)
 		b.mu.Unlock()
+		log.Printf("bizhawk ipc: SendCommand sendLine failed: %v", err)
 		return err
 	}
 	pc.sentAt = time.Now()
@@ -154,8 +174,10 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 		if r == nil {
 			// try reconnect
 			if err := b.connect(); err != nil {
+				log.Printf("bizhawk ipc: connect failed in readLoop: %v", err)
 				select {
 				case <-ctx.Done():
+					log.Printf("bizhawk ipc: readLoop context done while reconnecting")
 					return
 				case <-time.After(1 * time.Second):
 					continue
@@ -166,6 +188,7 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 		line, err := r.ReadString('\n')
 		if err != nil {
 			// connection closed; clear conn and retry
+			log.Printf("bizhawk ipc: readLoop detected read error: %v; will clear conn and notify", err)
 			b.mu.Lock()
 			if b.conn != nil {
 				_ = b.conn.Close()
@@ -189,9 +212,15 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 			closed := b.closed
 			b.mu.Unlock()
 			if !closed {
+				// dump brief stack and pending info to help debugging who is listening
+				buf := make([]byte, 1<<12)
+				m := runtime.Stack(buf, false)
+				log.Printf("bizhawk ipc: notifying MsgDisconnected; goroutines=%d pending=%d stack:\n%s", runtime.NumGoroutine(), len(b.pending), string(buf[:m]))
 				select {
 				case b.incoming <- MsgDisconnected:
+					log.Printf("bizhawk ipc: signaled MsgDisconnected to incoming consumers")
 				default:
+					log.Printf("bizhawk ipc: incoming channel full, dropping MsgDisconnected")
 				}
 			}
 			select {
@@ -206,6 +235,7 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 			continue
 		}
 		// dispatch
+		log.Printf("bizhawk ipc: received line: %q", line)
 		b.handleLine(line)
 	}
 }
@@ -222,6 +252,7 @@ func (b *BizhawkIPC) handleLine(line string) {
 			b.mu.Lock()
 			if pc, ok := b.pending[id]; ok {
 				pc.ch <- nil
+				log.Printf("bizhawk ipc: ACK received for id=%s", id)
 				delete(b.pending, id)
 			}
 			b.mu.Unlock()
@@ -236,6 +267,7 @@ func (b *BizhawkIPC) handleLine(line string) {
 			b.mu.Lock()
 			if pc, ok := b.pending[id]; ok {
 				pc.ch <- fmt.Errorf("nack: %s", reason)
+				log.Printf("bizhawk ipc: NACK received for id=%s reason=%s", id, reason)
 				delete(b.pending, id)
 			}
 			b.mu.Unlock()
@@ -250,13 +282,19 @@ func (b *BizhawkIPC) handleLine(line string) {
 		// reply PONG
 		if len(parts) >= 2 {
 			ts := parts[1]
-			_ = b.sendLine("PONG|" + ts)
+			if err := b.sendLine("PONG|" + ts); err != nil {
+				log.Printf("bizhawk ipc: failed to send PONG: %v", err)
+			} else {
+				log.Printf("bizhawk ipc: replied with PONG %s", ts)
+			}
 		}
 	default:
 		// forward other messages to incoming channel
 		select {
 		case b.incoming <- line:
+			log.Printf("bizhawk ipc: forwarded message to incoming: %q", line)
 		default:
+			log.Printf("bizhawk ipc: incoming channel full, dropping message: %q", line)
 		}
 	}
 }

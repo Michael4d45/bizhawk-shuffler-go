@@ -3,6 +3,7 @@ package client
 import (
 	"context"
 	"log"
+	"runtime"
 	"sync"
 
 	"github.com/michael4d45/bizshuffle/internal"
@@ -29,7 +30,11 @@ func RunControllerLoop(ctx context.Context, cfg Config, wsClient WSClientLike, b
 		select {
 		case cmdCh <- cmd:
 		default:
-			log.Printf("incoming command dropped: %v", cmd.Cmd)
+			var ir bool
+			ipcReadyMu.Lock()
+			ir = *ipcReady
+			ipcReadyMu.Unlock()
+			log.Printf("incoming command dropped: %v; goroutines=%d ipcReady=%v", cmd.Cmd, runtime.NumGoroutine(), ir)
 		}
 	})
 
@@ -41,14 +46,30 @@ func RunControllerLoop(ctx context.Context, cfg Config, wsClient WSClientLike, b
 
 	readDone := make(chan struct{})
 	go func() {
-		defer close(readDone)
+		defer func() {
+			log.Printf("controller read loop exiting; closing readDone")
+			close(readDone)
+		}()
 		for {
 			select {
 			case <-ctx.Done():
+				log.Printf("controller read loop: ctx.Done received; exiting")
 				return
-			case cmd := <-cmdCh:
+			case cmd, ok := <-cmdCh:
+				if !ok {
+					log.Printf("controller read loop: cmdCh closed; exiting")
+					return
+				}
 				log.Printf("server->client cmd: %s", cmd.Cmd)
-				controller.Handle(ctx, cmd)
+				// protect handler from panics
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("controller.Handle panic: %v", r)
+						}
+					}()
+					controller.Handle(ctx, cmd)
+				}()
 			}
 		}
 	}()

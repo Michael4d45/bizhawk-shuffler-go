@@ -88,12 +88,13 @@ func (w *WSClient) run() {
 	for {
 		select {
 		case <-w.ctx.Done():
+			log.Printf("wsclient: run loop context done, exiting")
 			return
 		default:
 		}
 		conn, _, err := dialer.Dial(w.wsURL, nil)
 		if err != nil {
-			log.Printf("ws dial: %v; retrying in 2s", err)
+			log.Printf("wsclient: ws dial error: %v; retrying in 2s", err)
 			select {
 			case <-time.After(2 * time.Second):
 				continue
@@ -101,7 +102,7 @@ func (w *WSClient) run() {
 				return
 			}
 		}
-		log.Printf("websocket connected to server")
+		log.Printf("wsclient: websocket connected to server %s", w.wsURL)
 
 		// record active connection so Stop() can close it
 		w.connMu.Lock()
@@ -111,15 +112,20 @@ func (w *WSClient) run() {
 		// writer
 		writeDone := make(chan struct{})
 		go func() {
-			defer close(writeDone)
+			defer func() {
+				close(writeDone)
+				log.Printf("wsclient: writer goroutine exiting")
+			}()
 			for {
 				select {
 				case cmd := <-w.sendCh:
 					if err := conn.WriteJSON(cmd); err != nil {
-						log.Printf("ws write error: %v", err)
+						log.Printf("wsclient: ws write error: %v", err)
 						return
 					}
+					log.Printf("wsclient: wrote cmd: %v", cmd)
 				case <-w.ctx.Done():
+					log.Printf("wsclient: writer received ctx.Done()")
 					return
 				}
 			}
@@ -129,14 +135,25 @@ func (w *WSClient) run() {
 		for {
 			var cmd types.Command
 			if err := conn.ReadJSON(&cmd); err != nil {
-				log.Printf("ws read: %v", err)
+				log.Printf("wsclient: ws read error: %v", err)
 				break
 			}
 			w.handlerMu.RLock()
 			h := w.handler
 			w.handlerMu.RUnlock()
 			if h != nil {
-				h(cmd)
+				// protect the handler invocation so a panic inside handler doesn't
+				// crash the wsclient goroutine; log panic if it happens.
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("wsclient: handler panic: %v", r)
+						}
+					}()
+					h(cmd)
+				}()
+			} else {
+				log.Printf("wsclient: no handler registered for incoming cmd: %v", cmd)
 			}
 		}
 

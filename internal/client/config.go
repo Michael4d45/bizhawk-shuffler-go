@@ -79,8 +79,24 @@ func (c Config) EnsureDefaults() error {
 			return fmt.Errorf("no default BizHawk download URL for OS: %s", goos)
 		}
 	}
+	// Derive a sensible default bizhawk_path from the download URL when not
+	// explicitly configured. For zip archives we assume the top-level folder
+	// name matches the archive basename without extension. For tar.gz archives
+	// strip the .tar.gz suffix.
 	if strings.TrimSpace(c["bizhawk_path"]) == "" {
-		c["bizhawk_path"] = filepath.Join("BizHawk-2.10-win-x64", "EmuHawk.exe")
+		// default to a platform-aware executable name
+		dl := c["bizhawk_download_url"]
+		base := filepath.Base(dl)
+		installDir := strings.TrimSuffix(base, filepath.Ext(base))
+		if strings.HasSuffix(strings.ToLower(base), ".tar.gz") || strings.HasSuffix(strings.ToLower(base), ".tgz") {
+			// base currently trimmed by filepath.Ext removed .gz; ensure .tar is removed too
+			installDir = strings.TrimSuffix(installDir, ".tar")
+		}
+		if runtime.GOOS == "windows" {
+			c["bizhawk_path"] = filepath.Join(installDir, "EmuHawk.exe")
+		} else {
+			c["bizhawk_path"] = filepath.Join(installDir, "EmuHawkMono.sh")
+		}
 	}
 	if c["rom_dir"] == "" {
 		c["rom_dir"] = "roms"

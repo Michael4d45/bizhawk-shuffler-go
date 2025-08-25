@@ -37,7 +37,6 @@ func Bootstrap(args []string) (serverURL string, cfg Config, cfgFile string, log
 		return
 	}
 	// use the package logger
-	// log.Printf("loaded config from %s", cfgFile) // callers may log
 
 	// normalize stored server url
 	cfg.NormalizeServer()
@@ -99,14 +98,12 @@ func Bootstrap(args []string) (serverURL string, cfg Config, cfgFile string, log
 
 	if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
 		_ = os.WriteFile(cfgFile, jb, 0644)
-		// log.Printf("wrote initial config to %s", cfgFile)
 	}
 
 	if err = cfg.EnsureDefaults(); err != nil {
 		err = fmt.Errorf("EnsureDefaults: %w", err)
 		return
 	}
-	// log.Printf("persisted default config to %s", cfgFile)
 	_ = cfg.Save(cfgFile)
 
 	httpClient = &http.Client{Timeout: 0}

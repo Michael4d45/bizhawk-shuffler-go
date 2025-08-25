@@ -5,11 +5,13 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
 	"os/exec"
 	"os/signal"
+	"runtime"
 	"strings"
 	"sync"
 	"syscall"
@@ -59,7 +61,41 @@ func Run(args []string) error {
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
+	// Wrap cancel so we can log a stacktrace when the top-level context is
+	// cancelled. This makes it easy to determine which goroutine/code path
+	// invoked cancel().
+	origCancel := cancel
+	// make cancel a guarded logger so accidental calls from internal
+	// components won't cancel the whole client. Use origCancel() explicitly
+	// in places where we intentionally want to shutdown (signal handler,
+	// readDone branch below).
+	cancel = func() {
+		pcs := make([]uintptr, 8)
+		n := runtime.Callers(2, pcs)
+		caller := "unknown"
+		if n > 0 {
+			frames := runtime.CallersFrames(pcs[:n])
+			if f, ok := frames.Next(); ok {
+				caller = fmt.Sprintf("%s %s:%d", f.Function, f.File, f.Line)
+			}
+		}
+		buf := make([]byte, 1<<12)
+		m := runtime.Stack(buf, false)
+		log.Printf("top-level cancel() invoked (guarded) by %s; stack snapshot:\n%s", caller, string(buf[:m]))
+		// DO NOT call origCancel() here to avoid accidental shutdowns.
+	}
 	defer cancel()
+
+	// Broad debug: record that Run started with guarded cancel installed.
+	log.Printf("run: starting with guarded cancel; wsURL=%s serverHTTP=%s player=%s goroutines=%d", wsURL, serverHTTP, cfg["name"], runtime.NumGoroutine())
+
+	// Defer an exit snapshot so we can see when Run returns and what the
+	// goroutine/stack state looked like.
+	defer func() {
+		buf := make([]byte, 1<<12)
+		m := runtime.Stack(buf, true)
+		log.Printf("run: exiting; goroutines=%d; stack snapshot:\n%s", runtime.NumGoroutine(), string(buf[:m]))
+	}()
 
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
@@ -105,18 +141,29 @@ func Run(args []string) error {
 			log.Printf("/state.json returned status: %s", resp.Status)
 			return running, playerGame
 		}
-		var st struct {
-			Running bool                      `json:"running"`
-			Players map[string]map[string]any `json:"players"`
-		}
-		dec := json.NewDecoder(resp.Body)
-		if err := dec.Decode(&st); err != nil {
-			log.Printf("failed to decode /state.json: %v", err)
+		// Read the full body and decode the new envelope shape only.
+		data, err := io.ReadAll(resp.Body)
+		if err != nil {
+			log.Printf("failed to read /state.json body: %v", err)
 			return running, playerGame
 		}
-		running = st.Running
-		if st.Players != nil {
-			if p, ok := st.Players[cfg["name"]]; ok {
+
+		var env struct {
+			State struct {
+				Running bool                      `json:"running"`
+				Players map[string]map[string]any `json:"players"`
+			} `json:"state"`
+			Ephemeral map[string]string `json:"ephemeral"`
+		}
+
+		if err := json.Unmarshal(data, &env); err != nil {
+			log.Printf("failed to decode /state.json envelope: %v", err)
+			return running, playerGame
+		}
+
+		running = env.State.Running
+		if env.State.Players != nil {
+			if p, ok := env.State.Players[cfg["name"]]; ok {
 				if v, ok2 := p["current_game"]; ok2 {
 					if s, ok4 := v.(string); ok4 {
 						playerGame = s
@@ -132,7 +179,7 @@ func Run(args []string) error {
 		return running, playerGame
 	}
 
-	StartIPCGoroutine(ctx, bipc, cfg["name"], fetchServerState, &ipcReadyMu, &ipcReady, cancel)
+	StartIPCGoroutine(ctx, bipc, cfg["name"], fetchServerState, &ipcReadyMu, &ipcReady)
 
 	dl := internal.NewDownloader(serverHTTP, "./roms")
 
@@ -163,9 +210,21 @@ func Run(args []string) error {
 
 	var bhCmd *exec.Cmd
 	var bhMu sync.Mutex
+	// Debug: log configured bizhawk_path before attempting to start
+	log.Printf("Debug: configured bizhawk_path=%q", cfg["bizhawk_path"])
 	bh, err := StartBizHawk(ctx, cfg, httpClient)
 	if err != nil {
-		return err
+		// Treat failure to start BizHawk as fatal for this client.
+		// Persist any config changes, call the original cancel to perform
+		// a proper shutdown of child components, and return the error.
+		if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
+			_ = os.WriteFile(cfgFile, jb, 0644)
+			log.Printf("persisted config after launching BizHawk (error path)")
+		}
+		log.Printf("StartBizHawk failed (fatal): %v", err)
+		// call origCancel to actually cancel the top-level context
+		origCancel()
+		return fmt.Errorf("StartBizHawk failed: %w", err)
 	}
 	bhCmd = bh
 	if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
@@ -175,8 +234,12 @@ func Run(args []string) error {
 	if bhCmd != nil {
 		log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
 		MonitorProcess(bhCmd, func(err error) {
-			_ = err // MonitorProcess already logs; propagate cancellation
-			cancel()
+			// BizHawk exited. Cancel the top-level context so the client will
+			// perform its normal shutdown sequence (terminate remaining
+			// components and exit). This makes the client exit when the
+			// monitored BizHawk process terminates.
+			log.Printf("MonitorProcess: BizHawk pid=%d exited with err=%v; cancelling client", bhCmd.Process.Pid, err)
+			origCancel()
 		})
 	}
 
@@ -189,25 +252,36 @@ func Run(args []string) error {
 			// TerminateProcess acquires the provided mutex internally. Do not
 			// hold the mutex here or we'll deadlock when TerminateProcess
 			// attempts to lock the same mutex (non-reentrant).
-			log.Printf("terminating BizHawk due to signal")
+			log.Printf("terminating BizHawk due to signal: %v", s)
 			TerminateProcess(&bhCmd, &bhMu, 3*time.Second)
-			cancel()
+			log.Printf("signal handler: calling origCancel() after TerminateProcess")
+			origCancel()
 		}
 	}()
 	// construct controller and read loop
-	readDone := RunControllerLoop(ctx, cfg, wsClient, bipc, dl, writeJSON, uploadSave, downloadSave, &ipcReadyMu, &ipcReady)
+	_ = RunControllerLoop(ctx, cfg, wsClient, bipc, dl, writeJSON, uploadSave, downloadSave, &ipcReadyMu, &ipcReady)
 
+	// Do not exit simply because the controller read loop ended or an
+	// internal component calls the guarded cancel(). Exit when either the
+	// top-level context is cancelled (origCancel was invoked by the signal
+	// handler or another intended shutdown path) or an OS signal is
+	// received. Previously this code blocked on the same `sigs` channel that
+	// the signal handler goroutine also read from, which meant the handler
+	// consumed the first Ctrl+C and the main goroutine waited for a second
+	// one. Use a select so a single Ctrl+C (handled by the goroutine which
+	// calls `origCancel()`) will let Run continue.
 	select {
 	case <-ctx.Done():
-		bhMu.Lock()
-		if bhCmd != nil && bhCmd.Process != nil {
-			if err := bhCmd.Process.Kill(); err != nil {
-				log.Printf("failed to kill BizHawk process: %v", err)
-			}
-		}
-		bhMu.Unlock()
-	case <-readDone:
-		cancel()
+		log.Printf("shutdown: context cancelled; terminating BizHawk and exiting")
+	case s := <-sigs:
+		log.Printf("received shutdown signal: %v; terminating BizHawk and exiting", s)
 	}
+	bhMu.Lock()
+	if bhCmd != nil && bhCmd.Process != nil {
+		if err := bhCmd.Process.Kill(); err != nil {
+			log.Printf("failed to kill BizHawk process: %v", err)
+		}
+	}
+	bhMu.Unlock()
 	return nil
 }

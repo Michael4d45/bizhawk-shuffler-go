@@ -37,24 +37,16 @@ Always reference these instructions first and fallback to search or bash command
 
 ### Validation and Testing
 - **ALWAYS run validation** after making changes:
-  - `go vet ./...` -- takes ~2 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
+  - `golangci-lint run --timeout 2m` -- takes ~2 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
   - `gofmt -d .` -- takes <1 second. Set timeout to 10+ seconds.
+  - `make build <server|client>` -- takes <5 seconds. Set timeout to 30+ seconds.
+  - if you want to test the code, cd ./bin/<server|client> ; ./bizshuffle-<server|client>(.exe)
 - **Manual functional testing**:
   - Start server and access web UI at http://127.0.0.1:8080/
   - Test API endpoint: `curl http://127.0.0.1:8080/api/games` should return `{"games":[],"main_games":[]}`
   - Test state endpoint: `curl http://127.0.0.1:8080/state.json` should return server state
   - Create test file: `mkdir -p files && echo "test" > files/test.txt`
   - Test file serving: `curl http://127.0.0.1:8080/files/test.txt` should return file content
-
-## Known Limitations and Workarounds
-
-### Client Platform Limitations
-- **Windows-focused**: Client downloads Windows BizHawk executable (EmuHawk.exe)
-- **Linux testing limitation**: Client setup will fail on Linux when downloading BizHawk, but configuration flow can be tested
-- **Workaround**: For testing client configuration on Linux, expect "zip: not a valid zip file" error after configuration setup
-
-### Build Environment
-- **No test files**: Repository contains no test files - validation is functional only
 
 ## Validation Scenarios
 
