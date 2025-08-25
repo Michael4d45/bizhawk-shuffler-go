@@ -82,6 +82,17 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					game = g
 				}
 			}
+			// If no game provided, treat as a resume/unpause signal.
+			if game == "" {
+				ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
+				defer cancel2()
+				if err := c.bipc.SendResume(ctx2, nil); err != nil {
+					sendNack(id, err.Error())
+					return
+				}
+				sendAck(id)
+				return
+			}
 			if game != "" {
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 				if err := c.dl.EnsureFile(ctx2, game); err != nil {
