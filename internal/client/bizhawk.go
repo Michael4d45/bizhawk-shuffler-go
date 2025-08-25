@@ -22,7 +22,7 @@ func DownloadFile(client *http.Client, url, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed: %s", resp.Status)
 	}
@@ -30,7 +30,7 @@ func DownloadFile(client *http.Client, url, dest string) error {
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, resp.Body)
 	return err
 }
@@ -40,12 +40,12 @@ func DownloadAndExtractZip(client *http.Client, url, zipPath, destDir string) er
 	if err := DownloadFile(client, url, zipPath); err != nil {
 		return err
 	}
-	defer os.Remove(zipPath)
+	defer func() { _ = os.Remove(zipPath) }()
 	r, err := zip.OpenReader(zipPath)
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 	for _, f := range r.File {
 		fpath := filepath.Join(destDir, f.Name)
 		if !strings.HasPrefix(fpath, filepath.Clean(destDir)+string(os.PathSeparator)) {
@@ -66,12 +66,21 @@ func DownloadAndExtractZip(client *http.Client, url, zipPath, destDir string) er
 		}
 		rc, err := f.Open()
 		if err != nil {
-			outFile.Close()
+			if err := outFile.Close(); err != nil {
+				return err
+			}
 			return err
 		}
 		_, err = io.Copy(outFile, rc)
-		outFile.Close()
-		rc.Close()
+		if err := outFile.Close(); err != nil {
+			if err := rc.Close(); err != nil {
+				return err
+			}
+			return err
+		}
+		if err := rc.Close(); err != nil {
+			return err
+		}
 		if err != nil {
 			return err
 		}

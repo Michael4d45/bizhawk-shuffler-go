@@ -37,7 +37,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "file missing: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	dstDir := "./files"
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
 		http.Error(w, "failed to create files dir: "+err.Error(), http.StatusInternalServerError)
@@ -49,7 +49,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "create file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	if _, err := io.Copy(out, file); err != nil {
 		http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -111,13 +111,15 @@ func (s *Server) handleBizhawkFilesZip(w http.ResponseWriter, r *http.Request) {
 				log.Printf("failed to create temp zip file: %v", err)
 			} else {
 				tmpName := tmp.Name()
-				tmp.Close()
+				if err := tmp.Close(); err != nil {
+					log.Printf("tmp close error: %v", err)
+				}
 				if err := func() error {
 					f, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_TRUNC, 0644)
 					if err != nil {
 						return err
 					}
-					defer f.Close()
+					defer func() { _ = f.Close() }()
 					if err := zipDir(dir, f); err != nil {
 						return err
 					}
@@ -153,7 +155,7 @@ func (s *Server) handleBizhawkFilesZip(w http.ResponseWriter, r *http.Request) {
 // zipDir writes a zip archive of srcDir to the provided writer.
 func zipDir(srcDir string, w io.Writer) error {
 	zw := zip.NewWriter(w)
-	defer zw.Close()
+	defer func() { _ = zw.Close() }()
 	return filepath.Walk(srcDir, func(path string, info os.FileInfo, err error) error {
 		if err != nil {
 			return err
@@ -174,7 +176,7 @@ func zipDir(srcDir string, w io.Writer) error {
 		if err != nil {
 			return err
 		}
-		defer f.Close()
+		defer func() { _ = f.Close() }()
 		fh, err := zip.FileInfoHeader(info)
 		if err != nil {
 			return err

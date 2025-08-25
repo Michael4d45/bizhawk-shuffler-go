@@ -30,7 +30,7 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "save file missing: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	defer file.Close()
+	defer func() { _ = file.Close() }()
 	if player == "" {
 		player = "unknown"
 	}
@@ -58,22 +58,28 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	lr := &io.LimitedReader{R: file, N: maxSaveSize}
 	if _, err := io.Copy(out, lr); err != nil {
-		out.Close()
-		os.Remove(tmp)
+		if err := out.Close(); err != nil {
+			log.Printf("close tmp out error: %v", err)
+		}
+		_ = os.Remove(tmp)
 		http.Error(w, "write tmp: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if lr.N == 0 {
-		out.Close()
-		os.Remove(tmp)
+		if err := out.Close(); err != nil {
+			log.Printf("close tmp out error: %v", err)
+		}
+		_ = os.Remove(tmp)
 		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
 		return
 	}
-	out.Close()
+	if err := out.Close(); err != nil {
+		log.Printf("close tmp out error: %v", err)
+	}
 	dst := filepath.Join(dir, fname)
 	if err := os.Rename(tmp, dst); err != nil {
 		log.Printf("failed to rename tmp index: %v", err)
-		os.Remove(tmp)
+		_ = os.Remove(tmp)
 		http.Error(w, "rename: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -86,7 +92,7 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	newIdx := make([]SaveIndexEntry, 0, len(idx)+1)
 	for _, e := range idx {
-		if !(e.Player == player && e.File == fname) {
+		if e.Player != player || e.File != fname {
 			newIdx = append(newIdx, e)
 		}
 	}

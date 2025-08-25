@@ -20,7 +20,7 @@ func UploadSave(serverHTTP, localPath, player, game string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	fw, err := w.CreateFormFile("save", filepath.Base(localPath))
@@ -33,7 +33,9 @@ func UploadSave(serverHTTP, localPath, player, game string) error {
 	_ = w.WriteField("player", player)
 	_ = w.WriteField("game", game)
 	_ = w.WriteField("filename", filepath.Base(localPath))
-	w.Close()
+	if err := w.Close(); err != nil {
+		return err
+	}
 	req, err := http.NewRequestWithContext(context.Background(), "POST", strings.TrimRight(serverHTTP, "/")+"/save/upload", &buf)
 	if err != nil {
 		return err
@@ -43,7 +45,7 @@ func UploadSave(serverHTTP, localPath, player, game string) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upload failed: %s %s", resp.Status, string(data))
@@ -66,7 +68,7 @@ func DownloadSave(ctx context.Context, serverHTTP, player, filename string) erro
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	if resp.StatusCode != 200 {
 		if resp.StatusCode == http.StatusNotFound {
 			return ErrNotFound
@@ -79,7 +81,7 @@ func DownloadSave(ctx context.Context, serverHTTP, player, filename string) erro
 	if err != nil {
 		return err
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, resp.Body)
 	return err
 }

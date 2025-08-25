@@ -145,7 +145,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		if err := s.saveState(); err != nil {
 			fmt.Printf("saveState error: %v\n", err)
 		}
-		c.Close()
+		if err := c.Close(); err != nil {
+			log.Printf("websocket close error: %v", err)
+		}
 	}()
 
 	for {

@@ -7,7 +7,7 @@ Always reference these instructions first and fallback to search or bash command
 ## Working Effectively
 
 ### Bootstrap and Build
-- **Install Go 1.25+**: The project requires Go 1.25 minimum (works with Go 1.24+)
+- **Install Go 1.24+**: The project requires Go 1.24 minimum (works with Go 1.24+)
 - **Build all components**: `make all` -- takes 1-20 seconds depending on dependency cache. NEVER CANCEL. Set timeout to 60+ seconds for first build.
 - **Build server only**: `make server` -- takes <1 second incremental. NEVER CANCEL. Set timeout to 30+ seconds.
 - **Build client only**: `make client` -- takes <1 second incremental. NEVER CANCEL. Set timeout to 30+ seconds.

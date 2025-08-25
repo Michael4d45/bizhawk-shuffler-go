@@ -168,7 +168,7 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 			// connection closed; clear conn and retry
 			b.mu.Lock()
 			if b.conn != nil {
-				b.conn.Close()
+				_ = b.conn.Close()
 			}
 			b.conn = nil
 			b.reader = nil

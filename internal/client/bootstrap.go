@@ -56,7 +56,9 @@ func Bootstrap(args []string) (serverURL string, cfg Config, cfgFile string, log
 			fmt.Println("server URL cannot be empty")
 			continue
 		}
-		if !(strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://")) {
+		if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://") {
+			// ok
+		} else {
 			fmt.Println("server URL must start with ws://, wss://, http:// or https://")
 			serverURL = ""
 			continue

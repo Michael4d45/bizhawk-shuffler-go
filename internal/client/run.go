@@ -30,7 +30,11 @@ func Run(args []string) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = logFile.Close() }()
+	defer func() {
+		if err := logFile.Close(); err != nil {
+			_ = err
+		}
+	}()
 
 	// EnsureBizHawkInstalled and LaunchBizHawk currently accept map[string]string
 	// so convert Config to that shape for now.
@@ -79,7 +83,7 @@ func Run(args []string) error {
 	}
 	defer func() {
 		log.Printf("closing bizhawk ipc")
-		bipc.Close()
+		_ = bipc.Close()
 	}()
 
 	var ipcReadyMu sync.Mutex
@@ -96,7 +100,7 @@ func Run(args []string) error {
 			log.Printf("failed to fetch /state.json: %v", err)
 			return running, playerGame
 		}
-		defer resp.Body.Close()
+		defer func() { _ = resp.Body.Close() }()
 		if resp.StatusCode != http.StatusOK {
 			log.Printf("/state.json returned status: %s", resp.Status)
 			return running, playerGame

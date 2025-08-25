@@ -29,7 +29,7 @@ func (s *Server) loadState() {
 		log.Printf("state file not found, using defaults: %v", err)
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var tmp types.ServerState
 	dec := json.NewDecoder(f)
@@ -72,17 +72,21 @@ func (s *Server) saveState() error {
 	enc := json.NewEncoder(tmpFile)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(&st); err != nil {
-		tmpFile.Close()
-		os.Remove(tmpFile.Name())
+		if err := tmpFile.Close(); err != nil {
+			_ = err
+		}
+		_ = os.Remove(tmpFile.Name())
 		return err
 	}
 	_ = tmpFile.Sync()
 	if err := tmpFile.Close(); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
+		log.Printf("close tmp file error: %v", err)
 		return err
 	}
 	if err := os.Rename(tmpFile.Name(), s.stateFile); err != nil {
-		os.Remove(tmpFile.Name())
+		_ = os.Remove(tmpFile.Name())
+		log.Printf("rename tmp file error: %v", err)
 		return err
 	}
 	return nil

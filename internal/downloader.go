@@ -55,18 +55,20 @@ func (d *Downloader) EnsureFile(ctx context.Context, name string) error {
 		}
 		if resp.StatusCode != 200 {
 			lastErr = fmt.Errorf("bad status: %s", resp.Status)
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			time.Sleep(500 * time.Millisecond)
 			continue
 		}
 		out, err := os.Create(dest)
 		if err != nil {
-			resp.Body.Close()
+			_ = resp.Body.Close()
 			return err
 		}
 		_, err = io.Copy(out, resp.Body)
-		resp.Body.Close()
-		out.Close()
+		_ = resp.Body.Close()
+		if err := out.Close(); err != nil {
+			_ = err
+		}
 		if err != nil {
 			lastErr = err
 			time.Sleep(500 * time.Millisecond)

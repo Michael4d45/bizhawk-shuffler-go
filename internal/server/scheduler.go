@@ -226,7 +226,7 @@ func (s *Server) schedulerLoop() {
 			continue
 		}
 		s.mu.Lock()
-		if !(s.state.Running && s.state.SwapEnabled) {
+		if !s.state.Running || !s.state.SwapEnabled {
 			s.mu.Unlock()
 			continue
 		}
