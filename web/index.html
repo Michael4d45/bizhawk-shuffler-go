@@ -187,7 +187,8 @@
                   <span class="text-xs px-2 py-0.5 rounded-full"
                     :class="p.has_files ? 'bg-green-600/10 text-green-300' : 'bg-yellow-600/10 text-yellow-300'"
                     x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
-                  <span class="text-xs text-gray-400" x-text="p.ephemeral ? ('status: ' + p.ephemeral) : ''"></span>
+                    <span class="text-xs text-gray-400" x-text="p.ephemeral ? ('status: ' + p.ephemeral) : ''"></span>
+                    <span class="text-xs text-gray-400" x-text="p.ping_ms ? ('ping: ' + p.ping_ms + 'ms') : 'no ping'"></span>
                 </div>
               </div>
 
@@ -396,7 +397,11 @@
         async refreshState() {
           try {
             const r = await fetch("/state.json");
-            this.state = await r.json();
+            const envelope = await r.json();
+            // envelope contains { state: ..., ephemeral: { player: status } }
+            const st = envelope && envelope.state ? envelope.state : envelope;
+            const ep = envelope && envelope.ephemeral ? envelope.ephemeral : {};
+            this.state = st;
             // If server provided a main_games catalog, import it into UI
             if (this.state.main_games && Array.isArray(this.state.main_games)) {
               // normalize entries: ensure {file, extra_files}
@@ -412,6 +417,14 @@
             }
             // Keep the checkboxes in sync with the active games
             this.selectedGames = Array.isArray(this.state.games) ? this.state.games.slice() : [];
+            // Merge ephemeral status into players for display (non-persistent)
+            if (ep && typeof ep === 'object') {
+              for (const [pname, stv] of Object.entries(ep)) {
+                if (this.state.players && this.state.players[pname]) {
+                  this.state.players[pname].ephemeral = stv;
+                }
+              }
+            }
             // normalize players map into UI-friendly shape
             if (this.state.players && typeof this.state.players === 'object') {
               const uiPlayers = {};
@@ -421,6 +434,7 @@
                   current_game: p.current_game || p.current || p.Current || '',
                   connected: p.connected || false,
                   has_files: p.has_files || p.hasFiles || false,
+                  ping_ms: p.ping_ms || p.pingMs || p.PingMs || 0,
                   selectedGame: '',
                   ephemeral: (this.state.ephemeral && this.state.ephemeral[name]) ? this.state.ephemeral[name] : ''
                 };

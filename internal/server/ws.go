@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"strconv"
 	"sync"
 	"time"
 
@@ -16,6 +17,17 @@ import (
 type wsClient struct {
 	conn   *websocket.Conn
 	sendCh chan types.Command
+}
+
+// findPlayerNameForClient returns the player name associated with the given wsClient or
+// empty string if none. Caller must hold s.mu if concurrent access is possible.
+func (s *Server) findPlayerNameForClient(client *wsClient) string {
+	for n, pc := range s.players {
+		if pc == client {
+			return n
+		}
+	}
+	return ""
 }
 
 // handleWS upgrades to websocket and manages client lifecycle.
@@ -31,8 +43,41 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	s.mu.Unlock()
 
 	c.SetReadLimit(1024 * 16)
-	c.SetReadDeadline(time.Now().Add(60 * time.Second))
-	c.SetPongHandler(func(string) error { c.SetReadDeadline(time.Now().Add(60 * time.Second)); return nil })
+	if err := c.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+		log.Printf("SetReadDeadline error: %v", err)
+	}
+	// Pong handler updated to compute RTT when we sent a timestamp in the ping payload.
+	c.SetPongHandler(func(appData string) error {
+		if err := c.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
+			log.Printf("SetReadDeadline error: %v", err)
+		}
+		// parse timestamp from pong appData (sent as unix nanoseconds string)
+		if appData == "" {
+			return nil
+		}
+		if ts, err := strconv.ParseInt(appData, 10, 64); err == nil {
+			sent := time.Unix(0, ts)
+			rtt := time.Since(sent)
+			// Attempt to find player name for this client and store ping in server state
+			s.mu.Lock()
+			pname := s.findPlayerNameForClient(client)
+			if pname != "" {
+				pl := s.state.Players[pname]
+				pl.PingMs = int(rtt.Milliseconds())
+				s.state.Players[pname] = pl
+				s.state.UpdatedAt = time.Now()
+			}
+			updatedAt := s.state.UpdatedAt
+			s.mu.Unlock()
+			// persist and notify others of the state update asynchronously
+			go func(at time.Time) {
+				_ = s.saveState()
+				log.Printf("pong rtt for %s = %dms", pname, int(rtt.Milliseconds()))
+				s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": at}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+			}(updatedAt)
+		}
+		return nil
+	})
 
 	var writeWG sync.WaitGroup
 	writeWG.Add(1)
@@ -42,18 +87,40 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		for {
 			select {
 			case cmd, ok := <-client.sendCh:
-				c.SetWriteDeadline(time.Now().Add(10 * time.Second))
+				if err := c.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+					log.Printf("SetWriteDeadline error: %v", err)
+				}
 				if !ok {
-					c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, ""))
+					if err := c.WriteMessage(websocket.CloseMessage, websocket.FormatCloseMessage(websocket.CloseNormalClosure, "")); err != nil {
+						log.Printf("write close msg err: %v", err)
+					}
 					return
 				}
-				if err := c.WriteJSON(cmd); err != nil {
-					log.Printf("write json err: %v", err)
-					return
+				// Special-case ping command to send a control ping frame with payload so client can pong with timestamp.
+				if cmd.Cmd == types.CmdPing {
+					// payload should be a string timestamp in nanoseconds if provided; otherwise use now.
+					payload := fmt.Sprintf("%d", time.Now().UnixNano())
+					if p, ok := cmd.Payload.(string); ok && p != "" {
+						payload = p
+					}
+					if err := c.WriteMessage(websocket.PingMessage, []byte(payload)); err != nil {
+						log.Printf("write ping err: %v", err)
+						return
+					}
+				} else {
+					if err := c.WriteJSON(cmd); err != nil {
+						log.Printf("write json err: %v", err)
+						return
+					}
 				}
 			case <-ticker.C:
-				c.SetWriteDeadline(time.Now().Add(10 * time.Second))
-				if err := c.WriteMessage(websocket.PingMessage, nil); err != nil {
+				if err := c.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
+					log.Printf("SetWriteDeadline error: %v", err)
+				}
+				// include timestamp payload (unix nano) so we can measure RTT on Pong
+				payload := fmt.Sprintf("%d", time.Now().UnixNano())
+				if err := c.WriteMessage(websocket.PingMessage, []byte(payload)); err != nil {
+					log.Printf("write ping err: %v", err)
 					return
 				}
 			}
@@ -65,13 +132,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		writeWG.Wait()
 		s.mu.Lock()
 		if cl, ok := s.conns[c]; ok {
-			name := ""
-			for n, pc := range s.players {
-				if pc == cl {
-					name = n
-					break
-				}
-			}
+			name := s.findPlayerNameForClient(cl)
 			if name != "" {
 				pl := s.state.Players[name]
 				pl.Connected = false
@@ -123,13 +184,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if cmd.Cmd == types.CmdStatus || cmd.Cmd == types.CmdStateUpdate {
 			s.mu.Lock()
-			var pname string
-			for n, pc := range s.players {
-				if pc == client {
-					pname = n
-					break
-				}
-			}
+			pname := s.findPlayerNameForClient(client)
 			if pname != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
 					if st, ok := pl["status"].(string); ok {
@@ -142,13 +197,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if cmd.Cmd == types.CmdGamesUpdateAck {
 			s.mu.Lock()
-			var pname string
-			for n, pc := range s.players {
-				if pc == client {
-					pname = n
-					break
-				}
-			}
+			pname := s.findPlayerNameForClient(client)
 			if pname != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
 					if hf, ok := pl["has_files"].(bool); ok {
@@ -205,6 +254,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					case client.sendCh <- types.Command{Cmd: types.CmdStart, Payload: startPayload, ID: fmt.Sprintf("init-%d", time.Now().UnixNano())}:
 					default:
 					}
+				}
+				// send an immediate ping command so the server can measure RTT quickly after hello
+				select {
+				case client.sendCh <- types.Command{Cmd: types.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
+				default:
 				}
 			}
 			continue

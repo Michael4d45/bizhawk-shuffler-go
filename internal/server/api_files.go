@@ -38,7 +38,10 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer file.Close()
 	dstDir := "./files"
-	os.MkdirAll(dstDir, 0755)
+	if err := os.MkdirAll(dstDir, 0755); err != nil {
+		http.Error(w, "failed to create files dir: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	dstPath := filepath.Join(dstDir, filepath.Base(header.Filename))
 	out, err := os.Create(dstPath)
 	if err != nil {
@@ -60,7 +63,7 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 		Size int64  `json:"size"`
 	}
 	files := []fileInfo{}
-	filepath.Walk("./files", func(p string, info os.FileInfo, err error) error {
+	if err := filepath.Walk("./files", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
@@ -70,9 +73,15 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 		rel, _ := filepath.Rel("./files", p)
 		files = append(files, fileInfo{Name: rel, Size: info.Size()})
 		return nil
-	})
+	}); err != nil {
+		http.Error(w, "failed to walk files: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(files)
+	if err := json.NewEncoder(w).Encode(files); err != nil {
+		http.Error(w, "failed to encode files list: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleBizhawkFilesZip serves a BizhawkFiles.zip by streaming or creating a zip

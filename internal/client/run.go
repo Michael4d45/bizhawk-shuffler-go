@@ -197,7 +197,9 @@ func Run(args []string) error {
 	case <-ctx.Done():
 		bhMu.Lock()
 		if bhCmd != nil && bhCmd.Process != nil {
-			bhCmd.Process.Kill()
+			if err := bhCmd.Process.Kill(); err != nil {
+				log.Printf("failed to kill BizHawk process: %v", err)
+			}
 		}
 		bhMu.Unlock()
 	case <-readDone:

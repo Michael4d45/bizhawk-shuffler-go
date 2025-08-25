@@ -91,9 +91,18 @@ func (s *Server) saveState() error {
 func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	st := s.state
+	ep := make(map[string]string, len(s.ephemeral))
+	for k, v := range s.ephemeral {
+		ep[k] = v
+	}
 	s.mu.Unlock()
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(st)
+	// Return an envelope with the persisted state and ephemeral runtime map.
+	out := map[string]any{
+		"state":     st,
+		"ephemeral": ep,
+	}
+	json.NewEncoder(w).Encode(out)
 }
 
 // reindexSaves rebuilds ./saves/index.json from on-disk files.

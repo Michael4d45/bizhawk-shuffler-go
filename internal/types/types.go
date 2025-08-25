@@ -12,6 +12,7 @@ type CommandName int
 const (
 	CmdUnknown CommandName = iota
 	CmdHello
+	CmdPing
 	CmdStart
 	CmdPause
 	CmdResume
@@ -176,6 +177,8 @@ type Player struct {
 	Current   string `json:"current_game"`
 	HasFiles  bool   `json:"has_files"`
 	Connected bool   `json:"connected"`
+	// PingMs stores the last measured round-trip time to the player in milliseconds.
+	PingMs int `json:"ping_ms,omitempty"`
 }
 
 // SaveMetadata describes a persisted save file. This mirrors the entries

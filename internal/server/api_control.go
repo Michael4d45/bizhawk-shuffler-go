@@ -17,13 +17,18 @@ func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
 	s.state.Running = true
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		// non-fatal; log for visibility
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	s.broadcast(types.Command{Cmd: types.CmdStart, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
 	}
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 // apiPause toggles running=false and notifies clients
@@ -32,13 +37,17 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 	s.state.Running = false
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	s.broadcast(types.Command{Cmd: types.CmdPause, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
 	}
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
@@ -47,9 +56,13 @@ func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
 	s.state.Running = false
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	s.broadcast(types.Command{Cmd: types.CmdReset, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {

@@ -16,7 +16,10 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 		resp := map[string]any{"main_games": s.state.MainGames, "games": s.state.Games}
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(resp)
+		if err := json.NewEncoder(w).Encode(resp); err != nil {
+			http.Error(w, "failed to encode response: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
 		return
 	}
 	if r.Method == http.MethodPost {

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"net/http"
 	"os"
 	"path"
@@ -71,6 +72,7 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	out.Close()
 	dst := filepath.Join(dir, fname)
 	if err := os.Rename(tmp, dst); err != nil {
+		log.Printf("failed to rename tmp index: %v", err)
 		os.Remove(tmp)
 		http.Error(w, "rename: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -100,7 +102,10 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	go s.reindexSaves()
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"result": "ok", "file": dst})
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok", "file": dst}); err != nil {
+		http.Error(w, "failed to encode response: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 // handleSaveServe serves files under ./saves via /save/<player>/<file>
@@ -133,16 +138,14 @@ func (s *Server) handleSavesList(w http.ResponseWriter, r *http.Request) {
 		var idx []SaveInfo
 		if err := json.Unmarshal(b, &idx); err == nil {
 			w.Header().Set("Content-Type", "application/json")
-			json.NewEncoder(w).Encode(idx)
-			return
+			if err := json.NewEncoder(w).Encode(idx); err == nil {
+				return
+			}
 		}
 	}
 	saves := []SaveInfo{}
-	filepath.Walk("./saves", func(p string, info os.FileInfo, err error) error {
-		if err != nil {
-			return nil
-		}
-		if info.IsDir() {
+	if err := filepath.Walk("./saves", func(p string, info os.FileInfo, err error) error {
+		if err != nil || info.IsDir() {
 			return nil
 		}
 		rel, _ := filepath.Rel("./saves", p)
@@ -151,7 +154,12 @@ func (s *Server) handleSavesList(w http.ResponseWriter, r *http.Request) {
 			saves = append(saves, SaveInfo{Player: parts[0], File: parts[1], Size: info.Size()})
 		}
 		return nil
-	})
+	}); err != nil {
+		log.Printf("walk saves error: %v", err)
+	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(saves)
+	if err := json.NewEncoder(w).Encode(saves); err != nil {
+		http.Error(w, "failed to encode saves: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
