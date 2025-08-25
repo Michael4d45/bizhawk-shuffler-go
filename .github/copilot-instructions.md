@@ -7,7 +7,7 @@ Always reference these instructions first and fallback to search or bash command
 ## Working Effectively
 
 ### Bootstrap and Build
-- **Install Go 1.21+**: The project requires Go 1.21 minimum (works with Go 1.24+)
+- **Install Go 1.25+**: The project requires Go 1.25 minimum (works with Go 1.24+)
 - **Build all components**: `make all` -- takes 1-20 seconds depending on dependency cache. NEVER CANCEL. Set timeout to 60+ seconds for first build.
 - **Build server only**: `make server` -- takes <1 second incremental. NEVER CANCEL. Set timeout to 30+ seconds.
 - **Build client only**: `make client` -- takes <1 second incremental. NEVER CANCEL. Set timeout to 30+ seconds.
@@ -48,11 +48,6 @@ Always reference these instructions first and fallback to search or bash command
 
 ## Known Limitations and Workarounds
 
-### Linting Issues
-- **golangci-lint incompatibility**: golangci-lint v1.59.0 fails with Go 1.24+ (exit code 3)
-- **Workaround**: Use `go vet ./...` and `gofmt -d .` for validation instead
-- **GitHub Actions**: The lint workflow (.github/workflows/lint.yml) uses golangci-lint v1.59.0 with Go 1.21
-
 ### Client Platform Limitations
 - **Windows-focused**: Client downloads Windows BizHawk executable (EmuHawk.exe)
 - **Linux testing limitation**: Client setup will fail on Linux when downloading BizHawk, but configuration flow can be tested
@@ -60,7 +55,6 @@ Always reference these instructions first and fallback to search or bash command
 
 ### Build Environment
 - **No test files**: Repository contains no test files - validation is functional only
-- **PowerShell script**: build.ps1 exists for Windows builds but Makefile works on all platforms
 
 ## Validation Scenarios
 
