@@ -45,10 +45,14 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 		}
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
-		s.saveState()
+		if err := s.saveState(); err != nil {
+			fmt.Printf("saveState error: %v\n", err)
+		}
 		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{"games": s.state.Games, "main_games": s.state.MainGames}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			fmt.Printf("write response error: %v\n", err)
+		}
 		return
 	}
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -61,7 +65,9 @@ func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
 		minv := s.state.MinIntervalSecs
 		maxv := s.state.MaxIntervalSecs
 		s.mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"min_interval_secs": minv, "max_interval_secs": maxv})
+		if err := json.NewEncoder(w).Encode(map[string]any{"min_interval_secs": minv, "max_interval_secs": maxv}); err != nil {
+			fmt.Printf("encode response error: %v\n", err)
+		}
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -82,9 +88,13 @@ func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
 		}
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
-		s.saveState()
+		if err := s.saveState(); err != nil {
+			fmt.Printf("saveState error: %v\n", err)
+		}
 		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-		w.Write([]byte("ok"))
+		if _, err := w.Write([]byte("ok")); err != nil {
+			fmt.Printf("write response error: %v\n", err)
+		}
 		return
 	}
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)

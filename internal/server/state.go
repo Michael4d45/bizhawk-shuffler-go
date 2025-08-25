@@ -2,6 +2,7 @@ package server
 
 import (
 	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
 	"os"
@@ -102,7 +103,9 @@ func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 		"state":     st,
 		"ephemeral": ep,
 	}
-	json.NewEncoder(w).Encode(out)
+	if err := json.NewEncoder(w).Encode(out); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
 }
 
 // reindexSaves rebuilds ./saves/index.json from on-disk files.

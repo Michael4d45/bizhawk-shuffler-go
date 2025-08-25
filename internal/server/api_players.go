@@ -35,7 +35,9 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]string{"result": res})
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": res}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
 }
 
 // apiRemovePlayer: POST {player: ...}
@@ -69,10 +71,14 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"result": "ok"})
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
 }
 
 // apiSwapAllToGame: POST {game:...}
@@ -109,5 +115,7 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 		}
 		results[p] = res
 	}
-	json.NewEncoder(w).Encode(results)
+	if err := json.NewEncoder(w).Encode(results); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
 }

@@ -95,7 +95,9 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	tmpIndex := indexPath + ".tmp"
 	ib, _ := json.MarshalIndent(newIdx, "", "  ")
 	if err := os.WriteFile(tmpIndex, ib, 0644); err == nil {
-		os.Rename(tmpIndex, indexPath)
+		if err := os.Rename(tmpIndex, indexPath); err != nil {
+			fmt.Printf("rename index error: %v\n", err)
+		}
 	}
 	s.mu.Unlock()
 

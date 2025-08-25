@@ -36,10 +36,8 @@ func Bootstrap(args []string) (serverURL string, cfg Config, cfgFile string, log
 		err = fmt.Errorf("failed to load config: %w", err)
 		return
 	}
-	if len(cfg) > 0 {
-		// use the package logger
-		// log.Printf("loaded config from %s", cfgFile) // callers may log
-	}
+	// use the package logger
+	// log.Printf("loaded config from %s", cfgFile) // callers may log
 
 	// normalize stored server url
 	cfg.NormalizeServer()
@@ -106,9 +104,8 @@ func Bootstrap(args []string) (serverURL string, cfg Config, cfgFile string, log
 		err = fmt.Errorf("EnsureDefaults: %w", err)
 		return
 	}
-	if err = cfg.Save(cfgFile); err == nil {
-		// log.Printf("persisted default config to %s", cfgFile)
-	}
+	// log.Printf("persisted default config to %s", cfgFile)
+	_ = cfg.Save(cfgFile)
 
 	httpClient = &http.Client{Timeout: 0}
 	return

@@ -142,7 +142,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			delete(s.conns, c)
 		}
 		s.mu.Unlock()
-		s.saveState()
+		if err := s.saveState(); err != nil {
+			fmt.Printf("saveState error: %v\n", err)
+		}
 		c.Close()
 	}()
 
@@ -210,7 +212,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			}
 			updatedAt := s.state.UpdatedAt
 			s.mu.Unlock()
-			s.saveState()
+			if err := s.saveState(); err != nil {
+				fmt.Printf("saveState error: %v\n", err)
+			}
 			s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": updatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 			continue
 		}
@@ -227,7 +231,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				games := append([]string{}, s.state.Games...)
 				mainGames := append([]types.GameEntry{}, s.state.MainGames...)
 				s.mu.Unlock()
-				s.saveState()
+				if err := s.saveState(); err != nil {
+					fmt.Printf("saveState error: %v\n", err)
+				}
 				payload := map[string]any{"games": games, "main_games": mainGames}
 				select {
 				case client.sendCh <- types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())}:
@@ -245,7 +251,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 						s.state.Players[name] = pl
 						s.state.UpdatedAt = time.Now()
 						s.mu.Unlock()
-						s.saveState()
+						if err := s.saveState(); err != nil {
+							fmt.Printf("saveState error: %v\n", err)
+						}
 					} else {
 						s.mu.Unlock()
 					}
