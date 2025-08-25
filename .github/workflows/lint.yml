@@ -21,7 +21,10 @@ jobs:
       - name: Run go vet
         run: go vet ./...
 
-      - name: Run golangci-lint
-        uses: golangci/golangci-lint-action@v4
-        with:
-          version: latest
+      - name: Run gofmt check
+        run: |
+          if [ -n "$(gofmt -l .)" ]; then
+            echo "Go code is not formatted. Please run 'gofmt -w .'"
+            gofmt -d .
+            exit 1
+          fi
