@@ -23,3 +23,7 @@ client_config.json
 
 # Files
 web/BizhawkFiles/*
+
+# Server artifacts
+state.json
+saves/index.json
