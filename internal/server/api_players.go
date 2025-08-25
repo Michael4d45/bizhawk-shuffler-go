@@ -35,7 +35,9 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
-	json.NewEncoder(w).Encode(map[string]string{"result": res})
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": res}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
 }
 
 // apiRemovePlayer: POST {player: ...}

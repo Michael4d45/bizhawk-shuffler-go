@@ -75,7 +75,9 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 	indexPath := filepath.Join(savesDir, "index.json")
 	_ = os.WriteFile(indexPath, []byte("[]"), 0644)
 	s.broadcast(types.Command{Cmd: types.CmdClearSaves, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
@@ -86,13 +88,17 @@ func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
 	}
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	s.broadcast(types.Command{Cmd: types.CmdToggleSwaps, Payload: map[string]any{"enabled": s.state.SwapEnabled, "next_swap_at": s.state.NextSwapAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
 	}
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 // apiMode sets or reads the swap mode
@@ -101,7 +107,9 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 		s.mu.Lock()
 		mode := s.state.Mode
 		s.mu.Unlock()
-		json.NewEncoder(w).Encode(map[string]any{"mode": mode})
+		if err := json.NewEncoder(w).Encode(map[string]any{"mode": mode}); err != nil {
+			fmt.Printf("encode response error: %v\n", err)
+		}
 		return
 	}
 	if r.Method == http.MethodPost {
@@ -116,8 +124,12 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 		s.state.Mode = b.Mode
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
-		s.saveState()
-		w.Write([]byte("ok"))
+		if err := s.saveState(); err != nil {
+			fmt.Printf("saveState error: %v\n", err)
+		}
+		if _, err := w.Write([]byte("ok")); err != nil {
+			fmt.Printf("write response error: %v\n", err)
+		}
 		return
 	}
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -128,5 +140,7 @@ func (s *Server) apiDoSwap(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		_, _ = s.performSwap()
 	}()
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
