@@ -3,6 +3,7 @@ package server
 import (
 	"archive/zip"
 	"encoding/json"
+	"fmt"
 	"io"
 	"log"
 	"net/http"
@@ -53,7 +54,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "write file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	w.Write([]byte("ok"))
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 // handleFilesList returns a JSON list of files under ./files

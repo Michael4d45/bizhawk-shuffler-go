@@ -76,7 +76,9 @@ func (s *Server) performSwapSync() (*SwapOutcome, error) {
 	}
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	return &SwapOutcome{Mapping: mapping, Results: results, DownloadResults: map[string]string{}}, nil
 }
 
@@ -174,7 +176,9 @@ func (s *Server) performSwapSave() (*SwapOutcome, error) {
 	}
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
 	return &SwapOutcome{Mapping: mapping, Results: results, DownloadResults: downloadResults}, nil
 }
 
@@ -208,7 +212,9 @@ func (s *Server) schedulerLoop() {
 		s.state.NextSwapAt = nextAt
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
-		s.saveState()
+		if err := s.saveState(); err != nil {
+			fmt.Printf("saveState error: %v\n", err)
+		}
 		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"next_swap_at": nextAt, "updated_at": time.Now()}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		timer := time.NewTimer(time.Duration(interval) * time.Second)
 		select {
