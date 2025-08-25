@@ -24,5 +24,4 @@ jobs:
       - name: Run golangci-lint
         uses: golangci/golangci-lint-action@v4
         with:
-          version: v2.4.0
-          args: run ./...
+          version: latest
