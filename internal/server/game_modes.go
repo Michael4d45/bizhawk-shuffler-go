@@ -1,7 +1,14 @@
 package server
 
 import (
+	"encoding/json"
+	"errors"
 	"fmt"
+	"log"
+	"math/rand"
+	"os"
+	"path/filepath"
+	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
@@ -22,7 +29,56 @@ type GameModeHandler interface {
 type SyncModeHandler struct{}
 
 func (h *SyncModeHandler) HandleSwap(s *Server) (*SwapOutcome, error) {
-	return s.performSwapSync()
+	// Inline the previous performSwapSync implementation here so game mode
+	// behavior lives with the mode handler.
+	s.mu.Lock()
+	players := []string{}
+	for name := range s.state.Players {
+		players = append(players, name)
+	}
+	games := append([]string{}, s.state.Games...)
+	s.mu.Unlock()
+	if len(players) == 0 || len(games) == 0 {
+		return nil, fmt.Errorf("need players and games configured")
+	}
+	idx := rand.Intn(len(games))
+	chosen := games[idx]
+	mapping := make(map[string]string)
+	for _, p := range players {
+		mapping[p] = chosen
+	}
+	// Log the expected mapping so operators can see what we intend to do
+	log.Printf("[swap][expected] mode=sync chosen=%s mapping=%+v", chosen, mapping)
+	results := make(map[string]string)
+	for player, game := range mapping {
+		cmdID := fmt.Sprintf("sync-%d-%s", time.Now().UnixNano(), player)
+		cmd := types.Command{Cmd: types.CmdSwap, ID: cmdID, Payload: map[string]string{"game": game, "mode": "sync"}}
+		res, err := s.sendAndWait(player, cmd, 15*time.Second)
+		if err != nil {
+			if errors.Is(err, ErrTimeout) {
+				results[player] = "timeout"
+				log.Printf("[swap][outcome] mode=sync player=%s result=timeout cmd=%s", player, cmdID)
+			} else {
+				results[player] = "send_failed: " + err.Error()
+				log.Printf("[swap][outcome] mode=sync player=%s result=send_failed err=%v cmd=%s", player, err, cmdID)
+			}
+			continue
+		}
+		results[player] = res
+		log.Printf("[swap][outcome] mode=sync player=%s result=%s cmd=%s", player, res, cmdID)
+	}
+	s.mu.Lock()
+	for p, g := range mapping {
+		pl := s.state.Players[p]
+		pl.Current = g
+		s.state.Players[p] = pl
+	}
+	s.state.UpdatedAt = time.Now()
+	s.mu.Unlock()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
+	return &SwapOutcome{Mapping: mapping, Results: results, DownloadResults: map[string]string{}}, nil
 }
 
 func (h *SyncModeHandler) GetCurrentGameForPlayer(s *Server, player string) string {
@@ -47,7 +103,127 @@ func (h *SyncModeHandler) Description() string {
 type SaveModeHandler struct{}
 
 func (h *SaveModeHandler) HandleSwap(s *Server) (*SwapOutcome, error) {
-	return s.performSwapSave()
+	// SaveModeHandler.HandleSwap logic outline:
+	// 1. Collect list of players and available games from server state.
+	// 2. Build a mapping assigning each player a game (round-robin over games).
+	// 3. Send a swap command to each player, wait for ack. If any player
+	//    fails to ack the swap, return the mapping and results without
+	//    attempting downloads.
+	// 4. If all players acknowledged, for each player determine the "owner"
+	//    of the most-recent save for the assigned game. The owner is found
+	//    by reading the saves/index.json and falling back to whichever
+	//    connected player currently reports that game as their Current. If
+	//    none found, the player is considered the owner.
+	// 5. Send download requests to each player to fetch the owner's save
+	//    and wait for results. Record download outcomes per player.
+	// 6. Update server state with new Current games and persist state.
+	//
+	// This comment provides a high-level outline to help operators and
+	// future contributors understand the flow.
+	s.mu.Lock()
+	players := []string{}
+	for name := range s.state.Players {
+		players = append(players, name)
+	}
+	games := append([]string{}, s.state.Games...)
+	s.mu.Unlock()
+	if len(players) == 0 || len(games) == 0 {
+		return nil, fmt.Errorf("need players and games configured")
+	}
+	mapping := make(map[string]string)
+	for i, p := range players {
+		mapping[p] = games[i%len(games)]
+	}
+	results := make(map[string]string)
+	// Log the expected mapping so operators can see what we intend to do
+	log.Printf("[swap][expected] mode=save mapping=%+v", mapping)
+	for player, game := range mapping {
+		cmdID := fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), player)
+		cmd := types.Command{Cmd: types.CmdSwap, ID: cmdID, Payload: map[string]string{"game": game}}
+		res, err := s.sendAndWait(player, cmd, 20*time.Second)
+		if err != nil {
+			if errors.Is(err, ErrTimeout) {
+				results[player] = "timeout"
+				log.Printf("[swap][outcome] mode=save player=%s result=timeout cmd=%s", player, cmdID)
+			} else {
+				results[player] = "send_failed: " + err.Error()
+				log.Printf("[swap][outcome] mode=save player=%s result=send_failed err=%v cmd=%s", player, err, cmdID)
+			}
+			continue
+		}
+		results[player] = res
+		log.Printf("[swap][outcome] mode=save player=%s result=%s cmd=%s", player, res, cmdID)
+	}
+	failed := false
+	for _, r := range results {
+		if r != "ack" {
+			failed = true
+			break
+		}
+	}
+	if failed {
+		return &SwapOutcome{Mapping: mapping, Results: results, DownloadResults: map[string]string{}}, nil
+	}
+	downloadResults := make(map[string]string)
+	for player, game := range mapping {
+		owner := ""
+		filename := game + ".state"
+		indexPath := filepath.Join("./saves", "index.json")
+		if b, err := os.ReadFile(indexPath); err == nil {
+			var idx []SaveIndexEntry
+			if json.Unmarshal(b, &idx) == nil {
+				var bestAt int64
+				for _, e := range idx {
+					if e.Game == game || e.File == filename {
+						if e.At > bestAt {
+							bestAt = e.At
+							owner = e.Player
+						}
+					}
+				}
+			}
+		}
+		if owner == "" {
+			s.mu.Lock()
+			for pname, p := range s.state.Players {
+				if p.Current == game {
+					owner = pname
+					break
+				}
+			}
+			s.mu.Unlock()
+		}
+		if owner == "" {
+			owner = player
+		}
+		cmdID := fmt.Sprintf("dl-%d-%s", time.Now().UnixNano(), player)
+		cmd := types.Command{Cmd: types.CmdDownloadSave, ID: cmdID, Payload: map[string]string{"player": owner, "file": filename}}
+		if err := s.sendToPlayer(player, cmd); err != nil {
+			downloadResults[player] = "send_failed: " + err.Error()
+			log.Printf("[swap][outcome] mode=save player=%s download_send_failed err=%v cmd=%s owner=%s file=%s", player, err, cmdID, owner, filename)
+			continue
+		}
+		res, err := s.waitForResult(cmdID, 30*time.Second)
+		if err != nil {
+			downloadResults[player] = "timeout"
+			log.Printf("[swap][outcome] mode=save player=%s download_timeout cmd=%s owner=%s file=%s", player, cmdID, owner, filename)
+		} else {
+			downloadResults[player] = res
+			log.Printf("[swap][outcome] mode=save player=%s download_result=%s cmd=%s owner=%s file=%s", player, res, cmdID, owner, filename)
+		}
+	}
+	s.mu.Lock()
+	for p, g := range mapping {
+		pl := s.state.Players[p]
+		pl.Current = g
+		s.state.Players[p] = pl
+	}
+	s.state.UpdatedAt = time.Now()
+	s.mu.Unlock()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
+	return &SwapOutcome{Mapping: mapping, Results: results, DownloadResults: downloadResults}, nil
 }
 
 func (h *SaveModeHandler) GetCurrentGameForPlayer(s *Server, player string) string {

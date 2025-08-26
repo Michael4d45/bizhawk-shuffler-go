@@ -24,7 +24,7 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	
+
 	// Persist the new current game for the player and broadcast state update
 	s.mu.Lock()
 	p, ok := s.state.Players[b.Player]

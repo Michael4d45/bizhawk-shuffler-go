@@ -62,8 +62,18 @@
         <div class="mt-4 flex flex-wrap gap-2">
           <template x-for="btn in sessionButtons" :key="btn.label">
             <button @click="trigger(btn.path)" :disabled="loadingAction === btn.path"
-              class="px-3 py-1 rounded font-semibold transition" :class="btn.class">
-              <span x-show="loadingAction !== btn.path" x-text="btn.label"></span>
+              class="px-3 py-1 rounded font-semibold transition transform"
+              :class="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'bg-emerald-400 text-black shadow-lg scale-105' : 'bg-slate-700') : btn.class"
+              :title="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'Swaps enabled' : 'Swaps disabled') : btn.label">
+              <span x-show="loadingAction !== btn.path" class="inline-flex items-center gap-2">
+                <span x-text="btn.label"></span>
+                <!-- small On/Off badge for the Toggle Swaps button -->
+                <template x-if="btn.path === '/api/toggle_swaps'">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                    :class="state.swap_enabled ? 'bg-white/90 text-black' : 'bg-slate-800 text-gray-300'"
+                    x-text="state.swap_enabled ? 'On' : 'Off'"></span>
+                </template>
+              </span>
               <span x-show="loadingAction === btn.path" class="inline-flex items-center gap-1">
                 <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
                   viewBox="0 0 24 24">
