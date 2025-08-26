@@ -8,6 +8,8 @@
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap" rel="stylesheet" />
   <script src="https://cdn.tailwindcss.com?plugins=forms,typography"></script>
   <script>
+    // Global sleep helper: await sleep(ms)
+    window.sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     tailwind.config = {
       theme: {
         extend: {
@@ -19,12 +21,21 @@
   <script defer src="https://unpkg.com/alpinejs@3.12.0/dist/cdn.min.js"></script>
 </head>
 
-  <body x-data="app()" x-init="init()" class="text-white font-inter h-full flex flex-col">
+<body x-data="app()" x-init="init()" class="text-white font-inter h-full flex flex-col">
+  <!-- Top swap progress bar: thin indicator that fills to the right until next swap -->
+  <div class="fixed top-0 left-0 w-full h-1 z-50 pointer-events-none">
+    <div x-show="state.next_swap_at" class="h-full bg-white/10 w-full">
+      <!-- Use GPU-accelerated transform scaleX for smooth continuous updates -->
+      <div id="swap-progress" class="h-full origin-left" :style="'transform: scaleX(' + (swapProgressPercent / 100) + ')'
+          " style="transform-origin:left; will-change:transform; background-color: rgba(52,211,153,1);"
+        x-bind:class="(swapProgressPercent >= 95 ? 'bg-amber-400' : 'bg-green-400')"></div>
+    </div>
+  </div>
   <!-- Main -->
   <main class="mx-auto px-6 py-8 flex-1 grid gap-6 lg:grid-cols-3">
-  <!-- Sidebar (Session, Games, Saves) -->
-  <!-- changed to flex column so expanded accordion panels can grow to fill available vertical space -->
-  <div class="flex flex-col gap-6 h-full">
+    <!-- Sidebar (Session, Games, Saves) -->
+    <!-- changed to flex column so expanded accordion panels can grow to fill available vertical space -->
+    <div class="flex flex-col gap-6 h-full">
       <!-- Session -->
       <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
         <div class="flex justify-between items-center">
@@ -51,8 +62,18 @@
         <div class="mt-4 flex flex-wrap gap-2">
           <template x-for="btn in sessionButtons" :key="btn.label">
             <button @click="trigger(btn.path)" :disabled="loadingAction === btn.path"
-              class="px-3 py-1 rounded font-semibold transition" :class="btn.class">
-              <span x-show="loadingAction !== btn.path" x-text="btn.label"></span>
+              class="px-3 py-1 rounded font-semibold transition transform"
+              :class="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'bg-emerald-400 text-black shadow-lg scale-105' : 'bg-slate-700') : btn.class"
+              :title="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'Swaps enabled' : 'Swaps disabled') : btn.label">
+              <span x-show="loadingAction !== btn.path" class="inline-flex items-center gap-2">
+                <span x-text="btn.label"></span>
+                <!-- small On/Off badge for the Toggle Swaps button -->
+                <template x-if="btn.path === '/api/toggle_swaps'">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                    :class="state.swap_enabled ? 'bg-white/90 text-black' : 'bg-slate-800 text-gray-300'"
+                    x-text="state.swap_enabled ? 'On' : 'Off'"></span>
+                </template>
+              </span>
               <span x-show="loadingAction === btn.path" class="inline-flex items-center gap-1">
                 <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
                   viewBox="0 0 24 24">
@@ -91,11 +112,12 @@
         class="transition-all">
         <div class="flex justify-between items-center">
           <h2 class="text-sm text-gray-400">Games</h2>
-          <button @click="toggleSection('games')"
-            class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"> <span x-text="showGamesExpanded ? 'Collapse' : 'Expand'"></span>
+          <button @click="toggleSection('games')" class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            <span x-text="showGamesExpanded ? 'Collapse' : 'Expand'"></span>
           </button>
         </div>
-        <div :class="showGamesExpanded ? 'mt-2 flex-1 overflow-auto space-y-2' : 'mt-2 space-y-2 max-h-60 overflow-auto'">
+        <div
+          :class="showGamesExpanded ? 'mt-2 flex-1 overflow-auto space-y-2' : 'mt-2 space-y-2 max-h-60 overflow-auto'">
           <template x-for="g in gamesList" :key="g">
             <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
               <label class="flex items-center gap-2">
@@ -130,11 +152,12 @@
         class="transition-all">
         <div class="flex justify-between items-center">
           <h2 class="text-sm text-gray-400">Saves</h2>
-          <button @click="toggleSection('saves')"
-            class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600"> <span x-text="showSavesExpanded ? 'Collapse' : 'Expand'"></span>
+          <button @click="toggleSection('saves')" class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            <span x-text="showSavesExpanded ? 'Collapse' : 'Expand'"></span>
           </button>
         </div>
-        <div :class="showSavesExpanded ? 'mt-2 flex-1 overflow-auto text-sm space-y-2' : 'mt-2 text-sm max-h-40 overflow-auto space-y-2'">
+        <div
+          :class="showSavesExpanded ? 'mt-2 flex-1 overflow-auto text-sm space-y-2' : 'mt-2 text-sm max-h-40 overflow-auto space-y-2'">
           <template x-for="(files, player) in saves" :key="player">
             <div>
               <strong x-text="player"></strong>
@@ -187,8 +210,9 @@
                   <span class="text-xs px-2 py-0.5 rounded-full"
                     :class="p.has_files ? 'bg-green-600/10 text-green-300' : 'bg-yellow-600/10 text-yellow-300'"
                     x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
-                    <span class="text-xs text-gray-400" x-text="p.ephemeral ? ('status: ' + p.ephemeral) : ''"></span>
-                    <span class="text-xs text-gray-400" x-text="p.ping_ms ? ('ping: ' + p.ping_ms + 'ms') : 'no ping'"></span>
+                  <span class="text-xs text-gray-400" x-text="p.ephemeral ? ('status: ' + p.ephemeral) : ''"></span>
+                  <span class="text-xs text-gray-400"
+                    x-text="p.ping_ms ? ('ping: ' + p.ping_ms + 'ms') : 'no ping'"></span>
                 </div>
               </div>
 
@@ -332,8 +356,24 @@
             ? `${this.state.min_interval_secs} - ${this.state.max_interval_secs}`
             : "--";
         },
-        // now is kept up-to-date each second so UI getters can compute relative times
-        now: Math.floor(Date.now() / 1000),
+        // nowMs is kept up-to-date at display refresh rate for smooth animations
+        nowMs: Date.now(),
+        // legacy second-resolution 'now' for other logic still expecting seconds
+        get now() { return Math.floor(this.nowMs / 1000); },
+        // percent 0-100 of progress until next swap (0 = just swapped, 100 = swap due)
+        get swapProgressPercent() {
+          if (!this.state || !this.state.next_swap_at) return 0;
+          // Use milliseconds for smoother progress
+          const nextMs = this.state.next_swap_at * 1000;
+          // Determine interval length in ms. Use max_interval if available else min or default 1s
+          const intervalSecs = this.state.max_interval_secs || this.state.min_interval_secs || 1;
+          const intervalMs = intervalSecs * 1000;
+          const remainingMs = nextMs - this.nowMs;
+          if (remainingMs <= 0) return 100;
+          const elapsedMs = intervalMs - remainingMs;
+          const pct = Math.max(0, Math.min(100, (elapsedMs / intervalMs) * 100));
+          return pct;
+        },
         get nextSwapDisplay() {
           if (!this.state.next_swap_at) return "--";
           const diff = this.state.next_swap_at - this.now; // seconds until swap
@@ -383,8 +423,18 @@
           await this.refreshState();
           // keep server state refreshed periodically
           setInterval(() => this.refreshState(), 5000);
-          // tick local clock every second so countdowns update in UI
-          setInterval(() => { this.now = Math.floor(Date.now() / 1000); }, 1000);
+          // start a high-resolution animation loop to update nowMs for smooth progress
+          const rafTick = () => {
+            this.nowMs = Date.now();
+            // continue the loop
+            this._rafId = requestAnimationFrame(rafTick);
+          };
+          // start the loop
+          this._rafId = requestAnimationFrame(rafTick);
+          // cleanup on unload
+          window.addEventListener('beforeunload', () => {
+            if (this._rafId) cancelAnimationFrame(this._rafId);
+          });
         },
         log(msg) {
           this.logs.unshift({
@@ -401,48 +451,79 @@
             // envelope contains { state: ..., ephemeral: { player: status } }
             const st = envelope && envelope.state ? envelope.state : envelope;
             const ep = envelope && envelope.ephemeral ? envelope.ephemeral : {};
-            this.state = st;
-            // If server provided a main_games catalog, import it into UI
-            if (this.state.main_games && Array.isArray(this.state.main_games)) {
-              // normalize entries: ensure {file, extra_files}
-              this.mainGames = this.state.main_games.map(e => ({ file: e.file, extra_files: e.extra_files || [] }));
+
+            // Ensure we have an object to update in-place so bindings that reference
+            // `state` object identity remain stable where possible.
+            this.state = this.state || {};
+
+            // 1) main_games: normalize and update only if changed
+            if (st.main_games && Array.isArray(st.main_games)) {
+              const normalized = st.main_games.map(e => ({ file: e.file, extra_files: e.extra_files || [] }));
+              if (JSON.stringify(normalized) !== JSON.stringify(this.mainGames)) {
+                this.mainGames = normalized;
+              }
             }
-            // If server didn't provide an active games list, populate from mainGames or local files
-            if (!this.state.games || this.state.games.length === 0) {
+
+            // 2) games: decide effective games list (server-provided or derived from mainGames/files)
+            let effectiveGames = [];
+            if (!st.games || st.games.length === 0) {
               if (this.mainGames && this.mainGames.length) {
-                this.state.games = this.mainGames.map(e => e.file).filter(Boolean);
+                effectiveGames = this.mainGames.map(e => e.file).filter(Boolean);
               } else {
-                this.state.games = this.state.games && this.state.games.length ? this.state.games : (this.files || []);
+                effectiveGames = (st.games && st.games.length) ? st.games.slice() : (this.files || []).slice();
               }
+            } else {
+              effectiveGames = st.games.slice();
             }
-            // Keep the checkboxes in sync with the active games
-            this.selectedGames = Array.isArray(this.state.games) ? this.state.games.slice() : [];
-            // Merge ephemeral status into players for display (non-persistent)
-            if (ep && typeof ep === 'object') {
-              for (const [pname, stv] of Object.entries(ep)) {
-                if (this.state.players && this.state.players[pname]) {
-                  this.state.players[pname].ephemeral = stv;
-                }
-              }
+            if (JSON.stringify(effectiveGames) !== JSON.stringify(this.state.games || [])) {
+              this.state.games = effectiveGames;
+              this.selectedGames = Array.isArray(this.state.games) ? this.state.games.slice() : [];
             }
-            // normalize players map into UI-friendly shape
-            if (this.state.players && typeof this.state.players === 'object') {
+
+            // 3) players: normalize into UI shape and update only if changed
+            if (st.players && typeof st.players === 'object') {
               const uiPlayers = {};
-              for (const [name, p] of Object.entries(this.state.players)) {
+              for (const [name, p] of Object.entries(st.players)) {
                 uiPlayers[name] = {
                   name: name,
                   current_game: p.current_game || p.current || p.Current || '',
                   connected: p.connected || false,
                   has_files: p.has_files || p.hasFiles || false,
                   ping_ms: p.ping_ms || p.pingMs || p.PingMs || 0,
-                  selectedGame: '',
-                  ephemeral: (this.state.ephemeral && this.state.ephemeral[name]) ? this.state.ephemeral[name] : ''
+                  selectedGame: this.state.players && this.state.players[name] ? this.state.players[name].selectedGame || '' : '',
+                  ephemeral: ''
                 };
               }
-              this.state.players = uiPlayers;
+              if (JSON.stringify(uiPlayers) !== JSON.stringify(this.state.players || {})) {
+                this.state.players = uiPlayers;
+              }
             }
-            this.interval.min = this.state.min_interval_secs || 0;
-            this.interval.max = this.state.max_interval_secs || 0;
+
+            // 4) ephemeral statuses: merge into existing players if changed
+            if (ep && typeof ep === 'object' && this.state.players) {
+              for (const [pname, stv] of Object.entries(ep)) {
+                if (this.state.players && this.state.players[pname]) {
+                  if (this.state.players[pname].ephemeral !== stv) {
+                    // update only the ephemeral field for that player
+                    this.state.players[pname].ephemeral = stv;
+                  }
+                }
+              }
+            }
+
+            // 5) other top-level keys: shallow-assign only when changed (avoid stomping unchanged UI state)
+            for (const [k, v] of Object.entries(st)) {
+              if (k === 'main_games' || k === 'games' || k === 'players') continue;
+              if (JSON.stringify(this.state[k]) !== JSON.stringify(v)) {
+                this.state[k] = v;
+              }
+            }
+
+            // 6) intervals: update interval inputs only if the server provided changed values
+            const minSecs = st.min_interval_secs || 0;
+            const maxSecs = st.max_interval_secs || 0;
+            if (this.interval.min !== minSecs) this.interval.min = minSecs;
+            if (this.interval.max !== maxSecs) this.interval.max = maxSecs;
           } catch (e) {
             this.log("state fetch error: " + e.message);
           }
@@ -461,7 +542,7 @@
 
         async setMode(mode) {
           try {
-            await fetch('/api/mode', { method: 'POST', headers: {'Content-Type':'application/json'}, body: JSON.stringify({mode}) });
+            await fetch('/api/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
             this.toast = 'Mode updated';
             setTimeout(() => this.toast = '', 1500);
           } catch (e) {
@@ -706,16 +787,15 @@
                   } else {
                     this.log(`/api/swap_player response: ${JSON.stringify(body)}`);
                   }
-                  await this.refreshState();
                 }
-              } else {
-                await this.refreshState();
               }
             }
           } catch (e) {
             this.log("swap_player err " + e.message);
           } finally {
             this.loadingAction = null;
+            await window.sleep(100);
+            await this.refreshState();
           }
         },
         async swapAll(game) {

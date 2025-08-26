@@ -120,8 +120,13 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
+		gameMode := types.ParseGameMode(b.Mode)
+		if gameMode == types.GameModeUnknown {
+			http.Error(w, "invalid game mode: "+b.Mode, http.StatusBadRequest)
+			return
+		}
 		s.mu.Lock()
-		s.state.Mode = b.Mode
+		s.state.Mode = gameMode
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
 		if err := s.saveState(); err != nil {
