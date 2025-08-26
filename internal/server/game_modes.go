@@ -2,7 +2,6 @@ package server
 
 import (
 	"fmt"
-	"hash/fnv"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
@@ -11,10 +10,10 @@ import (
 type GameModeHandler interface {
 	// HandleSwap performs the swap operation for this game mode
 	HandleSwap(s *Server) (*SwapOutcome, error)
-	
+
 	// GetCurrentGameForPlayer determines what game a player should be playing in this mode
 	GetCurrentGameForPlayer(s *Server, player string) string
-	
+
 	// Description returns a human-readable description of this game mode
 	Description() string
 }
@@ -52,19 +51,16 @@ func (h *SaveModeHandler) HandleSwap(s *Server) (*SwapOutcome, error) {
 }
 
 func (h *SaveModeHandler) GetCurrentGameForPlayer(s *Server, player string) string {
-	// In save mode, if player's current is not set, pick a deterministic different game
+	// In save mode, just return the first available game if any exist
+	// Save orchestration will handle different save files per player
 	if len(s.state.Games) > 0 {
-		// Use hash of player name for stable assignment
-		h := fnv.New32a()
-		_, _ = h.Write([]byte(player))
-		idx := int(h.Sum32()) % len(s.state.Games)
-		return s.state.Games[idx]
+		return s.state.Games[0]
 	}
 	return ""
 }
 
 func (h *SaveModeHandler) Description() string {
-	return "Save Mode: Players play different games and perform save upload/download orchestration on swap. Each player gets a different game assigned based on a hash of their name."
+	return "Save Mode: Players play different games and perform save upload/download orchestration on swap. Each player can be assigned different games during gameplay."
 }
 
 // getGameModeHandler returns the appropriate handler for the given game mode

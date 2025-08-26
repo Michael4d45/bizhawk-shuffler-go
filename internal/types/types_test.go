@@ -29,11 +29,11 @@ func TestParseGameMode(t *testing.T) {
 	}{
 		{"sync", GameModeSync},
 		{"SYNC", GameModeSync},
-		{"", GameModeSync},               // empty string defaults to sync
-		{"  sync  ", GameModeSync},       // with whitespace
+		{"", GameModeSync},         // empty string defaults to sync
+		{"  sync  ", GameModeSync}, // with whitespace
 		{"save", GameModeSave},
 		{"SAVE", GameModeSave},
-		{"  save  ", GameModeSave},       // with whitespace
+		{"  save  ", GameModeSave}, // with whitespace
 		{"invalid", GameModeUnknown},
 		{"random", GameModeUnknown},
 	}

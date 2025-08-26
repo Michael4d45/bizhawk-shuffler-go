@@ -78,7 +78,7 @@ func TestPerformSwapSyncMode(t *testing.T) {
 	// This will fail because there are no actual websocket connections,
 	// but we can test the mode-specific logic up to that point
 	outcome, err := server.performSwapSync()
-	
+
 	// Should return an error because players aren't connected, but not due to mode logic
 	if err != nil {
 		t.Logf("Expected error due to no connections: %v", err)
@@ -121,7 +121,7 @@ func TestPerformSwapSaveMode(t *testing.T) {
 	// This will fail because there are no actual websocket connections,
 	// but we can test the mode-specific logic up to that point
 	outcome, err := server.performSwapSave()
-	
+
 	// Should return an error because players aren't connected, but not due to mode logic
 	if err != nil {
 		t.Logf("Expected error due to no connections: %v", err)
@@ -177,12 +177,12 @@ func TestCurrentGameForPlayerModeLogic(t *testing.T) {
 			expected: "currentgame",
 		},
 		{
-			name:     "save mode without current, uses hash-based assignment",
+			name:     "save mode without current, uses first game assignment",
 			mode:     types.GameModeSave,
 			player:   "player1",
 			current:  "",
 			games:    []string{"game1", "game2"},
-			expected: "game2", // This is based on the hash function for "player1"
+			expected: "game1", // Now uses first game instead of hash-based assignment
 		},
 	}
 

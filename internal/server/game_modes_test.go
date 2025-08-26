@@ -41,7 +41,7 @@ func TestGameModeHandlers(t *testing.T) {
 
 func TestSyncModeHandler(t *testing.T) {
 	handler := &SyncModeHandler{}
-	
+
 	// Test description
 	desc := handler.Description()
 	if desc == "" {
@@ -91,13 +91,13 @@ func TestSyncModeHandler(t *testing.T) {
 
 func TestSaveModeHandler(t *testing.T) {
 	handler := &SaveModeHandler{}
-	
+
 	// Test description
 	desc := handler.Description()
 	if desc == "" {
 		t.Error("SaveModeHandler.Description() should not be empty")
 	}
-	if desc != "Save Mode: Players play different games and perform save upload/download orchestration on swap. Each player gets a different game assigned based on a hash of their name." {
+	if desc != "Save Mode: Players play different games and perform save upload/download orchestration on swap. Each player can be assigned different games during gameplay." {
 		t.Errorf("Unexpected description: %s", desc)
 	}
 
@@ -119,35 +119,30 @@ func TestSaveModeHandler(t *testing.T) {
 	server.state.Games = []string{"game1", "game2"}
 	result1 := handler.GetCurrentGameForPlayer(server, "player1")
 	result2 := handler.GetCurrentGameForPlayer(server, "player2")
-	
-	// Results should be deterministic based on player name hash
-	if result1 == "" {
-		t.Error("Expected non-empty result for player1")
+
+	// Both players should get the first game (no more hash-based assignment)
+	if result1 != "game1" {
+		t.Errorf("Expected 'game1' for player1, got %s", result1)
 	}
-	if result2 == "" {
-		t.Error("Expected non-empty result for player2")
+	if result2 != "game1" {
+		t.Errorf("Expected 'game1' for player2, got %s", result2)
 	}
-	
+
 	// Same player should always get same game
 	result1Again := handler.GetCurrentGameForPlayer(server, "player1")
 	if result1 != result1Again {
 		t.Errorf("Expected deterministic result for player1: %s != %s", result1, result1Again)
 	}
 
-	// Different players might get different games (depending on hash)
-	// We can't guarantee they're different, but we can check they're both valid
-	validGames := map[string]bool{"game1": true, "game2": true}
-	if !validGames[result1] {
-		t.Errorf("Invalid game assignment for player1: %s", result1)
-	}
-	if !validGames[result2] {
-		t.Errorf("Invalid game assignment for player2: %s", result2)
+	// Both players get the same game assignment (first game)
+	if result1 != result2 {
+		t.Errorf("Expected both players to get same game, got player1=%s, player2=%s", result1, result2)
 	}
 }
 
 func TestGetAllGameModes(t *testing.T) {
 	modes := GetAllGameModes()
-	
+
 	// Should have entries for all known modes
 	if len(modes) != 2 {
 		t.Errorf("Expected 2 game modes, got %d", len(modes))

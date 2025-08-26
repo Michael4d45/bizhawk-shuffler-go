@@ -24,12 +24,12 @@ func (s *Server) performSwap() (*SwapOutcome, error) {
 	s.mu.Lock()
 	mode := s.state.Mode
 	s.mu.Unlock()
-	
+
 	handler, err := getGameModeHandler(mode)
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return handler.HandleSwap(s)
 }
 
