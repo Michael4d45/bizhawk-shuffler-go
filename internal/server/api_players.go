@@ -24,6 +24,18 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
+	
+	// Persist the new current game for the player and broadcast state update
+	s.mu.Lock()
+	p, ok := s.state.Players[b.Player]
+	if !ok {
+		p = types.Player{Name: b.Player}
+	}
+	p.Current = b.Game
+	s.state.Players[b.Player] = p
+	s.state.UpdatedAt = time.Now()
+	s.mu.Unlock()
+
 	cmdID := fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), b.Player)
 	cmd := types.Command{Cmd: types.CmdSwap, ID: cmdID, Payload: map[string]string{"game": b.Game}}
 	res, err := s.sendAndWait(b.Player, cmd, 20*time.Second)
