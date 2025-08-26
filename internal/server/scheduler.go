@@ -7,7 +7,6 @@ import (
 	"math/rand"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -25,14 +24,13 @@ func (s *Server) performSwap() (*SwapOutcome, error) {
 	s.mu.Lock()
 	mode := s.state.Mode
 	s.mu.Unlock()
-	switch strings.ToLower(strings.TrimSpace(mode)) {
-	case "save":
-		return s.performSwapSave()
-	case "sync", "":
-		return s.performSwapSync()
-	default:
-		return nil, fmt.Errorf("unknown swap mode: %s", mode)
+	
+	handler, err := getGameModeHandler(mode)
+	if err != nil {
+		return nil, err
 	}
+	
+	return handler.HandleSwap(s)
 }
 
 // performSwapSync implements the "sync" mode.

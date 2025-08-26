@@ -2,11 +2,9 @@ package server
 
 import (
 	"fmt"
-	"hash/fnv"
 	"log"
 	"net/http"
 	"os"
-	"strings"
 	"sync"
 	"time"
 
@@ -36,7 +34,7 @@ func New(stateFile string) *Server {
 		state: types.ServerState{
 			Running:     false,
 			SwapEnabled: true,
-			Mode:        "sync",
+			Mode:        types.GameModeSync,
 			Games:       []string{},
 			MainGames:   []types.GameEntry{},
 			Players:     map[string]types.Player{},
@@ -131,8 +129,7 @@ func (s *Server) PersistedHost() string { s.mu.Lock(); defer s.mu.Unlock(); retu
 // currentGameForPlayer determines what game a player should be playing now.
 // Order of determination:
 // 1) If the player's Current field is set in persisted state, return that.
-// 2) If server mode is "sync", return the canonical game everyone is playing (if any).
-// 3) If server mode is "save", return the player's Current if set, otherwise an empty string.
+// 2) Delegate to the current game mode handler for mode-specific logic.
 // The function does not modify state; callers may persist any changes if desired.
 func (s *Server) currentGameForPlayer(player string) string {
 	s.mu.Lock()
@@ -143,31 +140,11 @@ func (s *Server) currentGameForPlayer(player string) string {
 			return p.Current
 		}
 	}
-	// 2) sync mode: try to find a single game that everyone should be playing
-	mode := strings.ToLower(strings.TrimSpace(s.state.Mode))
-	if mode == "sync" || mode == "" {
-		// Look for any player with a Current set and prefer that; otherwise, if any orchestration
-		// or NextSwapAt isn't helpful, fall back to first game in Games.
-		// Prefer the first non-empty Current found in state.Players.
-		for _, pl := range s.state.Players {
-			if pl.Current != "" {
-				return pl.Current
-			}
-		}
-		if len(s.state.Games) > 0 {
-			return s.state.Games[0]
-		}
+	// 2) delegate to game mode handler
+	handler, err := getGameModeHandler(s.state.Mode)
+	if err != nil {
+		// Fallback to sync mode behavior if unknown mode
+		handler = &SyncModeHandler{}
 	}
-	// 3) save mode: if player's current not set, pick a deterministic different game
-	if mode == "save" {
-		if len(s.state.Games) > 0 {
-			// use hash of player name for stable assignment
-			h := fnv.New32a()
-			_, _ = h.Write([]byte(player))
-			idx := int(h.Sum32()) % len(s.state.Games)
-			return s.state.Games[idx]
-		}
-	}
-	// nothing determinable
-	return ""
+	return handler.GetCurrentGameForPlayer(s, player)
 }

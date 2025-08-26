@@ -88,6 +88,49 @@ Orchestration persistence
 - Swap orchestration runs (triggered by `/api/do_swap`) are now persisted inside `ServerState.Orchestrations` keyed by an orchestration ID. This lets an admin inspect partial or failed swap runs in `state.json` and resume or debug them manually.
 - Orchestration state includes mapping (player->game), per-player statuses and results, timestamps, and an overall completed flag.
 
+Game Modes
+
+BizShuffle supports two main game modes that control how games are swapped between players:
+
+### Sync Mode (`sync`)
+
+**Description**: All players play the same game and swap simultaneously. No save files are uploaded or downloaded during swaps.
+
+**Behavior**:
+- When a swap occurs, all connected players receive the same game
+- No save state management - players start fresh on each game
+- Ideal for competitive scenarios where everyone should play the same game at the same time
+- Default mode when no mode is explicitly set
+
+**Use Cases**:
+- Racing scenarios where all players compete on the same game
+- Synchronized gameplay sessions
+- When save state management is not needed
+
+### Save Mode (`save`) 
+
+**Description**: Players play different games and perform save upload/download orchestration on swap. Each player gets a different game assigned based on a hash of their name.
+
+**Behavior**:
+- Each player gets assigned a different game using deterministic distribution
+- Save states are uploaded/downloaded during swaps to maintain progress
+- Players can continue from where the previous player left off
+- More complex orchestration with potential for partial failures
+
+**Use Cases**:
+- Collaborative gameplay where players take turns on different games
+- Scenarios where preserving game progress is important
+- When you want different players working on different games simultaneously
+
+### Changing Game Modes
+
+Game modes can be changed through:
+- The web admin UI mode selector
+- API endpoint: `POST /api/mode` with JSON body `{"mode": "sync"}` or `{"mode": "save"}`
+- The mode is persisted in `state.json` and survives server restarts
+
+**Note**: Changing modes while players are actively playing may cause disruption. It's recommended to pause the session before changing modes.
+
 Client UX & installation notes
 
 - The client is a simple Go binary. Wanting a one-click installer: packaging for Windows (NSIS or similar) can wrap the binary and drop a shortcut. The client will write `client_config.json` in the working directory; you can change this to %APPDATA% or user profile dir later.

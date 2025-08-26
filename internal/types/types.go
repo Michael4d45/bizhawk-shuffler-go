@@ -29,6 +29,17 @@ const (
 	CmdToggleSwaps
 )
 
+// GameMode enumerates the available game swapping modes.
+type GameMode int
+
+const (
+	GameModeUnknown GameMode = iota
+	// GameModeSync - all players play the same game and swap simultaneously (no saves uploaded/downloaded)
+	GameModeSync
+	// GameModeSave - players play different games and perform save upload/download orchestration on swap
+	GameModeSave
+)
+
 func (c CommandName) String() string {
 	switch c {
 	case CmdHello:
@@ -61,6 +72,17 @@ func (c CommandName) String() string {
 		return "reset"
 	case CmdToggleSwaps:
 		return "toggle_swaps"
+	default:
+		return "unknown"
+	}
+}
+
+func (g GameMode) String() string {
+	switch g {
+	case GameModeSync:
+		return "sync"
+	case GameModeSave:
+		return "save"
 	default:
 		return "unknown"
 	}
@@ -104,6 +126,18 @@ func ParseCommandName(s string) CommandName {
 	}
 }
 
+// ParseGameMode converts a string to the GameMode enum (case-insensitive).
+func ParseGameMode(s string) GameMode {
+	switch strings.ToLower(strings.TrimSpace(s)) {
+	case "sync", "":
+		return GameModeSync
+	case "save":
+		return GameModeSave
+	default:
+		return GameModeUnknown
+	}
+}
+
 // MarshalJSON encodes the enum as a JSON string (the wire format expects a string)
 func (c CommandName) MarshalJSON() ([]byte, error) {
 	return json.Marshal(c.String())
@@ -125,6 +159,27 @@ func (c *CommandName) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+// MarshalJSON encodes the GameMode enum as a JSON string
+func (g GameMode) MarshalJSON() ([]byte, error) {
+	return json.Marshal(g.String())
+}
+
+// UnmarshalJSON parses a JSON string into the GameMode enum.
+func (g *GameMode) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		// if not a string, try integer
+		var iv int
+		if err2 := json.Unmarshal(b, &iv); err2 == nil {
+			*g = GameMode(iv)
+			return nil
+		}
+		return err
+	}
+	*g = ParseGameMode(s)
+	return nil
+}
+
 // Command is the common websocket message envelope
 type Command struct {
 	Cmd     CommandName `json:"cmd"`
@@ -136,10 +191,8 @@ type Command struct {
 type ServerState struct {
 	Running     bool `json:"running"`
 	SwapEnabled bool `json:"swap_enabled"`
-	// Mode controls the high-level server swap behavior. Allowed values:
-	// "sync"  - all players play the same game and swap simultaneously (no saves uploaded/downloaded)
-	// "save"  - players play different games and perform save upload/download orchestration on swap
-	Mode string `json:"mode,omitempty"`
+	// Mode controls the high-level server swap behavior.
+	Mode GameMode `json:"mode,omitempty"`
 	// Host is an optional persisted listen host (e.g. "0.0.0.0" or "127.0.0.1").
 	// If present, the server can use this value when a --host flag isn't
 	// provided on the command line.
