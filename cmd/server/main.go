@@ -28,7 +28,15 @@ func main() {
 	}
 	s.UpdateHostIfChanged(chosenHost)
 
-	addr := fmt.Sprintf("%s:%d", chosenHost, *port)
+	chosenPort := *port
+	if chosenPort == 8080 {
+		if persisted := s.PersistedPort(); persisted != 0 {
+			chosenPort = persisted
+		}
+	}
+	s.UpdatePortIfChanged(chosenPort)
+
+	addr := fmt.Sprintf("%s:%d", chosenHost, chosenPort)
 	mux := http.NewServeMux()
 	s.RegisterRoutes(mux)
 	log.Printf("Starting server on %s", addr)

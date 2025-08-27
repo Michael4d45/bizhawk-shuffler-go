@@ -126,6 +126,27 @@ func (s *Server) UpdateHostIfChanged(host string) {
 // PersistedHost returns the persisted host if present.
 func (s *Server) PersistedHost() string { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Host }
 
+// UpdatePortIfChanged sets port in state if different and persists.
+func (s *Server) UpdatePortIfChanged(port int) {
+	s.mu.Lock()
+	if s.state.Port == port {
+		s.mu.Unlock()
+		return
+	}
+	s.state.Port = port
+	s.state.UpdatedAt = time.Now()
+	st := s.state
+	s.mu.Unlock()
+	if err := s.saveState(); err != nil {
+		log.Printf("failed to persist port: %v", err)
+	} else {
+		log.Printf("port updated to %d", st.Port)
+	}
+}
+
+// PersistedPort returns the persisted port if present.
+func (s *Server) PersistedPort() int { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Port }
+
 // currentGameForPlayer determines what game a player should be playing now.
 // Order of determination:
 // 1) If the player's Current field is set in persisted state, return that.

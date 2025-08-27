@@ -197,6 +197,10 @@ type ServerState struct {
 	// If present, the server can use this value when a --host flag isn't
 	// provided on the command line.
 	Host string `json:"host,omitempty"`
+	// Port is an optional persisted listen port (e.g. 8080).
+	// If present, the server can use this value when a --port flag isn't
+	// provided on the command line.
+	Port int `json:"port,omitempty"`
 	// NextSwapAt is the unix epoch seconds when the next scheduled swap will occur.
 	// It is updated by the server scheduler and persisted so the UI can display it.
 	NextSwapAt      int64 `json:"next_swap_at,omitempty"`
@@ -210,10 +214,7 @@ type ServerState struct {
 	// should also download when preparing this game.
 	MainGames []GameEntry       `json:"main_games,omitempty"`
 	Players   map[string]Player `json:"players"`
-	// Orchestrations stores recent swap orchestration runs so an admin can
-	// inspect or resume partial/failed swaps. Keyed by orchestration ID.
-	Orchestrations map[string]SwapOrchestrationState `json:"orchestrations,omitempty"`
-	UpdatedAt      time.Time                         `json:"updated_at"`
+	UpdatedAt time.Time         `json:"updated_at"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
@@ -248,19 +249,4 @@ type SaveMetadata struct {
 	Mime    string `json:"mime,omitempty"`
 	ModTime string `json:"modtime,omitempty"`
 	URL     string `json:"url,omitempty"`
-}
-
-// SwapOrchestrationState captures the state of a single swap orchestration
-// run. It is persisted into ServerState.Orchestrations to allow resumption
-// or inspection after partial failures.
-type SwapOrchestrationState struct {
-	ID          string            `json:"id"`
-	Mapping     map[string]string `json:"mapping"`                // player -> game
-	PrevMapping map[string]string `json:"prev_mapping,omitempty"` // previous player->game mapping for rollback
-	Status      map[string]string `json:"status,omitempty"`       // per-player step status (e.g. pending/acked/verified/failed)
-	Results     map[string]string `json:"results,omitempty"`      // per-player final result strings
-	StartedAt   time.Time         `json:"started_at"`
-	Step        string            `json:"step,omitempty"` // high level step name
-	Completed   bool              `json:"completed"`
-	Error       string            `json:"error,omitempty"`
 }
