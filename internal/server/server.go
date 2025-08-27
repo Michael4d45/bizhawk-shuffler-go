@@ -23,7 +23,6 @@ type Server struct {
 	players     map[string]*wsClient
 	upgrader    websocket.Upgrader
 	pending     map[string]chan string
-	ephemeral   map[string]string
 	schedulerCh chan struct{}
 }
 
@@ -43,7 +42,6 @@ func New() *Server {
 		players:     make(map[string]*wsClient),
 		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 		pending:     make(map[string]chan string),
-		ephemeral:   make(map[string]string),
 		schedulerCh: make(chan struct{}, 1),
 	}
 	s.loadState()

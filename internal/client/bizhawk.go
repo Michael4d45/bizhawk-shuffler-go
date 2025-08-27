@@ -14,14 +14,35 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
+	"syscall"
+	"time"
+
+	"github.com/michael4d45/bizshuffle/internal"
 )
 
+// BizHawkController manages BizHawk installation, download and launching.
+type BizHawkController struct {
+	httpClient *http.Client
+	cfg        Config
+	api        *API
+	bipc       *internal.BizhawkIPC
+}
+
+// NewBizHawkController creates a new controller with provided API, http client and config.
+func NewBizHawkController(api *API, httpClient *http.Client, cfg Config, bipc *internal.BizhawkIPC) *BizHawkController {
+	if httpClient == nil {
+		httpClient = http.DefaultClient
+	}
+	return &BizHawkController{httpClient: httpClient, cfg: cfg, api: api, bipc: bipc}
+}
+
 // DownloadFile downloads a URL to the given destination path.
-func DownloadFile(client *http.Client, url, dest string) error {
+func (c *BizHawkController) DownloadFile(url, dest string) error {
 	if err := os.MkdirAll(filepath.Dir(dest), 0o755); err != nil {
 		return err
 	}
-	resp, err := client.Get(url)
+	resp, err := c.httpClient.Get(url)
 	if err != nil {
 		return err
 	}
@@ -39,8 +60,8 @@ func DownloadFile(client *http.Client, url, dest string) error {
 }
 
 // DownloadAndExtractZip downloads a zip file and extracts it into destDir.
-func DownloadAndExtractZip(client *http.Client, url, zipPath, destDir string) error {
-	if err := DownloadFile(client, url, zipPath); err != nil {
+func (c *BizHawkController) DownloadAndExtractZip(url, zipPath, destDir string) error {
+	if err := c.DownloadFile(url, zipPath); err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(zipPath) }()
@@ -92,8 +113,8 @@ func DownloadAndExtractZip(client *http.Client, url, zipPath, destDir string) er
 }
 
 // DownloadAndExtractTarGz downloads a tar.gz (or tgz) file and extracts it into destDir.
-func DownloadAndExtractTarGz(client *http.Client, url, tarPath, destDir string) error {
-	if err := DownloadFile(client, url, tarPath); err != nil {
+func (c *BizHawkController) DownloadAndExtractTarGz(url, tarPath, destDir string) error {
+	if err := c.DownloadFile(url, tarPath); err != nil {
 		return err
 	}
 	defer func() { _ = os.Remove(tarPath) }()
@@ -152,20 +173,11 @@ func DownloadAndExtractTarGz(client *http.Client, url, tarPath, destDir string) 
 }
 
 // EnsureBizHawkInstalled checks for BizHawk at cfgPath and downloads/extracts it if missing.
-func EnsureBizHawkInstalled(httpClient *http.Client, cfg map[string]string) error {
-	// cfg may contain keys: bizhawk_download_url, bizhawk_path
-	// normalize alternate keys
-	if v, ok := cfg["BizHawkDownloadURL"]; ok && cfg["bizhawk_download_url"] == "" {
-		cfg["bizhawk_download_url"] = v
-	}
-	if v, ok := cfg["BizHawkPath"]; ok && cfg["bizhawk_path"] == "" {
-		cfg["bizhawk_path"] = v
-	}
-
-	downloadURL := cfg["bizhawk_download_url"]
+func (c *BizHawkController) EnsureBizHawkInstalled() error {
+	downloadURL := c.cfg["bizhawk_download_url"]
 	// If no download URL was provided, but a path is configured, trust the path.
 	if downloadURL == "" {
-		if p := cfg["bizhawk_path"]; strings.TrimSpace(p) != "" {
+		if p := c.cfg["bizhawk_path"]; strings.TrimSpace(p) != "" {
 			// nothing to do, path provided
 			return nil
 		}
@@ -182,43 +194,34 @@ func EnsureBizHawkInstalled(httpClient *http.Client, cfg map[string]string) erro
 
 	// Extra debug: report cwd and intended installDir
 	if wd, err := os.Getwd(); err == nil {
-		log.Printf("EnsureBizHawkInstalled: cwd=%s downloadURL=%s zipFile=%s installDir=%s expectedCfgPath=%s", wd, downloadURL, zipFile, installDir, cfg["bizhawk_path"])
+		log.Printf("EnsureBizHawkInstalled: cwd=%s downloadURL=%s zipFile=%s installDir=%s expectedCfgPath=%s", wd, downloadURL, zipFile, installDir, c.cfg["bizhawk_path"])
 	} else {
 		log.Printf("EnsureBizHawkInstalled: Getwd failed: %v", err)
 	}
 
 	// choose expected exe path inside installDir, prefer OS-specific name
-	expected := cfg["bizhawk_path"]
-	if expected == "" {
-		if runtime.GOOS == "windows" {
-			expected = filepath.Join(installDir, "EmuHawk.exe")
-		} else {
-			expected = filepath.Join(installDir, "EmuHawkMono.sh")
-		}
-		cfg["bizhawk_path"] = expected
-	}
-
+	expected := c.cfg["bizhawk_path"]
 	if _, err := os.Stat(expected); os.IsNotExist(err) {
 		log.Printf("BizHawk not found at %s, downloading...", expected)
 		// pick extractor based on URL
 		if strings.HasSuffix(strings.ToLower(downloadURL), ".zip") {
-			if err := DownloadAndExtractZip(httpClient, downloadURL, zipFile, installDir); err != nil {
+			if err := c.DownloadAndExtractZip(downloadURL, zipFile, installDir); err != nil {
 				return fmt.Errorf("failed to download/extract BizHawk: %w", err)
 			}
 		} else if strings.HasSuffix(strings.ToLower(downloadURL), ".tar.gz") || strings.HasSuffix(strings.ToLower(downloadURL), ".tgz") {
-			if err := DownloadAndExtractTarGz(httpClient, downloadURL, zipFile, installDir); err != nil {
+			if err := c.DownloadAndExtractTarGz(downloadURL, zipFile, installDir); err != nil {
 				return fmt.Errorf("failed to download/extract BizHawk: %w", err)
 			}
 		} else {
 			// unknown archive type: attempt zip first
-			if err := DownloadAndExtractZip(httpClient, downloadURL, zipFile, installDir); err != nil {
+			if err := c.DownloadAndExtractZip(downloadURL, zipFile, installDir); err != nil {
 				return fmt.Errorf("failed to download/extract BizHawk (unknown archive): %w", err)
 			}
 		}
 		// optional: look for additional files from server
-		if server, ok := cfg["server"]; ok && server != "" {
-			bizFilesURL := strings.TrimSuffix(server, "/") + "/api/BizhawkFiles.zip"
-			if err := DownloadAndExtractZip(httpClient, bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
+		if c.api != nil && c.api.BaseURL != "" {
+			bizFilesURL := c.api.BizhawkFilesURL()
+			if err := c.DownloadAndExtractZip(bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
 				log.Printf("warning: failed to download BizhawkFiles.zip: %v", err)
 			}
 		} else {
@@ -235,32 +238,17 @@ func EnsureBizHawkInstalled(httpClient *http.Client, cfg map[string]string) erro
 			log.Printf("EnsureBizHawkInstalled: failed to read installDir %s: %v", installDir, err)
 		}
 		// persist the computed path in cfg (caller should save cfg)
-		cfg["bizhawk_path"] = expected
+		c.cfg["bizhawk_path"] = expected
 	}
 	return nil
 }
 
 // LaunchBizHawk starts the BizHawk executable with environment variables and returns the *exec.Cmd.
-func LaunchBizHawk(ctx context.Context, cfg map[string]string, httpClient *http.Client) (*exec.Cmd, error) {
-	// normalize alternate keys
-	if v, ok := cfg["BizHawkPath"]; ok && cfg["bizhawk_path"] == "" {
-		cfg["bizhawk_path"] = v
-	}
-
-	bp := cfg["bizhawk_path"]
+func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error) {
+	bp := c.cfg["bizhawk_path"]
 	if strings.TrimSpace(bp) == "" {
 		return nil, fmt.Errorf("bizhawk_path not configured")
 	}
-	// Try to resolve relative paths before failing: if bp is not absolute
-	// and doesn't exist as given, look relative to the running executable
-	// directory and also under ./bin/client/ which is a common layout for
-	// the distributed client bundle. This helps when cfg contains a
-	// relative path like "BizHawk-2.10-win-x64\\EmuHawk.exe".
-	// If the configured path doesn't exist, try several resolution strategies:
-	// 1) If bp is absolute, leave it (we'll check existence below)
-	// 2) If bp is relative, try: a) next to running executable, b) ./bin/client/<bp>
-	// 3) Try exec.LookPath to see if it's on PATH
-	// 4) As a last resort, try join with current working dir.
 	if _, err := os.Stat(bp); os.IsNotExist(err) {
 		log.Printf("Debug: initial bizhawk path %q does not exist from cwd %s", bp, func() string {
 			if wd, e := os.Getwd(); e == nil {
@@ -330,14 +318,14 @@ func LaunchBizHawk(ctx context.Context, cfg map[string]string, httpClient *http.
 			} else {
 				bp = resolved
 			}
-			cfg["bizhawk_path"] = bp
+			c.cfg["bizhawk_path"] = bp
 			log.Printf("resolved BizHawk path to %s", bp)
 		}
 	}
 
 	// If the file still doesn't exist, try to install
 	if _, err := os.Stat(bp); os.IsNotExist(err) {
-		if err := EnsureBizHawkInstalled(httpClient, cfg); err != nil {
+		if err := c.EnsureBizHawkInstalled(); err != nil {
 			return nil, fmt.Errorf("failed to install bizhawk: %w", err)
 		}
 	}
@@ -357,8 +345,8 @@ func LaunchBizHawk(ctx context.Context, cfg map[string]string, httpClient *http.
 			}
 			// quick scan common candidates under parent
 			candidates := []string{"EmuHawk.exe", "DiscoHawk.exe", "EmuHawkMono.sh", "EmuHawk"}
-			for _, c := range candidates {
-				p := filepath.Join(parent, c)
+			for _, cnd := range candidates {
+				p := filepath.Join(parent, cnd)
 				if fi, e := os.Stat(p); e == nil {
 					log.Printf("LaunchBizHawk: found candidate during scan: %s (mode=%v)", p, fi.Mode())
 				}
@@ -371,7 +359,7 @@ func LaunchBizHawk(ctx context.Context, cfg map[string]string, httpClient *http.
 	if !filepath.IsAbs(bp) {
 		if abs, err := filepath.Abs(bp); err == nil {
 			bp = abs
-			cfg["bizhawk_path"] = bp
+			c.cfg["bizhawk_path"] = bp
 			log.Printf("LaunchBizHawk: converted bizhawk_path to absolute: %s", bp)
 		} else {
 			log.Printf("LaunchBizHawk: failed to convert bizhawk_path to abs: %v", err)
@@ -397,4 +385,165 @@ func LaunchBizHawk(ctx context.Context, cfg map[string]string, httpClient *http.
 	}
 	log.Printf("started BizHawk pid=%d", cmd.Process.Pid)
 	return cmd, nil
+}
+
+// LaunchAndManage starts BizHawk and takes ownership of lifecycle management:
+// - launches the process (using LaunchBizHawk)
+// - monitors the process and calls origCancel when it exits
+// - listens for incoming signals on sigs and attempts graceful termination
+// The function blocks until the context is cancelled or a shutdown signal is
+// received and the process has been terminated. It returns any launch error.
+func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func(), sigs <-chan os.Signal) error {
+	var bhCmd *exec.Cmd
+	var bhMu sync.Mutex
+
+	log.Printf("Debug: configured bizhawk_path=%q", c.cfg["bizhawk_path"])
+	cmd, err := c.LaunchBizHawk(ctx)
+	if err != nil {
+		// if launch failed, cancel higher-level contexts
+		if origCancel != nil {
+			origCancel()
+		}
+		return fmt.Errorf("StartBizHawk failed: %w", err)
+	}
+	bhMu.Lock()
+	bhCmd = cmd
+	bhMu.Unlock()
+
+	if bhCmd != nil {
+		log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
+		MonitorProcess(bhCmd, func(err error) {
+			log.Printf("MonitorProcess: BizHawk pid=%d exited with err=%v; cancelling client", bhCmd.Process.Pid, err)
+			if origCancel != nil {
+				origCancel()
+			}
+		})
+	}
+
+	// signal handling goroutine: listens for signals and attempts graceful shutdown
+	go func() {
+		select {
+		case <-ctx.Done():
+			return
+		case s := <-sigs:
+			log.Printf("signal: %v", s)
+			log.Printf("terminating BizHawk due to signal: %v", s)
+			TerminateProcess(&bhCmd, &bhMu, 3*time.Second)
+			log.Printf("signal handler: calling origCancel() after TerminateProcess")
+			if origCancel != nil {
+				origCancel()
+			}
+		}
+	}()
+
+	// Wait for either context cancellation or a signal (the caller's signal
+	// channel may also be drained elsewhere; we still check ctx.Done()).
+	select {
+	case <-ctx.Done():
+		log.Printf("shutdown: context cancelled; terminating BizHawk and exiting")
+	case s := <-sigs:
+		log.Printf("received shutdown signal: %v; terminating BizHawk and exiting", s)
+	}
+
+	bhMu.Lock()
+	if bhCmd != nil && bhCmd.Process != nil {
+		if err := bhCmd.Process.Kill(); err != nil {
+			log.Printf("failed to kill BizHawk process: %v", err)
+		}
+	}
+	bhMu.Unlock()
+
+	return nil
+}
+
+// TerminateProcess attempts to gracefully stop the given process and falls
+// back to killing it after the provided grace duration. It accepts a pointer
+// to the command and a mutex to coordinate access with callers that also use
+// the same mutex (the pattern used in run.go). This preserves the original
+// locking behavior while centralizing platform differences.
+//
+// On Windows the function will call Process.Kill() immediately because
+// POSIX signals are not supported there in the same way. On other OSes it
+// sends SIGTERM and schedules a forced kill after the grace period if the
+// process hasn't exited.
+func TerminateProcess(cmdPtr **exec.Cmd, mu *sync.Mutex, grace time.Duration) {
+	if cmdPtr == nil || mu == nil {
+		return
+	}
+	mu.Lock()
+	cmd := *cmdPtr
+	if cmd == nil || cmd.Process == nil {
+		mu.Unlock()
+		return
+	}
+	pid := cmd.Process.Pid
+
+	// Windows: kill immediately
+	if runtime.GOOS == "windows" {
+		log.Printf("killing BizHawk pid=%d (windows)", pid)
+		_ = cmd.Process.Kill()
+		mu.Unlock()
+		return
+	}
+
+	// POSIX: send SIGTERM and schedule a force kill after grace
+	log.Printf("sending SIGTERM to BizHawk pid=%d", pid)
+	_ = cmd.Process.Signal(syscall.SIGTERM)
+	mu.Unlock()
+
+	if grace <= 0 {
+		return
+	}
+
+	time.AfterFunc(grace, func() {
+		mu.Lock()
+		defer mu.Unlock()
+		if *cmdPtr != nil && (*cmdPtr).ProcessState == nil {
+			log.Printf("killing BizHawk pid=%d after grace", pid)
+			_ = (*cmdPtr).Process.Kill()
+		}
+	})
+}
+
+func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
+	// Use API.FetchServerState to query the server state for this client/player.
+	go func() {
+		for line := range c.bipc.Incoming() {
+			if line == internal.MsgDisconnected || line == "__BIZHAWK_IPC_DISCONNECTED__" {
+				log.Printf("bizhawk ipc: disconnected detected from readLoop (ipc handler); marking ipcReady=false and continuing")
+				if c.bipc != nil {
+					c.bipc.SetReady(false)
+				}
+				// don't cancel the main context here; allow reconnect logic to run
+				continue
+			}
+			log.Printf("lua incoming: %s", line)
+			if strings.HasPrefix(line, "HELLO") {
+				log.Printf("ipc handler: received HELLO from lua, sending SYNC")
+				if c.bipc != nil {
+					c.bipc.SetReady(true)
+				}
+				running, playerGame, err := c.api.FetchServerState(c.cfg["name"])
+				if err != nil {
+					log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)
+					running = true
+					playerGame = ""
+				}
+				if playerGame == "" {
+					log.Printf("ipc handler: no current game for player from server state; sending empty game")
+				}
+				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+				if err := c.bipc.SendSync(ctx2, playerGame, running, time.Now().Unix()); err != nil {
+					log.Printf("ipc handler: SendSync failed: %v", err)
+				} else {
+					log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", playerGame, running)
+				}
+				cancel2()
+			}
+		}
+		log.Printf("bizhawk ipc: incoming channel closed or handler goroutine exiting; marking ipcReady=false")
+		if c.bipc != nil {
+			c.bipc.SetReady(false)
+		}
+	}()
 }

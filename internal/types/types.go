@@ -229,4 +229,3 @@ type Player struct {
 	// PingMs stores the last measured round-trip time to the player in milliseconds.
 	PingMs int `json:"ping_ms,omitempty"`
 }
-

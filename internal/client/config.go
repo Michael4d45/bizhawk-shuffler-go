@@ -15,11 +15,11 @@ import (
 // map[string]string when calling legacy functions.
 type Config map[string]string
 
-// LoadConfig loads a JSON file from path into a Config. If the file does not
+// LoadConfig loads a JSON file from "config.json" into a Config. If the file does not
 // exist an empty Config is returned and no error.
-func LoadConfig(path string) (Config, error) {
+func LoadConfig() (Config, error) {
 	cfg := Config{}
-	b, err := os.ReadFile(path)
+	b, err := os.ReadFile("config.json")
 	if err != nil {
 		if os.IsNotExist(err) {
 			return cfg, nil
@@ -29,27 +29,28 @@ func LoadConfig(path string) (Config, error) {
 	if err := json.Unmarshal(b, &cfg); err != nil {
 		return nil, err
 	}
+	cfg.normalizeServer()
 	return cfg, nil
 }
 
-// Save writes the Config to path as indented JSON.
-func (c Config) Save(path string) error {
+// Save writes the Config to "config.json" as indented JSON.
+func (c Config) Save() error {
 	jb, err := json.MarshalIndent(c, "", "  ")
 	if err != nil {
 		return err
 	}
-	dir := filepath.Dir(path)
+	dir := filepath.Dir("config.json")
 	if dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return err
 		}
 	}
-	return os.WriteFile(path, jb, 0644)
+	return os.WriteFile("config.json", jb, 0644)
 }
 
-// NormalizeServer normalizes the stored "server" value: ws/wss -> http/https
-// and strips path/query/fragment.
-func (c Config) NormalizeServer() {
+// normalizeServer normalizes the stored "server" value: ws/wss -> http/https
+// and strips "config.json"/query/fragment.
+func (c Config) normalizeServer() {
 	if s, ok := c["server"]; ok && s != "" {
 		if u, err := url.Parse(s); err == nil {
 			switch u.Scheme {

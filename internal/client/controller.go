@@ -11,33 +11,16 @@ import (
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
-// BizhawkIPCLike is a minimal interface around internal.BizhawkIPC used by the controller
-type BizhawkIPCLike interface {
-	Start(ctx context.Context) error
-	Close() error
-	Incoming() <-chan string
-	SendSync(ctx context.Context, game string, running bool, ts int64) error
-	SendStart(ctx context.Context, ts int64, game string) error
-	SendPause(ctx context.Context, at *int64) error
-	SendResume(ctx context.Context, at *int64) error
-	SendSave(ctx context.Context, localPath string) error
-	SendSwap(ctx context.Context, ts int64, game string) error
-	SendCommand(ctx context.Context, parts ...string) error
-	SendMessage(ctx context.Context, msg string) error
-}
-
 // Controller wires dependencies and handles incoming commands.
 type Controller struct {
-	cfg        Config
-	bipc       BizhawkIPCLike
-	dl         *internal.Downloader
-	writeJSON  func(types.Command) error
-	ipcReadyMu *sync.Mutex
-	ipcReady   *bool
+	cfg       Config
+	bipc      *internal.BizhawkIPC
+	dl        *internal.Downloader
+	writeJSON func(types.Command) error
 }
 
-func NewController(cfg Config, bipc BizhawkIPCLike, dl *internal.Downloader, writeJSON func(types.Command) error, ipcReadyMu *sync.Mutex, ipcReady *bool) *Controller {
-	return &Controller{cfg: cfg, bipc: bipc, dl: dl, writeJSON: writeJSON, ipcReadyMu: ipcReadyMu, ipcReady: ipcReady}
+func NewController(cfg Config, bipc *internal.BizhawkIPC, dl *internal.Downloader, writeJSON func(types.Command) error) *Controller {
+	return &Controller{cfg: cfg, bipc: bipc, dl: dl, writeJSON: writeJSON}
 }
 
 // Handle processes a single incoming command. It launches goroutines for

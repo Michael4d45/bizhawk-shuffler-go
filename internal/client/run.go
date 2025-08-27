@@ -1,74 +1,166 @@
 package client
 
 import (
+	"bufio"
 	"context"
-	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
 	"runtime"
 	"strings"
-	"sync"
 	"syscall"
-	"time"
 
 	"github.com/michael4d45/bizshuffle/internal"
-	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
 // ErrNotFound is returned when a requested remote save/file is not present on the server
 var ErrNotFound = errors.New("not found")
 
-// Run is the main entrypoint for the client logic. It mirrors the previous
-// cmd/client/main.go contents but is refactored into an internal package so
-// the command's main remains tiny.
-func Run(args []string) error {
-	serverURL, cfg, cfgFile, logFile, httpClient, err := Bootstrap(args)
-	if err != nil {
-		return err
-	}
-	defer func() {
-		if err := logFile.Close(); err != nil {
-			_ = err
-		}
-	}()
+// Client represents a running client instance and holds its dependencies
+// and runtime state.
+type Client struct {
+	cfg     Config
+	logFile *os.File
 
-	// EnsureBizHawkInstalled and LaunchBizHawk currently accept map[string]string
-	// so convert Config to that shape for now.
-	cfgMap := map[string]string{}
-	for k, v := range cfg {
-		cfgMap[k] = v
+	wsClient     *WSClient
+	api          *API
+	bhController *BizHawkController
+	bipc         *internal.BizhawkIPC
+}
+
+// New creates and initializes a Client from CLI args.
+func New(args []string) (*Client, error) {
+	var verbose bool
+	var serverFlag string
+	fs := flag.NewFlagSet("client", flag.ContinueOnError)
+	fs.StringVar(&serverFlag, "server", "", "server URL (ws://, wss://, http:// or https://)")
+	fs.BoolVar(&verbose, "v", false, "enable verbose logging to stdout and file")
+	if err := fs.Parse(args); err != nil {
+		return nil, err
 	}
-	if err := EnsureBizHawkInstalled(httpClient, cfgMap); err != nil {
-		return fmt.Errorf("EnsureBizHawkInstalled: %w", err)
+
+	logFile, err := InitLogging(verbose)
+	if err != nil {
+		return nil, fmt.Errorf("failed to init logging: %w", err)
 	}
-	// persist any changes EnsureBizHawkInstalled may have made
-	for k, v := range cfgMap {
-		cfg[k] = v
+
+	cfg, err := LoadConfig()
+	if err != nil {
+		_ = logFile.Close()
+		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
-	if err := cfg.Save(cfgFile); err == nil {
-		log.Printf("persisted config after BizHawk install: %s", cfgFile)
+
+	reader := bufio.NewReader(os.Stdin)
+	serverURL := serverFlag
+	for serverURL == "" {
+		if s, ok := cfg["server"]; ok && s != "" {
+			serverURL = s
+			break
+		}
+		fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
+		line, _ := reader.ReadString('\n')
+		serverURL = strings.TrimSpace(line)
+		if serverURL == "" {
+			fmt.Println("server URL cannot be empty")
+			continue
+		}
+		if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://") {
+			// ok
+		} else {
+			fmt.Println("server URL must start with ws://, wss://, http:// or https://")
+			serverURL = ""
+			continue
+		}
+		u, err := url.Parse(serverURL)
+		if err != nil {
+			fmt.Printf("invalid server URL: %v\n", err)
+			serverURL = ""
+			continue
+		}
+		switch u.Scheme {
+		case "ws":
+			u.Scheme = "http"
+		case "wss":
+			u.Scheme = "https"
+		}
+		u.Path = ""
+		u.RawQuery = ""
+		u.Fragment = ""
+		cfg["server"] = u.String()
 	}
+
+	for {
+		if n, ok := cfg["name"]; ok && strings.TrimSpace(n) != "" {
+			break
+		}
+		fmt.Print("Player name: ")
+		line, _ := reader.ReadString('\n')
+		name := strings.TrimSpace(line)
+		if name == "" {
+			fmt.Println("player name cannot be empty")
+			continue
+		}
+		cfg["name"] = name
+		break
+	}
+
+	_ = cfg.Save()
+
+	if err := cfg.EnsureDefaults(); err != nil {
+		_ = logFile.Close()
+		return nil, fmt.Errorf("EnsureDefaults: %w", err)
+	}
+	_ = cfg.Save()
+
+	httpClient := &http.Client{Timeout: 0}
+
+	bipc := internal.NewBizhawkIPC("127.0.0.1", 55355)
+
+	// create a controller with a temporary API (no base URL) to perform any
+	// installation/download steps before the real server API is known.
+	installAPI := NewAPI("", httpClient, cfg)
+	bhController := NewBizHawkController(installAPI, httpClient, cfg, bipc)
+	if err := bhController.EnsureBizHawkInstalled(); err != nil {
+		_ = logFile.Close()
+		return nil, fmt.Errorf("EnsureBizHawkInstalled: %w", err)
+	}
+	_ = cfg.Save()
 
 	wsURL, serverHTTP, err := BuildWSAndHTTP(serverURL, cfg)
 	if err != nil {
-		return err
+		_ = logFile.Close()
+		return nil, err
 	}
 
+	api := NewAPI(serverHTTP, httpClient, cfg)
+	// update controller to use the real API
+	bhController.api = api
+	wsClient := NewWSClient(wsURL, api, bipc)
+
+	c := &Client{
+		cfg:          cfg,
+		logFile:      logFile,
+		wsClient:     wsClient,
+		api:          api,
+		bhController: bhController,
+		bipc:         bipc,
+	}
+
+	return c, nil
+}
+
+// Run starts the client's runtime: opens connections, starts goroutines and
+// blocks until shutdown completes.
+func (c *Client) Run() error {
 	ctx, cancel := context.WithCancel(context.Background())
-	// Wrap cancel so we can log a stacktrace when the top-level context is
-	// cancelled. This makes it easy to determine which goroutine/code path
-	// invoked cancel().
 	origCancel := cancel
-	// make cancel a guarded logger so accidental calls from internal
-	// components won't cancel the whole client. Use origCancel() explicitly
-	// in places where we intentionally want to shutdown (signal handler,
-	// readDone branch below).
 	cancel = func() {
 		pcs := make([]uintptr, 8)
 		n := runtime.Callers(2, pcs)
@@ -82,15 +174,10 @@ func Run(args []string) error {
 		buf := make([]byte, 1<<12)
 		m := runtime.Stack(buf, false)
 		log.Printf("top-level cancel() invoked (guarded) by %s; stack snapshot:\n%s", caller, string(buf[:m]))
-		// DO NOT call origCancel() here to avoid accidental shutdowns.
 	}
 	defer cancel()
 
-	// Broad debug: record that Run started with guarded cancel installed.
-	log.Printf("run: starting with guarded cancel; wsURL=%s serverHTTP=%s player=%s goroutines=%d", wsURL, serverHTTP, cfg["name"], runtime.NumGoroutine())
-
-	// Defer an exit snapshot so we can see when Run returns and what the
-	// goroutine/stack state looked like.
+	log.Printf("run: starting with guarded cancel; wsURL=%s server=%s player=%s goroutines=%d", c.wsClient.wsURL, c.api.BaseURL, c.cfg["name"], runtime.NumGoroutine())
 	defer func() {
 		buf := make([]byte, 1<<12)
 		m := runtime.Stack(buf, true)
@@ -100,154 +187,125 @@ func Run(args []string) error {
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 
-	// websocket client
-	wsClient := NewWSClient(wsURL)
-	wsClient.Start(ctx)
-	defer wsClient.Stop()
-
-	writeJSON := func(cmd types.Command) error {
-		return WriteJSONWithTimeout(ctx, wsClient, cmd, 2*time.Second)
-	}
-
-	// controller loop will register the ws handler and send the initial hello
-
-	bipc := internal.NewBizhawkIPC("127.0.0.1", 55355)
-	if err := bipc.Start(ctx); err != nil {
+	if err := c.bipc.Start(ctx); err != nil {
 		log.Printf("bizhawk ipc start: %v", err)
+		return err
 	} else {
 		log.Printf("bizhawk ipc started")
 	}
-	defer func() {
-		log.Printf("closing bizhawk ipc")
-		_ = bipc.Close()
-	}()
+	defer func() { _ = c.bipc.Close(); log.Printf("closing bizhawk ipc") }()
 
-	var ipcReadyMu sync.Mutex
-	ipcReady := false
+	c.wsClient.Start(ctx, c.cfg)
+	defer c.wsClient.Stop()
 
-	fetchServerState := func() (running bool, playerGame string) {
-		running = true
-		playerGame = ""
-		if serverHTTP == "" {
-			return running, playerGame
-		}
-		resp, err := http.Get(strings.TrimRight(serverHTTP, "/") + "/state.json")
-		if err != nil {
-			log.Printf("failed to fetch /state.json: %v", err)
-			return running, playerGame
-		}
-		defer func() { _ = resp.Body.Close() }()
-		if resp.StatusCode != http.StatusOK {
-			log.Printf("/state.json returned status: %s", resp.Status)
-			return running, playerGame
-		}
-		// Read the full body and decode the new envelope shape only.
-		data, err := io.ReadAll(resp.Body)
-		if err != nil {
-			log.Printf("failed to read /state.json body: %v", err)
-			return running, playerGame
-		}
+	c.bhController.StartIPCGoroutine(ctx)
 
-		var env struct {
-			State struct {
-				Running bool                      `json:"running"`
-				Players map[string]map[string]any `json:"players"`
-			} `json:"state"`
-			Ephemeral map[string]string `json:"ephemeral"`
+	// Delegate BizHawk launch and lifecycle management to the controller.
+	if err := c.bhController.LaunchAndManage(ctx, origCancel, sigs); err != nil {
+		// LaunchAndManage already calls origCancel() on failure where appropriate.
+		if c.logFile != nil {
+			_ = c.logFile.Close()
 		}
-
-		if err := json.Unmarshal(data, &env); err != nil {
-			log.Printf("failed to decode /state.json envelope: %v", err)
-			return running, playerGame
-		}
-
-		running = env.State.Running
-		if env.State.Players != nil {
-			if p, ok := env.State.Players[cfg["name"]]; ok {
-				if v, ok2 := p["current_game"]; ok2 {
-					if s, ok4 := v.(string); ok4 {
-						playerGame = s
-					}
-				}
-				if playerGame == "" {
-					if cur, ok2 := p["current"].(string); ok2 {
-						playerGame = cur
-					}
-				}
-			}
-		}
-		return running, playerGame
+		return err
 	}
 
-	StartIPCGoroutine(ctx, bipc, cfg["name"], fetchServerState, &ipcReadyMu, &ipcReady)
-
-	dl := internal.NewDownloader(serverHTTP, "./roms")
-
-	var bhCmd *exec.Cmd
-	var bhMu sync.Mutex
-	// Debug: log configured bizhawk_path before attempting to start
-	log.Printf("Debug: configured bizhawk_path=%q", cfg["bizhawk_path"])
-	bh, err := StartBizHawk(ctx, cfg, httpClient)
-	if err != nil {
-		// Treat failure to start BizHawk as fatal for this client.
-		// Persist any config changes, call the original cancel to perform
-		// a proper shutdown of child components, and return the error.
-		if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
-			_ = os.WriteFile(cfgFile, jb, 0644)
-			log.Printf("persisted config after launching BizHawk (error path)")
-		}
-		log.Printf("StartBizHawk failed (fatal): %v", err)
-		// call origCancel to actually cancel the top-level context
-		origCancel()
-		return fmt.Errorf("StartBizHawk failed: %w", err)
+	if c.logFile != nil {
+		_ = c.logFile.Close()
 	}
-	bhCmd = bh
-	if jb, _ := json.MarshalIndent(cfg, "", "  "); jb != nil {
-		_ = os.WriteFile(cfgFile, jb, 0644)
-		log.Printf("persisted config after launching BizHawk")
-	}
-	if bhCmd != nil {
-		log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
-		MonitorProcess(bhCmd, func(err error) {
-			// BizHawk exited. Cancel the top-level context so the client will
-			// perform its normal shutdown sequence (terminate remaining
-			// components and exit). This makes the client exit when the
-			// monitored BizHawk process terminates.
-			log.Printf("MonitorProcess: BizHawk pid=%d exited with err=%v; cancelling client", bhCmd.Process.Pid, err)
-			origCancel()
-		})
-	}
-
-	go func() {
-		select {
-		case <-ctx.Done():
-			return
-		case s := <-sigs:
-			log.Printf("signal: %v", s)
-			// TerminateProcess acquires the provided mutex internally. Do not
-			// hold the mutex here or we'll deadlock when TerminateProcess
-			// attempts to lock the same mutex (non-reentrant).
-			log.Printf("terminating BizHawk due to signal: %v", s)
-			TerminateProcess(&bhCmd, &bhMu, 3*time.Second)
-			log.Printf("signal handler: calling origCancel() after TerminateProcess")
-			origCancel()
-		}
-	}()
-	// construct controller and read loop
-	_ = RunControllerLoop(ctx, cfg, wsClient, bipc, dl, writeJSON, &ipcReadyMu, &ipcReady)
-
-	select {
-	case <-ctx.Done():
-		log.Printf("shutdown: context cancelled; terminating BizHawk and exiting")
-	case s := <-sigs:
-		log.Printf("received shutdown signal: %v; terminating BizHawk and exiting", s)
-	}
-	bhMu.Lock()
-	if bhCmd != nil && bhCmd.Process != nil {
-		if err := bhCmd.Process.Kill(); err != nil {
-			log.Printf("failed to kill BizHawk process: %v", err)
-		}
-	}
-	bhMu.Unlock()
 	return nil
+}
+
+// InitLogging sets up global logging and returns the opened log file which the
+// caller should Close when finished.
+func InitLogging(verbose bool) (*os.File, error) {
+	f, err := os.OpenFile("client.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	if err != nil {
+		return nil, err
+	}
+	if verbose {
+		mw := io.MultiWriter(os.Stdout, f)
+		log.SetOutput(mw)
+	} else {
+		log.SetOutput(f)
+	}
+	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	return f, nil
+}
+
+// BuildWSAndHTTP takes the -server flag value (which may be a ws:// or http://
+// form) and the stored config and returns a websocket URL to connect to and a
+// corresponding http(s) base URL for REST calls. It mirrors the URL logic
+// previously in run.go so the construction can be reused and tested.
+func BuildWSAndHTTP(serverFlag string, cfg Config) (wsURL string, serverHTTP string, err error) {
+	serverHTTP = ""
+	if s, ok := cfg["server"]; ok && s != "" {
+		serverHTTP = s
+	}
+
+	if strings.HasPrefix(serverFlag, "ws://") || strings.HasPrefix(serverFlag, "wss://") {
+		u, err := url.Parse(serverFlag)
+		if err != nil {
+			return "", "", fmt.Errorf("invalid server url %q: %w", serverFlag, err)
+		}
+		if u.Path == "" || u.Path == "/" {
+			u.Path = "/ws"
+		} else if !strings.HasSuffix(u.Path, "/ws") {
+			u.Path = strings.TrimRight(u.Path, "/") + "/ws"
+		}
+		wsURL = u.String()
+		if serverHTTP == "" {
+			hu := *u
+			switch hu.Scheme {
+			case "ws":
+				hu.Scheme = "http"
+			case "wss":
+				hu.Scheme = "https"
+			}
+			hu.Path = ""
+			hu.RawQuery = ""
+			hu.Fragment = ""
+			serverHTTP = hu.String()
+		}
+		return wsURL, serverHTTP, nil
+	}
+
+	if serverHTTP == "" {
+		return "", "", fmt.Errorf("no server configured for websocket and -server flag not provided")
+	}
+	hu, err := url.Parse(serverHTTP)
+	if err != nil {
+		return "", "", fmt.Errorf("invalid configured server %q: %w", serverHTTP, err)
+	}
+	switch hu.Scheme {
+	case "http":
+		hu.Scheme = "ws"
+	case "https":
+		hu.Scheme = "wss"
+	}
+	if hu.Path == "" || hu.Path == "/" {
+		hu.Path = "/ws"
+	} else if !strings.HasSuffix(hu.Path, "/ws") {
+		hu.Path = strings.TrimRight(hu.Path, "/") + "/ws"
+	}
+	wsURL = hu.String()
+	return wsURL, serverHTTP, nil
+}
+
+// MonitorProcess starts a goroutine that waits for the process to exit and
+// calls onExit(err). onExit will be called regardless of whether the process
+// exited successfully or with an error.
+func MonitorProcess(cmd *exec.Cmd, onExit func(error)) {
+	if cmd == nil {
+		go onExit(fmt.Errorf("nil cmd"))
+		return
+	}
+	go func() {
+		err := cmd.Wait()
+		if err != nil {
+			log.Printf("BizHawk exited with error: %v", err)
+		} else {
+			log.Printf("BizHawk exited")
+		}
+		onExit(err)
+	}()
 }

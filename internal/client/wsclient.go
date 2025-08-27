@@ -4,10 +4,12 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"runtime"
 	"sync"
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/michael4d45/bizshuffle/internal"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
@@ -30,16 +32,19 @@ type WSClient struct {
 	// unblock any blocking Read/Write calls.
 	connMu sync.Mutex
 	conn   *websocket.Conn
+
+	api  *API
+	bipc *internal.BizhawkIPC
 }
 
 // NewWSClient creates a client for wsURL. The returned client is not started
 // until Start is called.
-func NewWSClient(wsURL string) *WSClient {
-	return &WSClient{wsURL: wsURL, sendCh: make(chan types.Command, 64)}
+func NewWSClient(wsURL string, api *API, bipc *internal.BizhawkIPC) *WSClient {
+	return &WSClient{wsURL: wsURL, sendCh: make(chan types.Command, 64), api: api, bipc: bipc}
 }
 
 // Start begins the connection and goroutines. It returns immediately.
-func (w *WSClient) Start(parent context.Context) {
+func (w *WSClient) Start(parent context.Context, cfg Config) {
 	if w.ctx != nil {
 		return
 	}
@@ -48,6 +53,30 @@ func (w *WSClient) Start(parent context.Context) {
 	w.cancel = cancel
 	w.wg.Add(1)
 	go w.run()
+
+	writeJSON := func(cmd types.Command) error {
+		return w.WriteJSONWithTimeout(ctx, cmd, 2*time.Second)
+	}
+
+	_ = w.RunControllerLoop(ctx, cfg, writeJSON)
+}
+
+// WriteJSONWithTimeout sends a command using the provided WSClient with a
+// timeout. It preserves the previous behaviour of returning a specific error
+// if the send queue is full or there's no connection within the timeout.
+func (w *WSClient) WriteJSONWithTimeout(ctx context.Context, cmd types.Command, timeout time.Duration) error {
+	done := make(chan error, 1)
+	go func() {
+		done <- w.Send(cmd)
+	}()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(timeout):
+		return fmt.Errorf("send queue full or no connection")
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // Stop signals the client to stop and waits for goroutines to exit.
@@ -171,4 +200,58 @@ func (w *WSClient) run() {
 		}
 		// loop and reconnect
 	}
+}
+
+func (w *WSClient) RunControllerLoop(ctx context.Context, cfg Config, writeJSON func(types.Command) error) <-chan struct{} {
+	// incoming commands channel (buffered to avoid blocking the WS reader)
+	cmdCh := make(chan types.Command, 64)
+	w.RegisterHandler(func(cmd types.Command) {
+		select {
+		case cmdCh <- cmd:
+		default:
+			ir := false
+			if w.bipc != nil {
+				ir = w.bipc.IsReady()
+			}
+			log.Printf("incoming command dropped: %v; goroutines=%d ipcReady=%v", cmd.Cmd, runtime.NumGoroutine(), ir)
+		}
+	})
+
+	// send initial hello
+	hello := types.Command{Cmd: types.CmdHello, Payload: map[string]string{"name": cfg["name"]}, ID: ""}
+	_ = writeJSON(hello)
+
+	dl := w.api.NewDownloader("./roms")
+	controller := NewController(cfg, w.bipc, dl, writeJSON)
+
+	readDone := make(chan struct{})
+	go func() {
+		defer func() {
+			log.Printf("controller read loop exiting; closing readDone")
+			close(readDone)
+		}()
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("controller read loop: ctx.Done received; exiting")
+				return
+			case cmd, ok := <-cmdCh:
+				if !ok {
+					log.Printf("controller read loop: cmdCh closed; exiting")
+					return
+				}
+				log.Printf("server->client cmd: %s", cmd.Cmd)
+				// protect handler from panics
+				func() {
+					defer func() {
+						if r := recover(); r != nil {
+							log.Printf("controller.Handle panic: %v", r)
+						}
+					}()
+					controller.Handle(ctx, cmd)
+				}()
+			}
+		}
+	}()
+	return readDone
 }

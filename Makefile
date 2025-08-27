@@ -20,6 +20,7 @@ server:
 client:
 	@mkdir -p $(BIN_DIR)
 	$(GO) build -o $(BIN_DIR)/client/bizshuffle-client$(EXT) ./cmd/client
+	@cp server.lua $(BIN_DIR)/client/server.lua
 
 clean:
 	rm -rf $(BIN_DIR)

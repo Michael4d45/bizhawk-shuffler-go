@@ -67,14 +67,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.state.Players[pname] = pl
 				s.state.UpdatedAt = time.Now()
 			}
-			updatedAt := s.state.UpdatedAt
 			s.mu.Unlock()
-			// persist and notify others of the state update asynchronously
-			go func(at time.Time) {
-				_ = s.saveState()
-				log.Printf("pong rtt for %s = %dms", pname, int(rtt.Milliseconds()))
-				s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": at}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-			}(updatedAt)
 		}
 		return nil
 	})
@@ -182,19 +175,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 				close(ch)
 				delete(s.pending, cmd.ID)
-			}
-			s.mu.Unlock()
-			continue
-		}
-		if cmd.Cmd == types.CmdStatus || cmd.Cmd == types.CmdStateUpdate {
-			s.mu.Lock()
-			pname := s.findPlayerNameForClient(client)
-			if pname != "" {
-				if pl, ok := cmd.Payload.(map[string]any); ok {
-					if st, ok := pl["status"].(string); ok {
-						s.ephemeral[pname] = st
-					}
-				}
 			}
 			s.mu.Unlock()
 			continue

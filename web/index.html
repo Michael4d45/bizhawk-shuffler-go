@@ -207,7 +207,6 @@
                   <span class="text-xs px-2 py-0.5 rounded-full"
                     :class="p.has_files ? 'bg-green-600/10 text-green-300' : 'bg-yellow-600/10 text-yellow-300'"
                     x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
-                  <span class="text-xs text-gray-400" x-text="p.ephemeral ? ('status: ' + p.ephemeral) : ''"></span>
                   <span class="text-xs text-gray-400"
                     x-text="p.ping_ms ? ('ping: ' + p.ping_ms + 'ms') : 'no ping'"></span>
                 </div>
@@ -445,9 +444,8 @@
           try {
             const r = await fetch("/state.json");
             const envelope = await r.json();
-            // envelope contains { state: ..., ephemeral: { player: status } }
+            // envelope contains { state: ... }
             const st = envelope && envelope.state ? envelope.state : envelope;
-            const ep = envelope && envelope.ephemeral ? envelope.ephemeral : {};
 
             // Ensure we have an object to update in-place so bindings that reference
             // `state` object identity remain stable where possible.
@@ -488,7 +486,6 @@
                   has_files: p.has_files || p.hasFiles || false,
                   ping_ms: p.ping_ms || p.pingMs || p.PingMs || 0,
                   selectedGame: this.state.players && this.state.players[name] ? this.state.players[name].selectedGame || '' : '',
-                  ephemeral: ''
                 };
               }
               if (JSON.stringify(uiPlayers) !== JSON.stringify(this.state.players || {})) {
@@ -496,19 +493,7 @@
               }
             }
 
-            // 4) ephemeral statuses: merge into existing players if changed
-            if (ep && typeof ep === 'object' && this.state.players) {
-              for (const [pname, stv] of Object.entries(ep)) {
-                if (this.state.players && this.state.players[pname]) {
-                  if (this.state.players[pname].ephemeral !== stv) {
-                    // update only the ephemeral field for that player
-                    this.state.players[pname].ephemeral = stv;
-                  }
-                }
-              }
-            }
-
-            // 5) other top-level keys: shallow-assign only when changed (avoid stomping unchanged UI state)
+            // 4) other top-level keys: shallow-assign only when changed (avoid stomping unchanged UI state)
             for (const [k, v] of Object.entries(st)) {
               if (k === 'main_games' || k === 'games' || k === 'players') continue;
               if (JSON.stringify(this.state[k]) !== JSON.stringify(v)) {
@@ -516,7 +501,7 @@
               }
             }
 
-            // 6) intervals: update interval inputs only if the server provided changed values
+            // 5) intervals: update interval inputs only if the server provided changed values
             const minSecs = st.min_interval_secs || 0;
             const maxSecs = st.max_interval_secs || 0;
             if (this.interval.min !== minSecs) this.interval.min = minSecs;
@@ -860,9 +845,7 @@
             this.ws.onmessage = (ev) => {
               try {
                 const d = JSON.parse(ev.data);
-                if (d.cmd === "state_update" || d.cmd === "ephemeral") {
-                  this.refreshState();
-                } else if (d.cmd === "games_update") {
+                if (d.cmd === "games_update") {
                   // server pushed updated games/main_games; refresh UI state and available files
                   this.refreshFilesList();
                   this.refreshMainGames();

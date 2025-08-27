@@ -44,6 +44,11 @@ type BizhawkIPC struct {
 	pending  map[string]*pendingCmd
 	incoming chan string
 	closed   bool
+	// ready indicates whether the Lua side has completed its HELLO handshake
+	// and the IPC is considered ready to accept commands. Use the provided
+	// accessor methods to read/update this flag.
+	readyMu sync.Mutex
+	ready   bool
 }
 
 // NewBizhawkIPC creates an instance targeting host:port
@@ -374,4 +379,21 @@ func (b *BizhawkIPC) SendResume(ctx context.Context, at *int64) error {
 
 func (b *BizhawkIPC) SendMessage(ctx context.Context, msg string) error {
 	return b.SendCommand(ctx, "MSG", msg)
+}
+
+// SetReady sets the internal ready flag. Callers should use this to mark
+// the IPC as ready/unready when a HELLO/SYNC handshake is observed or when
+// the connection is lost.
+func (b *BizhawkIPC) SetReady(v bool) {
+	b.readyMu.Lock()
+	b.ready = v
+	b.readyMu.Unlock()
+}
+
+// IsReady returns the current ready flag.
+func (b *BizhawkIPC) IsReady() bool {
+	b.readyMu.Lock()
+	v := b.ready
+	b.readyMu.Unlock()
+	return v
 }

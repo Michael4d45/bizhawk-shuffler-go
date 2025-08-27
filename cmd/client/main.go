@@ -8,7 +8,11 @@ import (
 )
 
 func main() {
-	if err := client.Run(os.Args[1:]); err != nil {
+	c, err := client.New(os.Args[1:])
+	if err != nil {
+		log.Fatalf("client init failed: %v", err)
+	}
+	if err := c.Run(); err != nil {
 		log.Fatalf("client failed: %v", err)
 	}
 }
