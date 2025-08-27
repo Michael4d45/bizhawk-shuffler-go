@@ -183,31 +183,6 @@ func Run(args []string) error {
 
 	dl := internal.NewDownloader(serverHTTP, "./roms")
 
-	// Use helper functions in saves.go for upload/download. writeJSON is used
-	// here to emit status notifications like the previous implementation.
-	uploadSave := func(localPath, player, game string) error {
-		log.Printf("uploadSave: %s (player=%s game=%s)", localPath, player, game)
-		_ = writeJSON(types.Command{Cmd: types.CmdStatus, Payload: map[string]string{"status": "uploading"}})
-		err := UploadSave(serverHTTP, localPath, player, game)
-		if err != nil {
-			_ = writeJSON(types.Command{Cmd: types.CmdStatus, Payload: map[string]string{"status": "idle"}})
-			return err
-		}
-		_ = writeJSON(types.Command{Cmd: types.CmdStatus, Payload: map[string]string{"status": "idle"}})
-		return nil
-	}
-
-	downloadSave := func(ctx context.Context, player, filename string) error {
-		log.Printf("downloadSave: player=%s file=%s", player, filename)
-		_ = writeJSON(types.Command{Cmd: types.CmdStatus, Payload: map[string]string{"status": "downloading"}})
-		err := DownloadSave(ctx, serverHTTP, player, filename)
-		if err != nil {
-			return err
-		}
-		_ = writeJSON(types.Command{Cmd: types.CmdStatus, Payload: map[string]string{"status": "idle"}})
-		return nil
-	}
-
 	var bhCmd *exec.Cmd
 	var bhMu sync.Mutex
 	// Debug: log configured bizhawk_path before attempting to start
@@ -259,17 +234,8 @@ func Run(args []string) error {
 		}
 	}()
 	// construct controller and read loop
-	_ = RunControllerLoop(ctx, cfg, wsClient, bipc, dl, writeJSON, uploadSave, downloadSave, &ipcReadyMu, &ipcReady)
+	_ = RunControllerLoop(ctx, cfg, wsClient, bipc, dl, writeJSON, &ipcReadyMu, &ipcReady)
 
-	// Do not exit simply because the controller read loop ended or an
-	// internal component calls the guarded cancel(). Exit when either the
-	// top-level context is cancelled (origCancel was invoked by the signal
-	// handler or another intended shutdown path) or an OS signal is
-	// received. Previously this code blocked on the same `sigs` channel that
-	// the signal handler goroutine also read from, which meant the handler
-	// consumed the first Ctrl+C and the main goroutine waited for a second
-	// one. Use a select so a single Ctrl+C (handled by the goroutine which
-	// calls `origCancel()`) will let Run continue.
 	select {
 	case <-ctx.Done():
 		log.Printf("shutdown: context cancelled; terminating BizHawk and exiting")

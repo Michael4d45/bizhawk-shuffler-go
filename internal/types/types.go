@@ -17,7 +17,6 @@ const (
 	CmdPause
 	CmdResume
 	CmdSwap
-	CmdDownloadSave
 	CmdAck
 	CmdNack
 	CmdStatus
@@ -52,8 +51,6 @@ func (c CommandName) String() string {
 		return "resume"
 	case CmdSwap:
 		return "swap"
-	case CmdDownloadSave:
-		return "download_save"
 	case CmdAck:
 		return "ack"
 	case CmdNack:
@@ -101,8 +98,6 @@ func ParseCommandName(s string) CommandName {
 		return CmdResume
 	case "swap":
 		return CmdSwap
-	case "download_save":
-		return CmdDownloadSave
 	case "ack":
 		return CmdAck
 	case "nack":
@@ -235,18 +230,3 @@ type Player struct {
 	PingMs int `json:"ping_ms,omitempty"`
 }
 
-// SaveMetadata describes a persisted save file. This mirrors the entries
-// produced by the server's ./saves/index.json and documents the canonical
-// save filename convention: saves are stored under ./saves/<player>/<file>
-// and a common convention is to use <game>.state as the filename for a
-// game's save state on upload/download.
-type SaveMetadata struct {
-	Player  string `json:"player"`
-	File    string `json:"file"`
-	Size    int64  `json:"size"`
-	At      int64  `json:"at"` // unix seconds
-	Game    string `json:"game,omitempty"`
-	Mime    string `json:"mime,omitempty"`
-	ModTime string `json:"modtime,omitempty"`
-	URL     string `json:"url,omitempty"`
-}

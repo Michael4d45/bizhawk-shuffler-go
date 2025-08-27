@@ -390,23 +390,6 @@ func LaunchBizHawk(ctx context.Context, cfg map[string]string, httpClient *http.
 		// try to chmod the script/executable to be executable; ignore errors
 		_ = os.Chmod(bp, 0o755)
 	}
-	env := os.Environ()
-	// player_name may be stored under either "player_name" (legacy) or "name" (canonical)
-	if p, ok := cfg["player_name"]; ok && strings.TrimSpace(p) != "" {
-		env = append(env, "BIZHAWK_PLAYER_NAME="+p)
-	} else if p, ok := cfg["name"]; ok && strings.TrimSpace(p) != "" {
-		env = append(env, "BIZHAWK_PLAYER_NAME="+p)
-	}
-	if rd, ok := cfg["rom_dir"]; ok {
-		env = append(env, "BIZHAWK_ROM_DIR="+rd)
-	}
-	if sd, ok := cfg["save_dir"]; ok {
-		env = append(env, "BIZHAWK_SAVE_DIR="+sd)
-	}
-	if ipc, ok := cfg["bizhawk_ipc_port"]; ok && ipc != "" {
-		env = append(env, "BIZHAWK_IPC_PORT="+ipc)
-	}
-	cmd.Env = env
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	if err := cmd.Start(); err != nil {

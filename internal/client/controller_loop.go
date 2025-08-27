@@ -23,7 +23,7 @@ type WSClientLike interface {
 // RunControllerLoop wires the websocket client and bizhawk ipc into the
 // Controller and starts the read loop. It returns a channel that is closed
 // when the read loop exits.
-func RunControllerLoop(ctx context.Context, cfg Config, wsClient WSClientLike, bipc BizhawkIPCLike, dl *internal.Downloader, writeJSON func(types.Command) error, uploadSave func(string, string, string) error, downloadSave func(context.Context, string, string) error, ipcReadyMu *sync.Mutex, ipcReady *bool) <-chan struct{} {
+func RunControllerLoop(ctx context.Context, cfg Config, wsClient WSClientLike, bipc BizhawkIPCLike, dl *internal.Downloader, writeJSON func(types.Command) error, ipcReadyMu *sync.Mutex, ipcReady *bool) <-chan struct{} {
 	// incoming commands channel (buffered to avoid blocking the WS reader)
 	cmdCh := make(chan types.Command, 64)
 	wsClient.RegisterHandler(func(cmd types.Command) {
@@ -42,7 +42,7 @@ func RunControllerLoop(ctx context.Context, cfg Config, wsClient WSClientLike, b
 	hello := types.Command{Cmd: types.CmdHello, Payload: map[string]string{"name": cfg["name"]}, ID: ""}
 	_ = writeJSON(hello)
 
-	controller := NewController(cfg, bipc, dl, writeJSON, uploadSave, downloadSave, ipcReadyMu, ipcReady)
+	controller := NewController(cfg, bipc, dl, writeJSON, ipcReadyMu, ipcReady)
 
 	readDone := make(chan struct{})
 	go func() {

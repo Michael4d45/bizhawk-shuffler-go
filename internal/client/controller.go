@@ -2,11 +2,8 @@ package client
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"log"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -35,14 +32,12 @@ type Controller struct {
 	bipc       BizhawkIPCLike
 	dl         *internal.Downloader
 	writeJSON  func(types.Command) error
-	upload     func(localPath, player, game string) error
-	download   func(ctx context.Context, player, filename string) error
 	ipcReadyMu *sync.Mutex
 	ipcReady   *bool
 }
 
-func NewController(cfg Config, bipc BizhawkIPCLike, dl *internal.Downloader, writeJSON func(types.Command) error, upload func(string, string, string) error, download func(context.Context, string, string) error, ipcReadyMu *sync.Mutex, ipcReady *bool) *Controller {
-	return &Controller{cfg: cfg, bipc: bipc, dl: dl, writeJSON: writeJSON, upload: upload, download: download, ipcReadyMu: ipcReadyMu, ipcReady: ipcReady}
+func NewController(cfg Config, bipc BizhawkIPCLike, dl *internal.Downloader, writeJSON func(types.Command) error, ipcReadyMu *sync.Mutex, ipcReady *bool) *Controller {
+	return &Controller{cfg: cfg, bipc: bipc, dl: dl, writeJSON: writeJSON, ipcReadyMu: ipcReadyMu, ipcReady: ipcReady}
 }
 
 // Handle processes a single incoming command. It launches goroutines for
@@ -51,26 +46,6 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	sendAck := func(id string) { _ = c.writeJSON(types.Command{Cmd: types.CmdAck, ID: id}) }
 	sendNack := func(id, reason string) {
 		_ = c.writeJSON(types.Command{Cmd: types.CmdNack, ID: id, Payload: map[string]string{"reason": reason}})
-	}
-	sendNackDetailed := func(id, shortReason, filePath string, errDetails error) {
-		diag := map[string]any{"reason": shortReason}
-		if filePath != "" {
-			if fi, err := os.Stat(filePath); err == nil {
-				diag["file_exists"] = true
-				diag["file_size"] = fi.Size()
-				diag["file_modtime"] = fi.ModTime().Unix()
-			} else {
-				diag["file_exists"] = false
-				diag["file_stat_error"] = err.Error()
-			}
-		}
-		c.ipcReadyMu.Lock()
-		diag["ipc_ready"] = *c.ipcReady
-		c.ipcReadyMu.Unlock()
-		if errDetails != nil {
-			diag["error_detail"] = errDetails.Error()
-		}
-		_ = c.writeJSON(types.Command{Cmd: types.CmdNack, ID: id, Payload: diag})
 	}
 
 	switch cmd.Cmd {
@@ -137,27 +112,6 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				sendNack(id, "missing game")
 				return
 			}
-			player := c.cfg["name"]
-			saveDir := filepath.Join("./saves", player)
-			if err := os.MkdirAll(saveDir, 0755); err != nil {
-				sendNack(id, "mkdir failed: "+err.Error())
-				return
-			}
-			localSave := filepath.Join(saveDir, game+".state")
-			log.Printf("requesting save to localSave=%s", localSave)
-			if err := c.bipc.SendSave(ctx, localSave); err != nil {
-				log.Printf("SendSave failed: %v", err)
-				sendNackDetailed(id, "save failed", localSave, err)
-			}
-			if err := c.upload(localSave, player, game); err != nil {
-				log.Printf("uploadSave failed: %v", err)
-				if os.IsNotExist(err) {
-					log.Printf("local save missing, continuing without upload: %s", localSave)
-				} else {
-					sendNackDetailed(id, "upload failed", localSave, err)
-					return
-				}
-			}
 			ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 			log.Printf("ensuring ROM present for game=%s", game)
 			if err := c.dl.EnsureFile(ctx2, game); err != nil {
@@ -169,41 +123,6 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			log.Printf("sending swap to lua for game=%s", game)
 			if err := c.bipc.SendSwap(ctx, time.Now().Unix(), game); err != nil {
 				sendNack(id, err.Error())
-				return
-			}
-			sendAck(id)
-		}(cmd.ID)
-	case types.CmdDownloadSave:
-		go func(id string) {
-			player := ""
-			file := ""
-			if m, ok := cmd.Payload.(map[string]any); ok {
-				if p, ok := m["player"].(string); ok {
-					player = p
-				}
-				if f, ok := m["file"].(string); ok {
-					file = f
-				}
-			}
-			if player == "" || file == "" {
-				sendNack(id, "missing player or file")
-				return
-			}
-			ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-			defer cancel2()
-			log.Printf("handling download_save for player=%s file=%s", player, file)
-			if err := c.download(ctx2, player, file); err != nil {
-				if errors.Is(err, ErrNotFound) {
-					log.Printf("download_save: remote save not found for player=%s file=%s; acking without LOAD", player, file)
-					sendAck(id)
-					return
-				}
-				sendNack(id, "download save failed: "+err.Error())
-				return
-			}
-			localPath := filepath.Join("./saves", player, file)
-			if err := c.bipc.SendCommand(ctx2, "LOAD", localPath); err != nil {
-				sendNack(id, "load failed: "+err.Error())
 				return
 			}
 			sendAck(id)

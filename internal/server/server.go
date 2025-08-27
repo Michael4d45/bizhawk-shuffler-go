@@ -50,7 +50,6 @@ func New(stateFile string) *Server {
 	}
 	s.loadState()
 	_ = os.MkdirAll("./files", 0755)
-	s.reindexSaves()
 	go s.schedulerLoop()
 	return s
 }
@@ -68,18 +67,14 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mode", s.apiMode)
 	mux.HandleFunc("/files/", s.handleFiles)
 	mux.HandleFunc("/upload", s.handleUpload)
-	mux.HandleFunc("/upload/state", s.handleSaveUpload)
 	mux.HandleFunc("/files/list.json", s.handleFilesList)
 	mux.HandleFunc("/api/BizhawkFiles.zip", s.handleBizhawkFilesZip)
 	mux.HandleFunc("/state.json", s.handleStateJSON)
-	mux.HandleFunc("/saves/list.json", s.handleSavesList)
 	mux.HandleFunc("/api/games", s.apiGames)
 	mux.HandleFunc("/api/interval", s.apiInterval)
 	mux.HandleFunc("/api/swap_player", s.apiSwapPlayer)
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
-	mux.HandleFunc("/save/upload", s.handleSaveUpload)
-	mux.HandleFunc("/save/", s.handleSaveServe)
 }
 
 // broadcast sends a command to all currently connected players.

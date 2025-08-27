@@ -143,7 +143,9 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 // apiDoSwap triggers an immediate swap
 func (s *Server) apiDoSwap(w http.ResponseWriter, r *http.Request) {
 	go func() {
-		_, _ = s.performSwap()
+		if err := s.performSwap(); err != nil {
+			fmt.Printf("performSwap error: %v\n", err)
+		}
 	}()
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)

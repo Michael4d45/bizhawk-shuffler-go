@@ -98,14 +98,5 @@ func (c Config) EnsureDefaults() error {
 			c["bizhawk_path"] = filepath.Join(installDir, "EmuHawkMono.sh")
 		}
 	}
-	if c["rom_dir"] == "" {
-		c["rom_dir"] = "roms"
-	}
-	if c["save_dir"] == "" {
-		c["save_dir"] = "saves"
-	}
-	if c["bizhawk_ipc_port"] == "" {
-		c["bizhawk_ipc_port"] = "55355"
-	}
 	return nil
 }

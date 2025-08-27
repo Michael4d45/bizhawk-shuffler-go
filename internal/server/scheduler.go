@@ -8,22 +8,15 @@ import (
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
-// SwapOutcome groups results from performSwap so callers can inspect mapping and per-player results
-type SwapOutcome struct {
-	Mapping         map[string]string
-	Results         map[string]string
-	DownloadResults map[string]string
-}
-
 // performSwap dispatches to the appropriate mode implementation.
-func (s *Server) performSwap() (*SwapOutcome, error) {
+func (s *Server) performSwap() error {
 	s.mu.Lock()
 	mode := s.state.Mode
 	s.mu.Unlock()
 
 	handler, err := getGameModeHandler(mode)
 	if err != nil {
-		return nil, err
+		return err
 	}
 
 	return handler.HandleSwap(s)
@@ -79,7 +72,7 @@ func (s *Server) schedulerLoop() {
 		}
 		s.mu.Unlock()
 		go func() {
-			_, err := s.performSwap()
+			err := s.performSwap()
 			if err != nil {
 				fmt.Printf("performSwap error: %v\n", err)
 			}

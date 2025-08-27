@@ -7,20 +7,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
-
-// SaveIndexEntry represents a saved state file for a player and game.
-type SaveIndexEntry struct {
-	Player string `json:"player"`
-	File   string `json:"file"`
-	Size   int64  `json:"size"`
-	At     int64  `json:"at"`
-	Game   string `json:"game"`
-}
 
 // loadState loads persisted server state from disk if present.
 func (s *Server) loadState() {
@@ -110,33 +100,4 @@ func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewEncoder(w).Encode(out); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}
-}
-
-// reindexSaves rebuilds ./saves/index.json from on-disk files.
-func (s *Server) reindexSaves() {
-	idxPath := filepath.Join("./saves", "index.json")
-	entries := []SaveIndexEntry{}
-	_ = filepath.Walk("./saves", func(p string, info os.FileInfo, err error) error {
-		if err != nil || info.IsDir() {
-			return nil
-		}
-		rel, _ := filepath.Rel("./saves", p)
-		parts := strings.SplitN(rel, string(filepath.Separator), 2)
-		if len(parts) == 2 {
-			entries = append(entries, SaveIndexEntry{Player: parts[0], File: parts[1], Size: info.Size(), At: info.ModTime().Unix(), Game: strings.TrimSuffix(parts[1], ".state")})
-		}
-		return nil
-	})
-	if err := os.MkdirAll(filepath.Dir(idxPath), 0755); err != nil {
-		return
-	}
-	ib, err := json.MarshalIndent(entries, "", "  ")
-	if err != nil {
-		return
-	}
-	tmp := idxPath + ".tmp"
-	if err := os.WriteFile(tmp, ib, 0644); err != nil {
-		return
-	}
-	_ = os.Rename(tmp, idxPath)
 }

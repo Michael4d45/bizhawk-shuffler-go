@@ -294,23 +294,6 @@ func (s *Server) sendToPlayer(player string, cmd types.Command) error {
 	}
 }
 
-// waitForResult waits for result channel with timeout.
-func (s *Server) waitForResult(cmdID string, timeout time.Duration) (string, error) {
-	ch := make(chan string, 1)
-	s.mu.Lock()
-	s.pending[cmdID] = ch
-	s.mu.Unlock()
-	select {
-	case res := <-ch:
-		return res, nil
-	case <-time.After(timeout):
-		s.mu.Lock()
-		delete(s.pending, cmdID)
-		s.mu.Unlock()
-		return "", fmt.Errorf("timeout waiting for result %s", cmdID)
-	}
-}
-
 // sendAndWait convenience wrapper that registers pending and waits for ack/nack.
 func (s *Server) sendAndWait(player string, cmd types.Command, timeout time.Duration) (string, error) {
 	ch := make(chan string, 1)
