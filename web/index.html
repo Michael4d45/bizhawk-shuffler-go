@@ -134,9 +134,6 @@
           </template>
         </div>
         <div class="mt-3 flex gap-2">
-          <button @click="refreshGamesFromFiles()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-            Refresh
-          </button>
           <button @click="saveGames()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
             Save
           </button>
@@ -342,7 +339,7 @@
           { label: "Start", path: "/api/start", class: "bg-green-500 text-black" },
           { label: "Pause", path: "/api/pause", class: "bg-slate-700" },
           { label: "Do Swap", path: "/api/do_swap", class: "bg-slate-700" },
-          { label: "Toggle Swaps", path: "/api/toggle_swaps", class: "bg-slate-700" },
+          { label: "Auto Swaps", path: "/api/toggle_swaps", class: "bg-slate-700" },
           { label: "Clear Saves", path: "/api/clear_saves", class: "bg-orange-500 text-black" },
           { label: "Reset", path: "/api/reset", class: "bg-slate-700" },
         ],
@@ -614,20 +611,6 @@
             }, {});
           } catch (e) {
             this.log("saves load error: " + e.message);
-          }
-        },
-        async refreshGamesFromFiles() {
-          try {
-            const r = await fetch("/files/list.json");
-            const raw = await r.json();
-            // raw may be an array of strings or objects {name,size}
-            this.state.games = (raw || []).map(f => {
-              if (!f) return '';
-              if (typeof f === 'string') return f;
-              return f.name || f.Name || f.Name?.toString() || '';
-            }).filter(Boolean);
-          } catch (e) {
-            this.log("refresh games err: " + e.message);
           }
         },
         async refreshFilesList() {
