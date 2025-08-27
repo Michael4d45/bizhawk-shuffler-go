@@ -142,38 +142,6 @@
           </button>
         </div>
       </section>
-
-      <!-- Saves -->
-      <section
-        :class="showSavesExpanded ? 'flex-1 flex flex-col bg-card border border-white/10 p-4 rounded-lg shadow' : 'bg-card border border-white/10 p-4 rounded-lg shadow'"
-        class="transition-all">
-        <div class="flex justify-between items-center">
-          <h2 class="text-sm text-gray-400">Saves</h2>
-          <button @click="toggleSection('saves')" class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
-            <span x-text="showSavesExpanded ? 'Collapse' : 'Expand'"></span>
-          </button>
-        </div>
-        <div
-          :class="showSavesExpanded ? 'mt-2 flex-1 overflow-auto text-sm space-y-2' : 'mt-2 text-sm max-h-40 overflow-auto space-y-2'">
-          <template x-for="(files, player) in saves" :key="player">
-            <div>
-              <strong x-text="player"></strong>
-              <ul class="ml-4 list-disc text-gray-400">
-                <template x-for="s in files" :key="s.file">
-                  <li>
-                    <a class="hover:underline"
-                      :href="`/save/${encodeURIComponent(s.player)}/${encodeURIComponent(s.file)}`" x-text="s.file"></a>
-                    <span class="text-xs text-gray-500" x-text="`(${s.size} bytes)`"></span>
-                  </li>
-                </template>
-              </ul>
-            </div>
-          </template>
-        </div>
-        <button @click="loadSaves()" class="mt-3 px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-          Refresh Saves
-        </button>
-      </section>
     </div>
 
     <div class="space-y-6 col-span-2">
@@ -412,7 +380,6 @@
           this.loaded = true;
           await this.refreshFilesList();
           await this.refreshMainGames();
-          this.loadSaves();
           this.startWS();
           // load server mode
           this.fetchMode();
@@ -423,6 +390,18 @@
           const rafTick = () => {
             this.nowMs = Date.now();
             // continue the loop
+            // If a swap is due, call pausedRefreshState() once. Use _swapDueHandled
+            // to avoid repeated calls while the RAF loop runs at high frequency.
+            if (this.state && this.state.next_swap_at && this.nowMs / 1000 >= this.state.next_swap_at) {
+              if (!this._swapDueHandled) {
+                this._swapDueHandled = true;
+                this.pausedRefreshState(700);
+              }
+            } else {
+              // reset the flag when we're not currently past the swap time so
+              // the next swap event can trigger the handler again
+              this._swapDueHandled = false;
+            }
             this._rafId = requestAnimationFrame(rafTick);
           };
           // start the loop
@@ -431,6 +410,10 @@
           window.addEventListener('beforeunload', () => {
             if (this._rafId) cancelAnimationFrame(this._rafId);
           });
+        },
+        async pausedRefreshState(ms) {
+          await window.sleep(ms);
+          await this.refreshState();
         },
         log(msg) {
           this.logs.unshift({
@@ -583,19 +566,6 @@
             this.log("err " + e.message);
           } finally {
             this.loadingAction = null;
-          }
-        },
-        async loadSaves() {
-          try {
-            const r = await fetch("/saves/list.json");
-            const list = await r.json();
-            this.saves = list.reduce((acc, s) => {
-              acc[s.player] = acc[s.player] || [];
-              acc[s.player].push(s);
-              return acc;
-            }, {});
-          } catch (e) {
-            this.log("saves load error: " + e.message);
           }
         },
         async refreshFilesList() {
@@ -762,8 +732,7 @@
             this.log("swap_player err " + e.message);
           } finally {
             this.loadingAction = null;
-            await window.sleep(100);
-            await this.refreshState();
+            await this.pausedRefreshState(100);
           }
         },
         async swapAll(game) {

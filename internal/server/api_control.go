@@ -91,7 +91,6 @@ func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
 	if err := s.saveState(); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
-	s.broadcast(types.Command{Cmd: types.CmdToggleSwaps, Payload: map[string]any{"enabled": s.state.SwapEnabled, "next_swap_at": s.state.NextSwapAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
@@ -114,19 +113,14 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 	}
 	if r.Method == http.MethodPost {
 		var b struct {
-			Mode string `json:"mode"`
+			Mode types.GameMode `json:"mode"`
 		}
 		if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		gameMode := types.ParseGameMode(b.Mode)
-		if gameMode == types.GameModeUnknown {
-			http.Error(w, "invalid game mode: "+b.Mode, http.StatusBadRequest)
-			return
-		}
 		s.mu.Lock()
-		s.state.Mode = gameMode
+		s.state.Mode = b.Mode
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
 		if err := s.saveState(); err != nil {

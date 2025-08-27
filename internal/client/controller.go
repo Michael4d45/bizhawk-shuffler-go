@@ -75,14 +75,6 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			sendAck(id)
 		}(cmd.ID)
-	case types.CmdResume:
-		go func(id string) {
-			if err := c.bipc.SendResume(ctx, nil); err != nil {
-				sendNack(id, err.Error())
-				return
-			}
-			sendAck(id)
-		}(cmd.ID)
 	case types.CmdSwap:
 		go func(id string) {
 			game := ""

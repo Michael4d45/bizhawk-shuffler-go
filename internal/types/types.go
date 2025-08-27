@@ -2,176 +2,71 @@ package types
 
 import (
 	"encoding/json"
-	"strings"
 	"time"
 )
 
-// CommandName enumerates allowed websocket command names.
-type CommandName int
+// CommandName enumerates allowed websocket command names. Use string constants
+// so code can use the literal values directly without parsing.
+type CommandName string
 
 const (
-	CmdUnknown CommandName = iota
-	CmdHello
-	CmdPing
-	CmdStart
-	CmdPause
-	CmdResume
-	CmdSwap
-	CmdAck
-	CmdNack
-	CmdStatus
-	CmdGamesUpdate
-	CmdGamesUpdateAck
-	CmdStateUpdate
-	CmdClearSaves
-	CmdReset
-	CmdToggleSwaps
+	CmdHello          CommandName = "hello"
+	CmdPing           CommandName = "ping"
+	CmdStart          CommandName = "start"
+	CmdPause          CommandName = "pause"
+	CmdSwap           CommandName = "swap"
+	CmdAck            CommandName = "ack"
+	CmdNack           CommandName = "nack"
+	CmdStatus         CommandName = "status"
+	CmdGamesUpdate    CommandName = "games_update"
+	CmdGamesUpdateAck CommandName = "games_update_ack"
+	CmdStateUpdate    CommandName = "state_update"
+	CmdClearSaves     CommandName = "clear_saves"
+	CmdReset          CommandName = "reset"
 )
 
-// GameMode enumerates the available game swapping modes.
-type GameMode int
+// GameMode enumerates the available game swapping modes. Use string constants
+// so callers can use the literal values directly.
+type GameMode string
 
 const (
-	GameModeUnknown GameMode = iota
 	// GameModeSync - all players play the same game and swap simultaneously (no saves uploaded/downloaded)
-	GameModeSync
+	GameModeSync GameMode = "sync"
 	// GameModeSave - players play different games and perform save upload/download orchestration on swap
-	GameModeSave
+	GameModeSave GameMode = "save"
 )
 
 func (c CommandName) String() string {
-	switch c {
-	case CmdHello:
-		return "hello"
-	case CmdStart:
-		return "start"
-	case CmdPause:
-		return "pause"
-	case CmdResume:
-		return "resume"
-	case CmdSwap:
-		return "swap"
-	case CmdAck:
-		return "ack"
-	case CmdNack:
-		return "nack"
-	case CmdStatus:
-		return "status"
-	case CmdGamesUpdate:
-		return "games_update"
-	case CmdGamesUpdateAck:
-		return "games_update_ack"
-	case CmdStateUpdate:
-		return "state_update"
-	case CmdClearSaves:
-		return "clear_saves"
-	case CmdReset:
-		return "reset"
-	case CmdToggleSwaps:
-		return "toggle_swaps"
-	default:
-		return "unknown"
-	}
+	return string(c)
 }
 
 func (g GameMode) String() string {
-	switch g {
-	case GameModeSync:
-		return "sync"
-	case GameModeSave:
-		return "save"
-	default:
-		return "unknown"
-	}
+	return string(g)
 }
 
-// ParseCommandName converts a string to the CommandName enum (case-insensitive).
-func ParseCommandName(s string) CommandName {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "hello":
-		return CmdHello
-	case "start":
-		return CmdStart
-	case "pause":
-		return CmdPause
-	case "resume":
-		return CmdResume
-	case "swap":
-		return CmdSwap
-	case "ack":
-		return CmdAck
-	case "nack":
-		return CmdNack
-	case "status":
-		return CmdStatus
-	case "games_update":
-		return CmdGamesUpdate
-	case "games_update_ack":
-		return CmdGamesUpdateAck
-	case "state_update":
-		return CmdStateUpdate
-	case "clear_saves":
-		return CmdClearSaves
-	case "reset":
-		return CmdReset
-	case "toggle_swaps":
-		return CmdToggleSwaps
-	default:
-		return CmdUnknown
-	}
-}
-
-// ParseGameMode converts a string to the GameMode enum (case-insensitive).
-func ParseGameMode(s string) GameMode {
-	switch strings.ToLower(strings.TrimSpace(s)) {
-	case "sync", "":
-		return GameModeSync
-	case "save":
-		return GameModeSave
-	default:
-		return GameModeUnknown
-	}
-}
-
-// MarshalJSON encodes the enum as a JSON string (the wire format expects a string)
 func (c CommandName) MarshalJSON() ([]byte, error) {
-	return json.Marshal(c.String())
+	return json.Marshal(string(c))
 }
 
-// UnmarshalJSON parses a JSON string into the enum.
 func (c *CommandName) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
-		// if not a string, try integer
-		var iv int
-		if err2 := json.Unmarshal(b, &iv); err2 == nil {
-			*c = CommandName(iv)
-			return nil
-		}
 		return err
 	}
-	*c = ParseCommandName(s)
+	*c = CommandName(s)
 	return nil
 }
 
-// MarshalJSON encodes the GameMode enum as a JSON string
 func (g GameMode) MarshalJSON() ([]byte, error) {
-	return json.Marshal(g.String())
+	return json.Marshal(string(g))
 }
 
-// UnmarshalJSON parses a JSON string into the GameMode enum.
 func (g *GameMode) UnmarshalJSON(b []byte) error {
 	var s string
 	if err := json.Unmarshal(b, &s); err != nil {
-		// if not a string, try integer
-		var iv int
-		if err2 := json.Unmarshal(b, &iv); err2 == nil {
-			*g = GameMode(iv)
-			return nil
-		}
 		return err
 	}
-	*g = ParseGameMode(s)
+	*g = GameMode(s)
 	return nil
 }
 
