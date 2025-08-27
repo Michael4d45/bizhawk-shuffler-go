@@ -5,8 +5,6 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os"
-	"path/filepath"
 
 	"github.com/michael4d45/bizshuffle/internal/server"
 )
@@ -16,9 +14,7 @@ func main() {
 	port := flag.Int("port", 8080, "port to bind")
 	flag.Parse()
 
-	root, _ := os.Getwd()
-	stateFile := filepath.Join(root, "state.json")
-	s := server.New(stateFile)
+	s := server.New()
 
 	chosenHost := *host
 	if chosenHost == "127.0.0.1" {

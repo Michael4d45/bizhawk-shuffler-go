@@ -14,7 +14,7 @@ import (
 
 // loadState loads persisted server state from disk if present.
 func (s *Server) loadState() {
-	f, err := os.Open(s.stateFile)
+	f, err := os.Open("state.json")
 	if err != nil {
 		log.Printf("state file not found, using defaults: %v", err)
 		return
@@ -25,7 +25,7 @@ func (s *Server) loadState() {
 	dec := json.NewDecoder(f)
 	dec.DisallowUnknownFields()
 	if err := dec.Decode(&tmp); err != nil {
-		log.Printf("failed to decode state file %s: %v", s.stateFile, err)
+		log.Printf("failed to decode state file %s: %v", "state.json", err)
 		return
 	}
 	if tmp.Games == nil {
@@ -43,7 +43,7 @@ func (s *Server) loadState() {
 	s.mu.Lock()
 	s.state = tmp
 	s.mu.Unlock()
-	log.Printf("loaded state from %s", s.stateFile)
+	log.Printf("loaded state from %s", "state.json")
 }
 
 // saveState writes current state atomically to disk.
@@ -51,7 +51,7 @@ func (s *Server) saveState() error {
 	s.mu.Lock()
 	st := s.state
 	s.mu.Unlock()
-	dir := filepath.Dir(s.stateFile)
+	dir := filepath.Dir("state.json")
 	if dir == "" || dir == "." {
 		dir = "."
 	}
@@ -62,8 +62,8 @@ func (s *Server) saveState() error {
 	enc := json.NewEncoder(tmpFile)
 	enc.SetIndent("", "  ")
 	if err := enc.Encode(&st); err != nil {
-		if err := tmpFile.Close(); err != nil {
-			_ = err
+		if err2 := tmpFile.Close(); err2 != nil {
+			log.Printf("close tmp file error: %v", err2)
 		}
 		_ = os.Remove(tmpFile.Name())
 		return err
@@ -74,7 +74,7 @@ func (s *Server) saveState() error {
 		log.Printf("close tmp file error: %v", err)
 		return err
 	}
-	if err := os.Rename(tmpFile.Name(), s.stateFile); err != nil {
+	if err := os.Rename(tmpFile.Name(), "state.json"); err != nil {
 		_ = os.Remove(tmpFile.Name())
 		log.Printf("rename tmp file error: %v", err)
 		return err

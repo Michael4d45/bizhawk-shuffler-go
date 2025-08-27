@@ -22,14 +22,13 @@ type Server struct {
 	conns       map[*websocket.Conn]*wsClient
 	players     map[string]*wsClient
 	upgrader    websocket.Upgrader
-	stateFile   string
 	pending     map[string]chan string
 	ephemeral   map[string]string
 	schedulerCh chan struct{}
 }
 
 // New creates and initializes a Server, loading state and starting the scheduler.
-func New(stateFile string) *Server {
+func New() *Server {
 	s := &Server{
 		state: types.ServerState{
 			Running:     false,
@@ -43,7 +42,6 @@ func New(stateFile string) *Server {
 		conns:       make(map[*websocket.Conn]*wsClient),
 		players:     make(map[string]*wsClient),
 		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		stateFile:   stateFile,
 		pending:     make(map[string]chan string),
 		ephemeral:   make(map[string]string),
 		schedulerCh: make(chan struct{}, 1),
