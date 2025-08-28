@@ -41,11 +41,11 @@ func (h *SyncModeHandler) HandleSwap() error {
 		if player.Connected {
 			payload := map[string]string{"game": game}
 			// Notify connected players about the game change
-			h.server.players[name].sendCh <- types.Command{
+			h.server.sendAndWait(name, types.Command{
 				Cmd:     types.CmdSwap,
 				Payload: payload,
 				ID:      fmt.Sprintf("swap-%d", time.Now().UnixNano()),
-			}
+			}, 20*time.Second)
 		}
 	}
 	h.server.state.UpdatedAt = time.Now()

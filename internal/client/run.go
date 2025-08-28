@@ -32,6 +32,14 @@ type Client struct {
 
 // New creates and initializes a Client from CLI args.
 func New(args []string) (*Client, error) {
+	// ensure ./roms and ./saves dirs exist
+	if err := os.MkdirAll("./roms", 0755); err != nil {
+		return nil, fmt.Errorf("failed to create roms directory: %w", err)
+	}
+	if err := os.MkdirAll("./saves", 0755); err != nil {
+		return nil, fmt.Errorf("failed to create saves directory: %w", err)
+	}
+
 	var verbose bool
 	var serverFlag string
 	fs := flag.NewFlagSet("client", flag.ContinueOnError)

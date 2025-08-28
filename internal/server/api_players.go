@@ -156,10 +156,13 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 	}
 	s.mu.Lock()
 	players := []string{}
-	for name := range s.state.Players {
+	for name, player := range s.state.Players {
 		players = append(players, name)
+		player.Game = b.Game
+		s.state.Players[name] = player
 	}
 	s.mu.Unlock()
+	_ = s.saveState()
 	results := map[string]string{}
 	for _, p := range players {
 		cmdID := fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), p)
