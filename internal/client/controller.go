@@ -206,15 +206,15 @@ func (c *Controller) EnsureSaveState(instanceID string) {
 		log.Println("No instanceID provided, skipping save state orchestration")
 		return
 	}
-	
+
 	log.Println("Ensuring save state for instanceID:", instanceID)
-	
+
 	// Create saves directory if it doesn't exist
 	if err := os.MkdirAll("./saves", 0755); err != nil {
 		log.Printf("Failed to create saves directory: %v", err)
 		return
 	}
-	
+
 	// 1. Upload old instance if it exists (current player's save state)
 	if c.bipc.instanceID != "" && c.bipc.instanceID != instanceID {
 		go func() {
@@ -226,7 +226,7 @@ func (c *Controller) EnsureSaveState(instanceID string) {
 			}
 		}()
 	}
-	
+
 	// 2. Download new instance if it exists
 	go func() {
 		err := c.api.EnsureSaveState(instanceID)
