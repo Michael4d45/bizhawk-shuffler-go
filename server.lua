@@ -176,20 +176,18 @@ local function get_current_canonical_game()
     end
     return nil
 end
+
+local function do_save()
+    save_state(get_save_path())
+end
+
 local function do_swap(target_game)
     -- save current
     local cur_id = get_current_canonical_game()
     local target_id = canonical_game_id_from_filename(target_game) or canonical_game_id_from_display(target_game)
 
     -- save current
-    local cur = gameinfo.getromname()
-    cur = sanitize_filename(cur)
-    if cur and cur ~= "" and cur:lower() ~= "null" then
-        local path = SAVE_DIR .. "/" .. cur .. ".state"
-        pcall(function()
-            save_state(path)
-        end)
-    end
+    do_save()
 
     if target_id and cur_id and target_id == cur_id then
         -- same canonical game; skip reload
@@ -218,10 +216,6 @@ local function do_start(game)
     local rom_path = ROM_DIR .. "/" .. game
     load_rom(rom_path)
     load_state_if_exists()
-end
-
-local function do_save()
-    save_state(get_save_path())
 end
 
 local function do_load(path)
