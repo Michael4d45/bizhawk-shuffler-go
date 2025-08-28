@@ -50,6 +50,12 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			b, _ := json.Marshal(gi)
 			var instances []types.GameSwapInstance
 			if err := json.Unmarshal(b, &instances); err == nil {
+				// Initialize FileState for new instances
+				for i := range instances {
+					if instances[i].FileState == "" {
+						instances[i].FileState = types.FileStateNone
+					}
+				}
 				s.state.GameSwapInstances = instances
 			}
 		}

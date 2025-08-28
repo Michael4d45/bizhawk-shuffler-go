@@ -36,12 +36,28 @@ const (
 	GameModeSave GameMode = "save"
 )
 
+// FileState tracks the state of save files for instances
+type FileState string
+
+const (
+	// FileStateNone - no save file exists
+	FileStateNone FileState = "none"
+	// FileStatePending - save file operation is in progress
+	FileStatePending FileState = "pending"
+	// FileStateReady - save file is available and ready
+	FileStateReady FileState = "ready"
+)
+
 func (c CommandName) String() string {
 	return string(c)
 }
 
 func (g GameMode) String() string {
 	return string(g)
+}
+
+func (f FileState) String() string {
+	return string(f)
 }
 
 func (c CommandName) MarshalJSON() ([]byte, error) {
@@ -67,6 +83,19 @@ func (g *GameMode) UnmarshalJSON(b []byte) error {
 		return err
 	}
 	*g = GameMode(s)
+	return nil
+}
+
+func (f FileState) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(f))
+}
+
+func (f *FileState) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*f = FileState(s)
 	return nil
 }
 
@@ -127,6 +156,7 @@ type Player struct {
 }
 
 type GameSwapInstance struct {
-	ID   string `json:"id"`
-	Game string `json:"game"`
+	ID        string    `json:"id"`
+	Game      string    `json:"game"`
+	FileState FileState `json:"file_state"`
 }
