@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -201,12 +202,42 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 }
 
 func (c *Controller) EnsureSaveState(instanceID string) {
+	if instanceID == "" {
+		log.Println("No instanceID provided, skipping save state orchestration")
+		return
+	}
+	
 	log.Println("Ensuring save state for instanceID:", instanceID)
-	// if instanceID == "" {
-	// 	return
-	// }
-	// go func() {
-	// 	c.api.UploadSaveState(c.bipc.instanceID)
-	// }()
-	// c.api.EnsureSaveState(instanceID)
+	
+	// Create saves directory if it doesn't exist
+	if err := os.MkdirAll("./saves", 0755); err != nil {
+		log.Printf("Failed to create saves directory: %v", err)
+		return
+	}
+	
+	// 1. Upload old instance if it exists (current player's save state)
+	if c.bipc.instanceID != "" && c.bipc.instanceID != instanceID {
+		go func() {
+			err := c.api.UploadSaveState(c.bipc.instanceID)
+			if err != nil {
+				log.Printf("Failed to upload old save state for instance %s: %v", c.bipc.instanceID, err)
+			} else {
+				log.Printf("Successfully uploaded save state for instance %s", c.bipc.instanceID)
+			}
+		}()
+	}
+	
+	// 2. Download new instance if it exists
+	go func() {
+		err := c.api.EnsureSaveState(instanceID)
+		if err != nil {
+			if err == ErrNotFound {
+				log.Printf("Save state for instance %s not found on server (this is OK, Lua will create one)", instanceID)
+			} else {
+				log.Printf("Failed to download save state for instance %s: %v", instanceID, err)
+			}
+		} else {
+			log.Printf("Successfully downloaded save state for instance %s", instanceID)
+		}
+	}()
 }

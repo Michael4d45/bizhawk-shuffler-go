@@ -49,6 +49,7 @@ func New() *Server {
 	}
 	s.loadState()
 	_ = os.MkdirAll("./files", 0755)
+	_ = os.MkdirAll("./saves", 0755)
 	go s.schedulerLoop()
 	return s
 }
@@ -75,6 +76,9 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/swap_player", s.apiSwapPlayer)
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
+	// Save state management endpoints
+	mux.HandleFunc("/save/upload", s.handleSaveUpload)
+	mux.HandleFunc("/save/", s.handleSaveDownload)
 }
 
 // broadcast sends a command to all currently connected players.
