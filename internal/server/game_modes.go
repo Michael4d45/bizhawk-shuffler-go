@@ -105,7 +105,7 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	h.server.state.UpdatedAt = time.Now()
 	h.server.mu.Unlock()
 
-	_ = h.server.sendSwap(player, p.Game, p.InstanceID)
+	h.server.sendSwap(player, p.Game, p.InstanceID)
 	return nil
 }
 
@@ -188,7 +188,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 			}
 		}
 		if inst != nil && inst.Game != "" {
-			_ = h.server.sendSwap(name, p.Game, p.InstanceID)
+			h.server.sendSwap(name, p.Game, p.InstanceID)
 		}
 	}
 	return nil
@@ -273,11 +273,11 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	// Set instance state to pending before upload starts
 	if foundPlayer != "" {
 		h.server.setInstanceFileState(foundInst.ID, types.FileStatePending)
-		_ = h.server.sendSwap(foundPlayer, "", "")
+		h.server.sendSwap(foundPlayer, "", "")
 	} else {
 		h.server.setInstanceFileState(foundInst.ID, types.FileStateNone)
 	}
-	_ = h.server.sendSwap(player, foundInst.Game, foundInst.ID)
+	h.server.sendSwap(player, foundInst.Game, foundInst.ID)
 	return nil
 }
 
