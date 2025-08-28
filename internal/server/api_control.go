@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"net/http"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -72,8 +71,6 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 		_ = os.Rename(savesDir, trash)
 	}
 	_ = os.MkdirAll(savesDir, 0755)
-	indexPath := filepath.Join(savesDir, "index.json")
-	_ = os.WriteFile(indexPath, []byte("[]"), 0644)
 	s.broadcast(types.Command{Cmd: types.CmdClearSaves, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)

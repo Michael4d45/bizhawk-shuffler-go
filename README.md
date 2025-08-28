@@ -75,8 +75,7 @@ File transfer
 
 Save filename convention
 
-- Saves are stored under `./saves/<player>/<file>` on the server.
-- The canonical filename convention used by the server/client is `<game>.state` for a game's save state. For example, a save for game "mario" uploaded by player "alice" would be stored as `./saves/alice/mario.state` and indexed in `./saves/index.json`.
+- Saves are stored under `./saves/<file>` on the server..
 - Upload handlers honor an explicit `filename` form field; otherwise the server will fall back to the uploaded filename or `<game>.state` when `game` is provided.
 
 Persistence
