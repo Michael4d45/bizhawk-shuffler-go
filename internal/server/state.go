@@ -31,6 +31,12 @@ func (s *Server) loadState() {
 	if tmp.GameSwapInstances == nil {
 		tmp.GameSwapInstances = []types.GameSwapInstance{}
 	}
+	// Initialize FileState for existing instances that don't have it set
+	for i, instance := range tmp.GameSwapInstances {
+		if instance.FileState == "" {
+			tmp.GameSwapInstances[i].FileState = types.FileStateNone
+		}
+	}
 	if tmp.Games == nil {
 		tmp.Games = []string{}
 	}
