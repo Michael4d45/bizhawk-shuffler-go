@@ -14,8 +14,8 @@ type GameModeHandler interface {
 	// HandleSwap performs the swap operation for this game mode
 	HandleSwap() error
 
-	// GetCurrentGameForPlayer determines what game a player should be playing in this mode
-	GetCurrentGameForPlayer(player string) string
+	// GetPlayer determines what game a player should be playing in this mode
+	GetPlayer(player string) types.Player
 
 	SetupState() error
 	// HandlePlayerSwap updates server state for a player-level swap (assign instances, set player->game mapping, etc)
@@ -66,21 +66,23 @@ func (h *SyncModeHandler) randomGame() string {
 	return games[rand.Intn(len(games))]
 }
 
-func (h *SyncModeHandler) GetCurrentGameForPlayer(player string) string {
+func (h *SyncModeHandler) GetPlayer(player string) types.Player {
 	h.server.mu.Lock()
 	defer h.server.mu.Unlock()
 
+	// If any player already has a game assigned, return that game for the requesting player.
 	for _, pp := range h.server.state.Players {
 		if pp.Game != "" {
-			return pp.Game
+			return types.Player{Name: player, Game: pp.Game, InstanceID: pp.InstanceID}
 		}
 	}
 
+	// Otherwise pick a random game from the available games
 	if len(h.server.state.Games) > 0 {
-		return h.randomGame()
+		return types.Player{Name: player, Game: h.randomGame()}
 	}
 
-	return ""
+	return types.Player{Name: player}
 }
 
 func (h *SyncModeHandler) SetupState() error {
@@ -186,15 +188,33 @@ func (h *SaveModeHandler) HandleSwap() error {
 	return nil
 }
 
-func (h *SaveModeHandler) GetCurrentGameForPlayer(player string) string {
-	// In save mode, return first instance game if available, else fallbacks
+func (h *SaveModeHandler) GetPlayer(player string) types.Player {
+	// In save mode, prefer returning the first unassigned game instance.
+	// We consider an instance unassigned when no player currently has its InstanceID.
+	h.server.mu.Lock()
+	defer h.server.mu.Unlock()
+
 	if len(h.server.state.GameSwapInstances) > 0 {
-		return h.server.state.GameSwapInstances[0].Game
+		// build a set of assigned instance IDs
+		assigned := map[string]struct{}{}
+		for _, p := range h.server.state.Players {
+			if p.InstanceID != "" {
+				assigned[p.InstanceID] = struct{}{}
+			}
+		}
+		// find first instance that is not assigned
+		for _, inst := range h.server.state.GameSwapInstances {
+			if _, ok := assigned[inst.ID]; !ok {
+				return types.Player{
+					Name:       player,
+					Game:       inst.Game,
+					InstanceID: inst.ID,
+				}
+			}
+		}
 	}
-	if len(h.server.state.MainGames) > 0 {
-		return h.server.state.MainGames[0].File
-	}
-	return ""
+
+	return types.Player{Name: player}
 }
 
 func (h *SaveModeHandler) SetupState() error {
@@ -244,9 +264,9 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 
 	_ = h.server.saveState()
 
-	h.server.sendSwap(player, foundInst.Game, foundInst.ID)
+	_ = h.server.sendSwap(player, foundInst.Game, foundInst.ID)
 	if foundPlayer != "" {
-		h.server.sendSwap(foundPlayer, "", "")
+		_ = h.server.sendSwap(foundPlayer, "", "")
 	}
 	return nil
 }

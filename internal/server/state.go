@@ -106,13 +106,15 @@ func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) GetGameForPlayer(player string) string {
+func (s *Server) GetGameForPlayer(player string) types.Player {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	// Use direct map lookup by player key. This is deterministic and
 	// avoids relying on the Player.Name field matching the map key.
 	if pp, ok := s.state.Players[player]; ok {
-		return pp.Game
+		return pp
 	}
-	return ""
+	return types.Player{
+		Name: player,
+	}
 }

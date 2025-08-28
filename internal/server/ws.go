@@ -206,21 +206,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if v, ok := pl["name"].(string); ok {
 					name = v
 				}
-				game := s.currentGameForPlayer(name)
+				player := s.currentPlayer(name)
+				player.Connected = true
 
 				s.mu.Lock()
-
-				s.state.Players[name] = types.Player{
-					Name:      name,
-					Connected: true,
-					Game:      game,
-				}
+				s.state.Players[name] = player
 				s.conns[c] = client
 				s.players[name] = client
 
 				instances := append([]types.GameSwapInstance{}, s.state.GameSwapInstances...)
 				mainGames := append([]types.GameEntry{}, s.state.MainGames...)
-
 				s.mu.Unlock()
 
 				if err := s.saveState(); err != nil {
@@ -242,8 +237,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					fmt.Printf("[WARN] Failed to send CmdGamesUpdate to %s (channel full?)\n", name)
 				}
 
-				if game != "" {
-					startPayload := map[string]any{"game": game}
+				if player.Game != "" {
+					startPayload := map[string]any{
+						"game":       player.Game,
+						"instanceID": player.InstanceID,
+					}
 					select {
 					case client.sendCh <- types.Command{
 						Cmd:     types.CmdStart,

@@ -146,9 +146,12 @@ end
 local function get_save_path()
     local cur = gameinfo.getromname()
     cur = sanitize_filename(cur)
-    local name = instance_id
+    local name = ""
     if cur and cur ~= "" and cur:lower() ~= "null" then
         name = cur
+    end
+    if instance_id and instance_id ~= "" then
+        name = instance_id
     end
 
     if not name or name == "" or name:lower() == "null" then

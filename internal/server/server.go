@@ -139,13 +139,12 @@ func (s *Server) UpdatePortIfChanged(port int) {
 // PersistedPort returns the persisted port if present.
 func (s *Server) PersistedPort() int { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Port }
 
-func (s *Server) currentGameForPlayer(player string) string {
-	game := s.GetGameForPlayer(player)
-	if game != "" {
-		return game
+func (s *Server) currentPlayer(player string) types.Player {
+	playerInfo := s.GetGameForPlayer(player)
+	if playerInfo.Game != "" {
+		return playerInfo
 	}
-
 	handler := s.GetGameModeHandler()
-	game = handler.GetCurrentGameForPlayer(player)
-	return game
+	playerInfo = handler.GetPlayer(player)
+	return playerInfo
 }
