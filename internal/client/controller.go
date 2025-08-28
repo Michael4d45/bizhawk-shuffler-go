@@ -49,7 +49,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			if game == "" {
 				ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
 				defer cancel2()
-				if err := c.bipc.SendResume(ctx2, nil); err != nil {
+				if err := c.bipc.SendResume(ctx2); err != nil {
 					sendNack(id, err.Error())
 					return
 				}
@@ -71,7 +71,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 
 			log.Printf("handling start command for game=%s", game)
-			if err := c.bipc.SendStart(ctx, time.Now().Unix(), game, instanceID); err != nil {
+			if err := c.bipc.SendStart(ctx, game, instanceID); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
@@ -79,7 +79,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 		}(cmd.ID)
 	case types.CmdPause:
 		go func(id string) {
-			if err := c.bipc.SendPause(ctx, nil); err != nil {
+			if err := c.bipc.SendPause(ctx); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
@@ -118,7 +118,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				return
 			}
 
-			if err := c.bipc.SendSwap(ctx, time.Now().Unix(), game, instanceID); err != nil {
+			if err := c.bipc.SendSwap(ctx, game, instanceID); err != nil {
 				sendNack(id, err.Error())
 				return
 			}

@@ -58,6 +58,7 @@ local function file_exists(name)
 end
 
 local function save_state(path)
+    console.log("Saving state to: " .. tostring(path))
     savestate.save(path)
 end
 
@@ -80,41 +81,6 @@ end
 
 local function strip_extension(filename)
     return (filename:gsub("%.[^%.]+$", ""))
-end
-
--- Scheduler (same as reference)
-local pending = {}
-local function schedule(at_epoch, fn, command)
-    table.insert(pending, {
-        at = at_epoch,
-        fn = fn,
-        command = command
-    })
-end
-local function execute_due()
-    local t = now()
-    local keep = {}
-    for _, job in ipairs(pending) do
-        if job.at <= t then
-            local ok, err = pcall(job.fn)
-            if not ok then
-                console.log("[ERROR] Scheduled task failed: " .. tostring(err))
-            end
-        else
-            table.insert(keep, job)
-        end
-    end
-    pending = keep
-end
-local function schedule_or_now(at_epoch, fn, command)
-    if at_epoch and at_epoch > (now() + 0.0005) then
-        schedule(at_epoch, fn, command)
-    else
-        local ok, err = pcall(fn)
-        if not ok then
-            console.log("[ERROR] Immediate command failed: " .. tostring(err))
-        end
-    end
 end
 
 -- Command implementations
@@ -345,34 +311,23 @@ local function handle_line(line)
                 do_save()
             end)
         elseif cmd == "SWAP" then
-            local at, game, instance = tonumber(parts[4]), parts[5], parts[6]
+            local game, instance = parts[4], parts[5]
             safe_exec_and_ack(id, function()
-                schedule_or_now(at, function()
-                    do_swap(game, instance)
-                end, game)
+                do_swap(game, instance)
             end)
         elseif cmd == "START" then
-            local at, game, instance = tonumber(parts[4]), parts[5], parts[6]
+            local game, instance = parts[4], parts[5]
             instance_id = instance
             safe_exec_and_ack(id, function()
-                schedule_or_now(at, function()
                     do_start(game)
-                end, game)
-            end)
-        elseif cmd == "LOAD" then
-            local path = parts[4]
-            safe_exec_and_ack(id, function()
-                do_load(path)
             end)
         elseif cmd == "PAUSE" then
-            local at = tonumber(parts[4])
             safe_exec_and_ack(id, function()
-                schedule_or_now(at, do_pause, 'pause')
+                 do_pause()
             end)
         elseif cmd == "RESUME" then
-            local at = tonumber(parts[4])
             safe_exec_and_ack(id, function()
-                schedule_or_now(at, do_resume, 'resume')
+                do_resume()
             end)
         elseif cmd == "MSG" then
             local text = join_from(parts, 4)
@@ -380,23 +335,19 @@ local function handle_line(line)
                 show_message(text, 3)
             end)
         elseif cmd == "SYNC" then
-            local game, instance, state, state_at = parts[4], parts[5], parts[6], tonumber(parts[7] or "0")
+            local game, instance, state = parts[4], parts[5], parts[6]
             instance_id = instance
             safe_exec_and_ack(id, function()
                 if state == "running" then
                     if game and game ~= "" then
-                        schedule_or_now(state_at, function()
-                            do_start(game)
-                        end, game)
+                        do_start(game)
                     end
                 else
                     if game and game ~= "" then
-                        schedule_or_now(state_at, function()
-                            do_start(game)
-                            do_pause()
-                        end, game .. "_paused")
+                        do_start(game)
+                        do_pause()
                     else
-                        schedule_or_now(state_at, do_pause, 'pause')
+                        do_pause()
                     end
                 end
             end)
@@ -414,7 +365,6 @@ local function handle_line(line)
 end
 
 -- Main loop: accept connection, then read lines non-blocking and process scheduled tasks
-local next_pending_log = now() + 10.0
 local next_auto_save = now() + 10.0
 while true do
     if not client_socket then
@@ -444,9 +394,6 @@ while true do
         end
     end
 
-    -- scheduled task execution and housekeeping
-    execute_due()
-
     local t = now()
     if t >= next_auto_save then
         -- autosave current if any
@@ -454,18 +401,6 @@ while true do
             do_save()
         end)
         next_auto_save = t + 10.0
-    end
-    if t >= next_pending_log then
-        if #pending == 0 then
-            console.log("[PENDING] No scheduled games.")
-        else
-            console.log("[PENDING] Scheduled games:")
-            for i, job in ipairs(pending) do
-                local secs = math.max(0, job.at - t)
-                console.log(string.format("  %s in %.1fs", job.command, secs))
-            end
-        end
-        next_pending_log = t + 10.0
     end
 
     draw_messages()
