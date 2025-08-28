@@ -111,6 +111,8 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			cancel2()
 			log.Printf("sending swap to lua for game=%s", game)
 
+			_ = c.bipc.SendSave(ctx)
+
 			if err := c.EnsureSaveState(instanceID); err != nil {
 				sendNack(id, "save state orchestration failed: "+err.Error())
 				return
@@ -223,11 +225,6 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 }
 
 func (c *Controller) EnsureSaveState(instanceID string) error {
-	if instanceID == "" {
-		log.Println("No instanceID provided, skipping save state orchestration")
-		return nil
-	}
-
 	log.Println("Ensuring save state for instanceID:", instanceID)
 
 	// Create saves directory if it doesn't exist
@@ -237,15 +234,21 @@ func (c *Controller) EnsureSaveState(instanceID string) error {
 	}
 
 	// 1. Upload old instance if it exists (current player's save state)
-	if c.bipc.instanceID != "" && c.bipc.instanceID != instanceID {
-		log.Printf("Uploading save state for old instance: %s", c.bipc.instanceID)
-		err := c.api.UploadSaveState(c.bipc.instanceID)
-		if err != nil {
-			log.Printf("Failed to upload old save state for instance %s: %v", c.bipc.instanceID, err)
-			// Don't return error here as this is not critical for the swap
-		} else {
-			log.Printf("Successfully uploaded save state for instance %s", c.bipc.instanceID)
+	go func() {
+		if c.bipc.instanceID != "" {
+			log.Printf("Uploading save state for old instance: %s", c.bipc.instanceID)
+			err := c.api.UploadSaveState(c.bipc.instanceID)
+			if err != nil {
+				log.Printf("Failed to upload old save state for instance %s: %v", c.bipc.instanceID, err)
+			} else {
+				log.Printf("Successfully uploaded save state for instance %s", c.bipc.instanceID)
+			}
 		}
+	}()
+
+	if instanceID == "" {
+		log.Println("No instanceID provided, skipping save state orchestration")
+		return nil
 	}
 
 	// 2. Download new instance save state (synchronous, blocking)

@@ -49,6 +49,10 @@ func (s *Server) loadState() {
 	if tmp.UpdatedAt.IsZero() {
 		tmp.UpdatedAt = time.Now()
 	}
+	for name, player := range tmp.Players {
+		player.Connected = false
+		tmp.Players[name] = player
+	}
 	s.mu.Lock()
 	s.state = tmp
 	s.mu.Unlock()

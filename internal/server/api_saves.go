@@ -43,9 +43,6 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 		instanceID = filename[:len(filename)-6]
 	}
 
-	// Set instance state to pending before upload starts
-	s.setInstanceFileState(instanceID, types.FileStatePending)
-
 	// Ensure saves directory exists
 	savesDir := "./saves"
 	if err := os.MkdirAll(savesDir, 0755); err != nil {

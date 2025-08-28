@@ -20,7 +20,6 @@ const (
 	msgNACK  = "NACK"
 	msgHELLO = "HELLO"
 	msgPING  = "PING"
-	msgPONG  = "PONG"
 	// sentinel used to notify consumers that the IPC connection was lost
 	// exported so callers can react when the Lua side disconnects.
 	MsgDisconnected = "__BIZHAWK_IPC_DISCONNECTED__"
@@ -367,6 +366,10 @@ func (b *BizhawkIPC) SendSync(ctx context.Context, game string, instanceID strin
 
 // Incoming returns the channel with raw lines from Lua for processing
 func (b *BizhawkIPC) Incoming() <-chan string { return b.incoming }
+
+func (b *BizhawkIPC) SendSave(ctx context.Context) error {
+	return b.SendCommand(ctx, "SAVE")
+}
 
 // convenience helpers to match previous code
 func (b *BizhawkIPC) SendSwap(ctx context.Context, at int64, game string, instanceID string) error {

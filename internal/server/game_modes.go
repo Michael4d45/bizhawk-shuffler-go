@@ -134,6 +134,12 @@ func (h *SaveModeHandler) HandleSwap() error {
 
 	// Clear players' InstanceID for a fresh assignment
 	for n, p := range h.server.state.Players {
+		// If player had an assigned instance, set that instance state to pending (in transition)
+		if p.InstanceID != "" {
+			h.server.mu.Unlock()
+			h.server.setInstanceFileState(p.InstanceID, types.FileStatePending)
+			h.server.mu.Lock()
+		}
 		p.InstanceID = ""
 		p.Game = ""
 		h.server.state.Players[n] = p
@@ -264,10 +270,14 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 
 	_ = h.server.saveState()
 
-	_ = h.server.sendSwap(player, foundInst.Game, foundInst.ID)
+	// Set instance state to pending before upload starts
 	if foundPlayer != "" {
+		h.server.setInstanceFileState(foundInst.ID, types.FileStatePending)
 		_ = h.server.sendSwap(foundPlayer, "", "")
+	} else {
+		h.server.setInstanceFileState(foundInst.ID, types.FileStateNone)
 	}
+	_ = h.server.sendSwap(player, foundInst.Game, foundInst.ID)
 	return nil
 }
 

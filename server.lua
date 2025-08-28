@@ -181,13 +181,14 @@ local function do_save()
     save_state(get_save_path())
 end
 
-local function do_swap(target_game)
+local function do_swap(target_game, instance)
     -- save current
     local cur_id = get_current_canonical_game()
     local target_id = canonical_game_id_from_filename(target_game) or canonical_game_id_from_display(target_game)
 
     -- save current
     do_save()
+    instance_id = instance
 
     if target_id and cur_id and target_id == cur_id then
         -- same canonical game; skip reload
@@ -339,12 +340,15 @@ local function handle_line(line)
     console.log(parts)
     if parts[1] == "CMD" then
         local id, cmd = parts[2], parts[3]
-        if cmd == "SWAP" then
+        if cmd == "SAVE" then
+            safe_exec_and_ack(id, function()
+                do_save()
+            end)
+        elseif cmd == "SWAP" then
             local at, game, instance = tonumber(parts[4]), parts[5], parts[6]
-            instance_id = instance
             safe_exec_and_ack(id, function()
                 schedule_or_now(at, function()
-                    do_swap(game)
+                    do_swap(game, instance)
                 end, game)
             end)
         elseif cmd == "START" then
