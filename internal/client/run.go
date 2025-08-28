@@ -124,18 +124,6 @@ func New(args []string) (*Client, error) {
 
 	httpClient := &http.Client{Timeout: 0}
 
-	bipc := NewBizhawkIPC("127.0.0.1", 55355)
-
-	// create a controller with a temporary API (no base URL) to perform any
-	// installation/download steps before the real server API is known.
-	installAPI := NewAPI("", httpClient, cfg)
-	bhController := NewBizHawkController(installAPI, httpClient, cfg, bipc)
-	if err := bhController.EnsureBizHawkInstalled(); err != nil {
-		_ = logFile.Close()
-		return nil, fmt.Errorf("EnsureBizHawkInstalled: %w", err)
-	}
-	_ = cfg.Save()
-
 	wsURL, serverHTTP, err := BuildWSAndHTTP(serverURL, cfg)
 	if err != nil {
 		_ = logFile.Close()
@@ -143,6 +131,17 @@ func New(args []string) (*Client, error) {
 	}
 
 	api := NewAPI(serverHTTP, httpClient, cfg)
+
+	bipc := NewBizhawkIPC("127.0.0.1", 55355)
+
+	// create a controller with a temporary API (no base URL) to perform any
+	// installation/download steps before the real server API is known.
+	bhController := NewBizHawkController(api, httpClient, cfg, bipc)
+	if err := bhController.EnsureBizHawkInstalled(); err != nil {
+		_ = logFile.Close()
+		return nil, fmt.Errorf("EnsureBizHawkInstalled: %w", err)
+	}
+	_ = cfg.Save()
 	// update controller to use the real API
 	bhController.api = api
 	wsClient := NewWSClient(wsURL, api, bipc)

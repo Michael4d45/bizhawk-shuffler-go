@@ -217,14 +217,9 @@ func (c *BizHawkController) EnsureBizHawkInstalled() error {
 				return fmt.Errorf("failed to download/extract BizHawk (unknown archive): %w", err)
 			}
 		}
-		// optional: look for additional files from server
-		if c.api != nil && c.api.BaseURL != "" {
-			bizFilesURL := c.api.BizhawkFilesURL()
-			if err := c.DownloadAndExtractZip(bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
-				log.Printf("warning: failed to download BizhawkFiles.zip: %v", err)
-			}
-		} else {
-			log.Printf("no server configured, skipping BizhawkFiles.zip download")
+		bizFilesURL := c.api.BizhawkFilesURL()
+		if err := c.DownloadAndExtractZip(bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
+			log.Printf("warning: failed to download BizhawkFiles.zip: %v", err)
 		}
 		// After extraction, list installDir contents for debugging
 		log.Printf("BizHawk installed into %s", installDir)
