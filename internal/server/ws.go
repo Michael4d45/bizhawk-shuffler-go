@@ -206,36 +206,68 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if v, ok := pl["name"].(string); ok {
 					name = v
 				}
+				game := s.currentGameForPlayer(name)
+
 				s.mu.Lock()
-				s.state.Players[name] = types.Player{Name: name, Connected: true}
+
+				s.state.Players[name] = types.Player{
+					Name:      name,
+					Connected: true,
+					Game:      game,
+				}
 				s.conns[c] = client
 				s.players[name] = client
+
 				instances := append([]types.GameSwapInstance{}, s.state.GameSwapInstances...)
 				mainGames := append([]types.GameEntry{}, s.state.MainGames...)
+
 				s.mu.Unlock()
+
 				if err := s.saveState(); err != nil {
-					fmt.Printf("saveState error: %v\n", err)
+					fmt.Printf("[ERROR] saveState error: %v\n", err)
 				}
-				payload := map[string]any{"game_instances": instances, "main_games": mainGames}
+
+				payload := map[string]any{
+					"game_instances": instances,
+					"main_games":     mainGames,
+				}
 				select {
-				case client.sendCh <- types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())}:
+				case client.sendCh <- types.Command{
+					Cmd:     types.CmdGamesUpdate,
+					Payload: payload,
+					ID:      fmt.Sprintf("%d", time.Now().UnixNano()),
+				}:
+
 				default:
+					fmt.Printf("[WARN] Failed to send CmdGamesUpdate to %s (channel full?)\n", name)
 				}
-				// determine the current game for this player and send it so the client
-				// can load the correct ROM on startup. If we determine a game and the
-				// player's persisted Current is empty, persist the assignment.
-				if game := s.currentGameForPlayer(name); game != "" {
+
+				if game != "" {
 					startPayload := map[string]any{"game": game}
 					select {
-					case client.sendCh <- types.Command{Cmd: types.CmdStart, Payload: startPayload, ID: fmt.Sprintf("init-%d", time.Now().UnixNano())}:
+					case client.sendCh <- types.Command{
+						Cmd:     types.CmdStart,
+						Payload: startPayload,
+						ID:      fmt.Sprintf("init-%d", time.Now().UnixNano()),
+					}:
+
 					default:
+						fmt.Printf("[WARN] Failed to send CmdStart to %s (channel full?)\n", name)
 					}
 				}
-				// send an immediate ping command so the server can measure RTT quickly after hello
+
 				select {
-				case client.sendCh <- types.Command{Cmd: types.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
+				case client.sendCh <- types.Command{
+					Cmd:     types.CmdPing,
+					Payload: fmt.Sprintf("%d", time.Now().UnixNano()),
+					ID:      fmt.Sprintf("ping-%d", time.Now().UnixNano()),
+				}:
+
 				default:
+					fmt.Printf("[WARN] Failed to send CmdPing to %s (channel full?)\n", name)
 				}
+			} else {
+				fmt.Printf("[ERROR] Invalid payload type for CmdHello: %T\n", cmd.Payload)
 			}
 			continue
 		}

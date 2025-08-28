@@ -80,14 +80,9 @@ func (a *API) FetchServerState(player string) (bool, string, error) {
 	playerGame := ""
 	if env.State.Players != nil {
 		if p, ok := env.State.Players[player]; ok {
-			if v, ok2 := p["current_game"]; ok2 {
-				if s, ok4 := v.(string); ok4 {
+			if v, ok2 := p["game"]; ok2 {
+				if s, ok3 := v.(string); ok3 {
 					playerGame = s
-				}
-			}
-			if playerGame == "" {
-				if cur, ok2 := p["current"].(string); ok2 {
-					playerGame = cur
 				}
 			}
 		}

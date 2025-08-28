@@ -129,14 +129,13 @@
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline gap-3">
                   <strong class="truncate max-w-[10rem] sm:max-w-[14rem]" x-text="name"></strong>
-                  <div class="text-xs text-gray-400 truncate" x-text="p.current_game || '-'"></div>
+                  <div class="text-xs text-gray-400 truncate" x-text="p.game || '-'"></div>
                 </div>
 
                 <div class="mt-1 flex flex-wrap items-center gap-2">
                   <span class="text-xs px-2 py-0.5 rounded-full"
                     :class="p.connected ? 'bg-green-500/20 text-green-400' : 'bg-red-500/20 text-red-400'"
                     x-text="p.connected ? 'Connected' : 'Offline'"></span>
-                  <span class="text-xs px-2 py-0.5" x-text="p.game ? p.game : 'No game'"></span>
                   <span class="text-xs px-2 py-0.5 rounded-full"
                     :class="p.has_files ? 'bg-green-600/10 text-green-300' : 'bg-yellow-600/10 text-yellow-300'"
                     x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
@@ -612,12 +611,10 @@
               const uiPlayers = {};
               for (const [name, p] of Object.entries(st.players)) {
                 let currentInstance = "";
-                let currentGame = "";
                 if (st.game_instances && Array.isArray(st.game_instances)) {
                   for (const inst of st.game_instances) {
                     if (inst && inst.player === name) {
                       currentInstance = inst.id || "";
-                      currentGame = inst.game || "";
                       break;
                     }
                   }
@@ -626,10 +623,10 @@
                 const newP = {
                   name,
                   current_instance: currentInstance,
-                  current_game: currentGame,
                   connected: p.connected || false,
                   has_files: p.has_files || p.hasFiles || false,
                   ping_ms: p.ping_ms || p.pingMs || p.PingMs || 0,
+                  game: p.game || "",
                 };
 
                 // merge with old player if exists

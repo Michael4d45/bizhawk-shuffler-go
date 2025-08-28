@@ -99,3 +99,14 @@ func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("encode response error: %v\n", err)
 	}
 }
+
+func (s *Server) GetGameForPlayer(player string) string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	// Use direct map lookup by player key. This is deterministic and
+	// avoids relying on the Player.Name field matching the map key.
+	if pp, ok := s.state.Players[player]; ok {
+		return pp.Game
+	}
+	return ""
+}

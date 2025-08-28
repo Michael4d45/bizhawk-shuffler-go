@@ -36,7 +36,6 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			p = types.Player{Name: b.Player}
 		}
-		p.Connected = true
 		s.state.Players[b.Player] = p
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
@@ -57,7 +56,6 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		if !ok {
 			p = types.Player{Name: b.Player}
 		}
-		p.Connected = true
 		s.state.Players[b.Player] = p
 		s.state.UpdatedAt = time.Now()
 		s.mu.Unlock()
@@ -96,7 +94,6 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 	if err := s.saveState(); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
-	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 
 	if err := json.NewEncoder(w).Encode(map[string]string{"result": res}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)

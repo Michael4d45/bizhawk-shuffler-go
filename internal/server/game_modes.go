@@ -2,6 +2,8 @@ package server
 
 import (
 	"errors"
+	"fmt"
+	"math/rand"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -26,10 +28,52 @@ type SyncModeHandler struct {
 }
 
 func (h *SyncModeHandler) HandleSwap() error {
+	game := h.randomGame()
+	if game == "" {
+		return errors.New("no games available for swap")
+	}
+	// In sync mode, set all players to the same game
+	h.server.mu.Lock()
+	defer h.server.mu.Unlock()
+	for name, player := range h.server.state.Players {
+		player.Game = game
+		h.server.state.Players[name] = player
+		if player.Connected {
+			payload := map[string]string{"game": game}
+			// Notify connected players about the game change
+			h.server.players[name].sendCh <- types.Command{
+				Cmd:     types.CmdSwap,
+				Payload: payload,
+				ID:      fmt.Sprintf("swap-%d", time.Now().UnixNano()),
+			}
+		}
+	}
+	h.server.state.UpdatedAt = time.Now()
 	return nil
 }
 
+func (h *SyncModeHandler) randomGame() string {
+	games := h.server.state.Games
+	if len(games) == 0 {
+		return ""
+	}
+	return games[rand.Intn(len(games))]
+}
+
 func (h *SyncModeHandler) GetCurrentGameForPlayer(player string) string {
+	h.server.mu.Lock()
+	defer h.server.mu.Unlock()
+
+	for _, pp := range h.server.state.Players {
+		if pp.Game != "" {
+			return pp.Game
+		}
+	}
+
+	if len(h.server.state.Games) > 0 {
+		return h.randomGame()
+	}
+
 	return ""
 }
 
@@ -50,7 +94,6 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceI
 		p = types.Player{Name: player}
 	}
 	p.Game = game
-	p.Connected = true
 	h.server.state.Players[player] = p
 	h.server.state.UpdatedAt = time.Now()
 	return nil
