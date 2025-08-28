@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -123,6 +124,20 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 		}(cmd.ID)
 	case types.CmdClearSaves:
 		go func(id string) {
+
+			// delete files in ./saves directory
+			files, err := os.ReadDir("./saves")
+			if err != nil {
+				log.Printf("Failed to read saves directory: %v", err)
+			} else {
+				for _, file := range files {
+					err := os.RemoveAll(filepath.Join("./saves", file.Name()))
+					if err != nil {
+						log.Printf("Failed to delete save file %s: %v", file.Name(), err)
+					}
+				}
+			}
+
 			if err := c.bipc.SendMessage(ctx, "clear_saves"); err != nil {
 				sendNack(id, err.Error())
 				return

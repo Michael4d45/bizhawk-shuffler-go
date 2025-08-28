@@ -264,9 +264,6 @@
 
           <div class="mt-3 flex gap-2 items-center">
             <div class="flex gap-2 items-center">
-              <button @click="saveInstances()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-                Save Instances
-              </button>
               <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
                 Catalog
               </button>
@@ -561,12 +558,16 @@
                 : [];
             }
 
+            const playerNameByInstanceId = Object.fromEntries(
+              Object.entries(st.players || {}).map(([name, p]) => [p.instance_id, name])
+            );
+
             // --- 2b) game_instances (merge by id) ---
             if (st.game_instances && Array.isArray(st.game_instances)) {
               const newMap = Object.fromEntries(
                 st.game_instances.map((i) => [
                   i.id,
-                  { id: i.id, game: i.game || "", player: i.player || "", _saved: true },
+                  { id: i.id, game: i.game || "", player: playerNameByInstanceId[i.id] || "", _saved: true },
                 ])
               );
 
@@ -583,7 +584,7 @@
                     ...oldMap[id],
                     id: oldMap[id]._dirtyId ? oldMap[id].id : newInst.id,
                     game: oldMap[id]._dirtyGame ? oldMap[id].game : newInst.game,
-                    player: newInst.player || oldMap[id].player,
+                    player: playerNameByInstanceId[id] || "",
                     _saved: true,
                   };
                 }
