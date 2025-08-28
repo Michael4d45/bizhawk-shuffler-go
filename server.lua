@@ -60,11 +60,6 @@ end
 local function save_state(path)
     savestate.save(path)
 end
-local function load_state_if_exists(path)
-    if file_exists(path) then
-        savestate.load(path)
-    end
-end
 
 local function load_rom(path)
     if file_exists(path) then
@@ -123,7 +118,7 @@ local function schedule_or_now(at_epoch, fn, command)
 end
 
 -- Command implementations
-local current_game = nil
+local instance_id = nil
 -- Compute a canonical id for a game based on display name or filename
 local function canonical_game_id_from_display(name)
     if not name then
@@ -148,15 +143,33 @@ local function canonical_game_id_from_filename(filename)
     return base:lower()
 end
 
+local function get_save_path()
+    local cur = gameinfo.getromname()
+    cur = sanitize_filename(cur)
+    local name = instance_id
+    if cur and cur ~= "" and cur:lower() ~= "null" then
+        name = cur
+    end
+
+    if not name or name == "" or name:lower() == "null" then
+        return nil
+    end
+
+    return SAVE_DIR .. "/" .. name .. ".state"
+end
+
+local function load_state_if_exists()
+    local path = get_save_path()
+    if path and file_exists(path) then
+        savestate.load(path)
+    end
+end
+
 local function get_current_canonical_game()
     local disp = gameinfo.getromname()
     local id = canonical_game_id_from_display(disp)
     if id and id ~= "" then
         return id
-    end
-    -- fallback: if we have stored current_game as filename, use that
-    if current_game then
-        return canonical_game_id_from_filename(current_game)
     end
     return nil
 end
@@ -187,10 +200,7 @@ local function do_swap(target_game)
     if not disp or disp == "" or disp:lower() == "null" then
         disp = sanitize_filename(strip_extension(target_game))
     end
-    local target_save_path = SAVE_DIR .. "/" .. disp .. ".state"
-    load_state_if_exists(target_save_path)
-    -- update tracked current_game to the filename used for swap
-    current_game = target_game
+    load_state_if_exists()
 end
 
 local function do_start(game)
@@ -202,20 +212,15 @@ local function do_start(game)
         console.log("Start skipped: target is same as current (" .. tostring(target_id) .. ")")
         return
     end
-    current_game = game
     local rom_path = ROM_DIR .. "/" .. game
     load_rom(rom_path)
-    local disp = sanitize_filename(gameinfo.getromname())
-    if not disp or disp == "" or disp:lower() == "null" then
-        disp = sanitize_filename(strip_extension(game))
-    end
-    local save_path = SAVE_DIR .. "/" .. disp .. ".state"
-    load_state_if_exists(save_path)
+    load_state_if_exists()
 end
 
-local function do_save(path)
-    save_state(path)
+local function do_save()
+    save_state(get_save_path())
 end
+
 local function do_load(path)
     if not path then
         error("no path")
@@ -338,23 +343,20 @@ local function handle_line(line)
     if parts[1] == "CMD" then
         local id, cmd = parts[2], parts[3]
         if cmd == "SWAP" then
-            local at, game = tonumber(parts[4]), parts[5]
+            local at, game, instance = tonumber(parts[4]), parts[5], parts[6]
+            instance_id = instance
             safe_exec_and_ack(id, function()
                 schedule_or_now(at, function()
                     do_swap(game)
                 end, game)
             end)
         elseif cmd == "START" then
-            local at, game = tonumber(parts[4]), parts[5]
+            local at, game, instance = tonumber(parts[4]), parts[5], parts[6]
+            instance_id = instance
             safe_exec_and_ack(id, function()
                 schedule_or_now(at, function()
                     do_start(game)
                 end, game)
-            end)
-        elseif cmd == "SAVE" then
-            local path = parts[4]
-            safe_exec_and_ack(id, function()
-                do_save(path)
             end)
         elseif cmd == "LOAD" then
             local path = parts[4]
@@ -377,7 +379,8 @@ local function handle_line(line)
                 show_message(text, 3)
             end)
         elseif cmd == "SYNC" then
-            local game, state, state_at = parts[4], parts[5], tonumber(parts[6] or "0")
+            local game, instance, state, state_at = parts[4], parts[5], parts[6], tonumber(parts[7] or "0")
+            instance_id = instance
             safe_exec_and_ack(id, function()
                 if state == "running" then
                     if game and game ~= "" then
@@ -446,14 +449,9 @@ while true do
     local t = now()
     if t >= next_auto_save then
         -- autosave current if any
-        local cur = gameinfo.getromname()
-        cur = sanitize_filename(cur)
-        if cur and cur ~= "" and cur:lower() ~= "null" then
-            local path = SAVE_DIR .. "/" .. cur .. ".state"
-            pcall(function()
-                save_state(path)
-            end)
-        end
+        pcall(function()
+            do_save()
+        end)
         next_auto_save = t + 10.0
     end
     if t >= next_pending_log then

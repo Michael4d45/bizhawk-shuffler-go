@@ -49,6 +49,8 @@ type BizhawkIPC struct {
 	// accessor methods to read/update this flag.
 	readyMu sync.Mutex
 	ready   bool
+
+	instanceID string
 }
 
 // NewBizhawkIPC creates an instance targeting host:port
@@ -354,28 +356,27 @@ func (b *BizhawkIPC) resendLoop(ctx context.Context) {
 }
 
 // SendSync sends a SYNC command with game, state (running|stopped), and startAt epoch
-func (b *BizhawkIPC) SendSync(ctx context.Context, game string, running bool, startAt int64) error {
+func (b *BizhawkIPC) SendSync(ctx context.Context, game string, instanceID string, running bool, startAt int64) error {
 	state := "stopped"
 	if running {
 		state = "running"
 	}
-	return b.SendCommand(ctx, "SYNC", game, state, strconv.FormatInt(startAt, 10))
+	b.instanceID = instanceID
+	return b.SendCommand(ctx, "SYNC", game, instanceID, state, strconv.FormatInt(startAt, 10))
 }
 
 // Incoming returns the channel with raw lines from Lua for processing
 func (b *BizhawkIPC) Incoming() <-chan string { return b.incoming }
 
 // convenience helpers to match previous code
-func (b *BizhawkIPC) SendSwap(ctx context.Context, at int64, game string) error {
-	return b.SendCommand(ctx, "SWAP", strconv.FormatInt(at, 10), game)
+func (b *BizhawkIPC) SendSwap(ctx context.Context, at int64, game string, instanceID string) error {
+	b.instanceID = instanceID
+	return b.SendCommand(ctx, "SWAP", strconv.FormatInt(at, 10), game, instanceID)
 }
 
-func (b *BizhawkIPC) SendStart(ctx context.Context, at int64, game string) error {
-	return b.SendCommand(ctx, "START", strconv.FormatInt(at, 10), game)
-}
-
-func (b *BizhawkIPC) SendSave(ctx context.Context, path string) error {
-	return b.SendCommand(ctx, "SAVE", path)
+func (b *BizhawkIPC) SendStart(ctx context.Context, at int64, game string, instanceID string) error {
+	b.instanceID = instanceID
+	return b.SendCommand(ctx, "START", strconv.FormatInt(at, 10), game, instanceID)
 }
 
 func (b *BizhawkIPC) SendPause(ctx context.Context, at *int64) error {

@@ -43,9 +43,8 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		// Look up instance by id and assign to player if provided
 		s.mu.Lock()
 		found := false
-		for i, inst := range s.state.GameSwapInstances {
+		for _, inst := range s.state.GameSwapInstances {
 			if inst.ID == b.InstanceID {
-				s.state.GameSwapInstances[i].Player = b.Player
 				gameFile = inst.Game
 				found = true
 				break
@@ -78,25 +77,9 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Build swap command and send to client
-	cmdID := fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), b.Player)
-	cmd := types.Command{Cmd: types.CmdSwap, ID: cmdID, Payload: map[string]string{"game": gameFile}}
-	res, err := s.sendAndWait(b.Player, cmd, 20*time.Second)
-	if err != nil {
-		if errors.Is(err, ErrTimeout) {
-			http.Error(w, "timeout", http.StatusGatewayTimeout)
-			return
-		}
-		http.Error(w, err.Error(), http.StatusInternalServerError)
-		return
-	}
 	// Persist state and broadcast update
 	if err := s.saveState(); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
-	}
-
-	if err := json.NewEncoder(w).Encode(map[string]string{"result": res}); err != nil {
-		fmt.Printf("encode response error: %v\n", err)
 	}
 }
 

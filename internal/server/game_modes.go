@@ -41,11 +41,17 @@ func (h *SyncModeHandler) HandleSwap() error {
 		if player.Connected {
 			payload := map[string]string{"game": game}
 			// Notify connected players about the game change
-			h.server.sendAndWait(name, types.Command{
+			if _, err := h.server.sendAndWait(name, types.Command{
 				Cmd:     types.CmdSwap,
 				Payload: payload,
 				ID:      fmt.Sprintf("swap-%d", time.Now().UnixNano()),
-			}, 20*time.Second)
+			}, 20*time.Second); err != nil {
+				if errors.Is(err, ErrTimeout) {
+					fmt.Printf("swap timeout for %s\n", name)
+				} else {
+					fmt.Printf("sendAndWait error: %v\n", err)
+				}
+			}
 		}
 	}
 	h.server.state.UpdatedAt = time.Now()
@@ -88,7 +94,6 @@ func (h *SyncModeHandler) SetupState() error {
 func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
 	// In sync mode we don't use instances; just set the player's current game
 	h.server.mu.Lock()
-	defer h.server.mu.Unlock()
 	p, ok := h.server.state.Players[player]
 	if !ok {
 		p = types.Player{Name: player}
@@ -96,6 +101,9 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	p.Game = game
 	h.server.state.Players[player] = p
 	h.server.state.UpdatedAt = time.Now()
+	h.server.mu.Unlock()
+
+	_ = h.server.sendSwap(player, p.Game, p.InstanceID)
 	return nil
 }
 
@@ -105,6 +113,76 @@ type SaveModeHandler struct {
 }
 
 func (h *SaveModeHandler) HandleSwap() error {
+	// Ensure there are instances to swap between
+	if len(h.server.state.GameSwapInstances) == 0 {
+		return errors.New("no game instances available for swap")
+	}
+
+	// Collect player names (preserve current map snapshot)
+	h.server.mu.Lock()
+	players := []string{}
+	for name := range h.server.state.Players {
+		players = append(players, name)
+	}
+
+	// Shuffle instances to vary assignment each swap
+	rand.Shuffle(len(h.server.state.GameSwapInstances), func(i, j int) {
+		h.server.state.GameSwapInstances[i], h.server.state.GameSwapInstances[j] = h.server.state.GameSwapInstances[j], h.server.state.GameSwapInstances[i]
+	})
+
+	// Clear players' InstanceID for a fresh assignment
+	for n, p := range h.server.state.Players {
+		p.InstanceID = ""
+		p.Game = ""
+		h.server.state.Players[n] = p
+	}
+
+	// Assign instances to players: one instance per player up to available instances
+	maxAssign := min(len(players), len(h.server.state.GameSwapInstances))
+	for i := range maxAssign {
+		pname := players[i]
+		inst := h.server.state.GameSwapInstances[i]
+		p, ok := h.server.state.Players[pname]
+		if !ok {
+			p = types.Player{Name: pname}
+		}
+		// set player's game to the instance's game and record the instance id
+		p.Game = inst.Game
+		p.InstanceID = inst.ID
+		// preserve existing Connected flag
+		h.server.state.Players[pname] = p
+	}
+
+	// Update timestamp before sending commands
+	h.server.state.UpdatedAt = time.Now()
+	// capture local copy of instances for sending without holding lock while network operations run
+	instances := append([]types.GameSwapInstance{}, h.server.state.GameSwapInstances...)
+	playersMap := map[string]types.Player{}
+	for n, p := range h.server.state.Players {
+		playersMap[n] = p
+	}
+	h.server.mu.Unlock()
+	_ = h.server.saveState()
+
+	// Send swap command to each connected player. Include instance_id when player has an assigned instance.
+	for name, p := range playersMap {
+		if !p.Connected {
+			continue
+		}
+		// find instance by player's InstanceID (players now store instance ids)
+		var inst *types.GameSwapInstance
+		if p.InstanceID != "" {
+			for i := range instances {
+				if instances[i].ID == p.InstanceID {
+					inst = &instances[i]
+					break
+				}
+			}
+		}
+		if inst != nil && inst.Game != "" {
+			_ = h.server.sendSwap(name, p.Game, p.InstanceID)
+		}
+	}
 	return nil
 }
 
@@ -125,53 +203,51 @@ func (h *SaveModeHandler) SetupState() error {
 
 func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
 	h.server.mu.Lock()
-	defer h.server.mu.Unlock()
 
-	// If instance ID provided, assign that instance to the player
-	if instanceID != "" {
-		for i, inst := range h.server.state.GameSwapInstances {
-			if inst.ID == instanceID {
-				h.server.state.GameSwapInstances[i].Player = player
-				// update player entry
-				p, ok := h.server.state.Players[player]
-				if !ok {
-					p = types.Player{Name: player}
-				}
-				p.Game = h.server.state.GameSwapInstances[i].Game
-				p.Connected = true
-				h.server.state.Players[player] = p
-				h.server.state.UpdatedAt = time.Now()
-				return nil
-			}
+	// If instance ID provided, assign that instance to the player (players now store InstanceID)
+	if instanceID == "" {
+		h.server.mu.Unlock()
+		return errors.New("instance ID is required")
+	}
+	var foundInst *types.GameSwapInstance
+	for i, inst := range h.server.state.GameSwapInstances {
+		if inst.ID == instanceID {
+			// capture instance
+			foundInst = &h.server.state.GameSwapInstances[i]
+			break
 		}
+	}
+	if foundInst == nil {
 		return errors.New("instance not found")
 	}
-
-	// If no instance ID, try to find an unassigned instance matching the game and assign it.
-	for i, inst := range h.server.state.GameSwapInstances {
-		if inst.Game == game && inst.Player == "" {
-			h.server.state.GameSwapInstances[i].Player = player
-			p, ok := h.server.state.Players[player]
-			if !ok {
-				p = types.Player{Name: player}
-			}
-			p.Game = game
-			p.Connected = true
-			h.server.state.Players[player] = p
-			h.server.state.UpdatedAt = time.Now()
-			return nil
+	var foundPlayer string
+	for playerName, player := range h.server.state.Players {
+		if player.InstanceID == foundInst.ID {
+			// Clear previous assignment
+			player.Game = ""
+			player.InstanceID = ""
+			h.server.state.Players[playerName] = player
+			foundPlayer = playerName
+			break
 		}
 	}
-
-	// Fallback: set player's game without assigning an instance
+	// update player entry
 	p, ok := h.server.state.Players[player]
 	if !ok {
 		p = types.Player{Name: player}
 	}
-	p.Game = game
-	p.Connected = true
+	p.Game = foundInst.Game
+	p.InstanceID = foundInst.ID
 	h.server.state.Players[player] = p
 	h.server.state.UpdatedAt = time.Now()
+	h.server.mu.Unlock()
+
+	_ = h.server.saveState()
+
+	h.server.sendSwap(player, foundInst.Game, foundInst.ID)
+	if foundPlayer != "" {
+		h.server.sendSwap(foundPlayer, "", "")
+	}
 	return nil
 }
 

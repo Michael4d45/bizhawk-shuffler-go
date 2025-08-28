@@ -309,3 +309,17 @@ func (s *Server) sendAndWait(player string, cmd types.Command, timeout time.Dura
 		return "", ErrTimeout
 	}
 }
+
+func (s *Server) sendSwap(player string, game string, instanceID string) error {
+	payload := map[string]string{"game": game}
+	if instanceID != "" {
+		payload["instance_id"] = instanceID
+	}
+	cmd := types.Command{
+		Cmd:     types.CmdSwap,
+		Payload: payload,
+		ID:      fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), player),
+	}
+	_, err := s.sendAndWait(player, cmd, 20*time.Second)
+	return err
+}

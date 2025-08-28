@@ -66,7 +66,7 @@ func (a *API) GetState(dest interface{}) error {
 // FetchServerState fetches the server state and extracts whether the server
 // is running and the current game for the given player name (if any).
 // It returns (running, playerGame, error).
-func (a *API) FetchServerState(player string) (bool, string, error) {
+func (a *API) FetchServerState(player string) (bool, string, string, error) {
 	var env struct {
 		State struct {
 			Running bool                      `json:"running"`
@@ -74,10 +74,11 @@ func (a *API) FetchServerState(player string) (bool, string, error) {
 		} `json:"state"`
 	}
 	if err := a.GetState(&env); err != nil {
-		return false, "", err
+		return false, "", "", err
 	}
 	running := env.State.Running
 	playerGame := ""
+	instanceID := ""
 	if env.State.Players != nil {
 		if p, ok := env.State.Players[player]; ok {
 			if v, ok2 := p["game"]; ok2 {
@@ -85,13 +86,19 @@ func (a *API) FetchServerState(player string) (bool, string, error) {
 					playerGame = s
 				}
 			}
+			if v, ok2 := p["instance_id"]; ok2 {
+				if s, ok3 := v.(string); ok3 {
+					instanceID = s
+				}
+			}
 		}
 	}
-	return running, playerGame, nil
+	return running, playerGame, instanceID, nil
 }
 
 // UploadSave uploads a local save file to the server.
-func (a *API) UploadSave(localPath, player, game string) error {
+func (a *API) UploadSaveState(instanceID string) error {
+	localPath := "./saves/" + instanceID + ".state"
 	f, err := os.Open(localPath)
 	if err != nil {
 		return err
@@ -106,8 +113,6 @@ func (a *API) UploadSave(localPath, player, game string) error {
 	if _, err := io.Copy(fw, f); err != nil {
 		return err
 	}
-	_ = w.WriteField("player", player)
-	_ = w.WriteField("game", game)
 	_ = w.WriteField("filename", filepath.Base(localPath))
 	if err := w.Close(); err != nil {
 		return err
@@ -131,12 +136,8 @@ func (a *API) UploadSave(localPath, player, game string) error {
 
 // DownloadSave downloads a save file for player/filename into ./saves/player.
 // Returns ErrNotFound when the server responds 404.
-func (a *API) DownloadSave(player, filename string) error {
-	destDir := filepath.Join("./saves", player)
-	if err := os.MkdirAll(destDir, 0755); err != nil {
-		return err
-	}
-	p := "/save/" + url.PathEscape(player) + "/" + url.PathEscape(filename)
+func (a *API) EnsureSaveState(instanceID string) error {
+	p := "/save/" + url.PathEscape(instanceID+".state")
 	fetch := a.BaseURL + p
 	req, _ := http.NewRequestWithContext(a.Ctx, "GET", fetch, nil)
 	resp, err := a.HTTPClient.Do(req)
@@ -151,7 +152,7 @@ func (a *API) DownloadSave(player, filename string) error {
 		body, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("bad status: %s %s", resp.Status, string(body))
 	}
-	outPath := filepath.Join(destDir, filename)
+	outPath := filepath.Join("./saves", instanceID+".state")
 	out, err := os.Create(outPath)
 	if err != nil {
 		return err

@@ -130,6 +130,7 @@
                 <div class="flex items-baseline gap-3">
                   <strong class="truncate max-w-[10rem] sm:max-w-[14rem]" x-text="name"></strong>
                   <div class="text-xs text-gray-400 truncate" x-text="p.game || '-'"></div>
+                  <div class="text-xs text-gray-400 truncate" x-text="p.instance_id || '-'"></div>
                 </div>
 
                 <div class="mt-1 flex flex-wrap items-center gap-2">
@@ -610,19 +611,10 @@
             if (st.players && typeof st.players === "object") {
               const uiPlayers = {};
               for (const [name, p] of Object.entries(st.players)) {
-                let currentInstance = "";
-                if (st.game_instances && Array.isArray(st.game_instances)) {
-                  for (const inst of st.game_instances) {
-                    if (inst && inst.player === name) {
-                      currentInstance = inst.id || "";
-                      break;
-                    }
-                  }
-                }
 
                 const newP = {
                   name,
-                  current_instance: currentInstance,
+                  instance_id: p.instance_id || "",
                   connected: p.connected || false,
                   has_files: p.has_files || p.hasFiles || false,
                   ping_ms: p.ping_ms || p.pingMs || p.PingMs || 0,

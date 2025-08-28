@@ -117,16 +117,16 @@ type GameEntry struct {
 
 // Player represents a connected client
 type Player struct {
-	Name      string `json:"name"`
-	HasFiles  bool   `json:"has_files"`
-	Connected bool   `json:"connected"`
-	Game      string `json:"game,omitempty"`
+	Name       string `json:"name"`
+	HasFiles   bool   `json:"has_files"`
+	Connected  bool   `json:"connected"`
+	Game       string `json:"game,omitempty"`
+	InstanceID string `json:"instance_id,omitempty"`
 	// PingMs stores the last measured round-trip time to the player in milliseconds.
 	PingMs int `json:"ping_ms,omitempty"`
 }
 
 type GameSwapInstance struct {
-	ID     string `json:"id"`
-	Game   string `json:"game"`
-	Player string `json:"player,omitempty"`
+	ID   string `json:"id"`
+	Game string `json:"game"`
 }

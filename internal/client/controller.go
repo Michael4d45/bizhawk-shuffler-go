@@ -34,9 +34,13 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	case types.CmdStart:
 		go func(id string) {
 			game := ""
+			instanceID := ""
 			if m, ok := cmd.Payload.(map[string]any); ok {
 				if g, ok := m["game"].(string); ok {
 					game = g
+				}
+				if iid, ok := m["instance_id"].(string); ok {
+					instanceID = iid
 				}
 			}
 			// If no game provided, treat as a resume/unpause signal.
@@ -49,8 +53,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				}
 				sendAck(id)
 				return
-			}
-			if game != "" {
+			} else {
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 				if err := c.api.EnsureFile(ctx2, game); err != nil {
 					cancel2()
@@ -59,8 +62,11 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				}
 				cancel2()
 			}
+
+			c.EnsureSaveState(instanceID)
+
 			log.Printf("handling start command for game=%s", game)
-			if err := c.bipc.SendStart(ctx, time.Now().Unix(), game); err != nil {
+			if err := c.bipc.SendStart(ctx, time.Now().Unix(), game, instanceID); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
@@ -77,9 +83,13 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	case types.CmdSwap:
 		go func(id string) {
 			game := ""
+			instanceID := ""
 			if m, ok := cmd.Payload.(map[string]any); ok {
 				if g, ok := m["game"].(string); ok {
 					game = g
+				}
+				if iid, ok := m["instance_id"].(string); ok {
+					instanceID = iid
 				}
 			}
 			if game == "" {
@@ -95,7 +105,10 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			cancel2()
 			log.Printf("sending swap to lua for game=%s", game)
-			if err := c.bipc.SendSwap(ctx, time.Now().Unix(), game); err != nil {
+
+			c.EnsureSaveState(instanceID)
+
+			if err := c.bipc.SendSwap(ctx, time.Now().Unix(), game, instanceID); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
@@ -185,4 +198,15 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	default:
 		sendAck(cmd.ID)
 	}
+}
+
+func (c *Controller) EnsureSaveState(instanceID string) {
+	log.Println("Ensuring save state for instanceID:", instanceID)
+	// if instanceID == "" {
+	// 	return
+	// }
+	// go func() {
+	// 	c.api.UploadSaveState(c.bipc.instanceID)
+	// }()
+	// c.api.EnsureSaveState(instanceID)
 }

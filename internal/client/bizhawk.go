@@ -522,7 +522,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 			if strings.HasPrefix(line, "HELLO") {
 				log.Printf("ipc handler: received HELLO from lua, sending SYNC")
 				c.bipc.SetReady(true)
-				running, playerGame, err := c.api.FetchServerState(c.cfg["name"])
+				running, playerGame, instanceID, err := c.api.FetchServerState(c.cfg["name"])
 				if err != nil {
 					log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)
 					running = true
@@ -532,7 +532,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 					log.Printf("ipc handler: no current game for player from server state; sending empty game")
 				}
 				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := c.bipc.SendSync(ctx2, playerGame, running, time.Now().Unix()); err != nil {
+				if err := c.bipc.SendSync(ctx2, playerGame, instanceID, running, time.Now().Unix()); err != nil {
 					log.Printf("ipc handler: SendSync failed: %v", err)
 				} else {
 					log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", playerGame, running)
