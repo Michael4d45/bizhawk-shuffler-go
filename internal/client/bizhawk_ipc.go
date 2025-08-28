@@ -1,4 +1,4 @@
-package internal
+package client
 
 import (
 	"bufio"
@@ -221,11 +221,10 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 				buf := make([]byte, 1<<12)
 				m := runtime.Stack(buf, false)
 				log.Printf("bizhawk ipc: notifying MsgDisconnected; goroutines=%d pending=%d stack:\n%s", runtime.NumGoroutine(), len(b.pending), string(buf[:m]))
-				select {
-				case b.incoming <- MsgDisconnected:
+				if b.safeSend(MsgDisconnected) {
 					log.Printf("bizhawk ipc: signaled MsgDisconnected to incoming consumers")
-				default:
-					log.Printf("bizhawk ipc: incoming channel full, dropping MsgDisconnected")
+				} else {
+					log.Printf("bizhawk ipc: incoming channel full or closed, dropping MsgDisconnected")
 				}
 			}
 			select {
@@ -279,9 +278,9 @@ func (b *BizhawkIPC) handleLine(line string) {
 		}
 	case msgHELLO:
 		// Lua said HELLO, we might want to send a SYNC later. Push incoming event.
-		select {
-		case b.incoming <- line:
-		default:
+		if !b.safeSend(line) {
+			// dropped because incoming is full or closed - log at debug level
+			log.Printf("bizhawk ipc: incoming channel full or closed, dropping HELLO")
 		}
 	case msgPING:
 		// reply PONG
@@ -295,12 +294,28 @@ func (b *BizhawkIPC) handleLine(line string) {
 		}
 	default:
 		// forward other messages to incoming channel
-		select {
-		case b.incoming <- line:
+		if b.safeSend(line) {
 			log.Printf("bizhawk ipc: forwarded message to incoming: %q", line)
-		default:
-			log.Printf("bizhawk ipc: incoming channel full, dropping message: %q", line)
+		} else {
+			log.Printf("bizhawk ipc: incoming channel full or closed, dropping message: %q", line)
 		}
+	}
+}
+
+// safeSend attempts to send a string to the incoming channel while holding
+// the mutex to ensure we don't send on a closed channel. It performs a
+// non-blocking send and returns true if the value was queued.
+func (b *BizhawkIPC) safeSend(s string) bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.closed {
+		return false
+	}
+	select {
+	case b.incoming <- s:
+		return true
+	default:
+		return false
 	}
 }
 

@@ -11,14 +11,13 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
-
-	"github.com/michael4d45/bizshuffle/internal"
 )
 
 // BizHawkController manages BizHawk installation, download and launching.
@@ -26,11 +25,11 @@ type BizHawkController struct {
 	httpClient *http.Client
 	cfg        Config
 	api        *API
-	bipc       *internal.BizhawkIPC
+	bipc       *BizhawkIPC
 }
 
 // NewBizHawkController creates a new controller with provided API, http client and config.
-func NewBizHawkController(api *API, httpClient *http.Client, cfg Config, bipc *internal.BizhawkIPC) *BizHawkController {
+func NewBizHawkController(api *API, httpClient *http.Client, cfg Config, bipc *BizhawkIPC) *BizHawkController {
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
@@ -393,7 +392,9 @@ func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error
 // - listens for incoming signals on sigs and attempts graceful termination
 // The function blocks until the context is cancelled or a shutdown signal is
 // received and the process has been terminated. It returns any launch error.
-func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func(), sigs <-chan os.Signal) error {
+func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func()) error {
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	var bhCmd *exec.Cmd
 	var bhMu sync.Mutex
 
@@ -509,7 +510,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 	// Use API.FetchServerState to query the server state for this client/player.
 	go func() {
 		for line := range c.bipc.Incoming() {
-			if line == internal.MsgDisconnected || line == "__BIZHAWK_IPC_DISCONNECTED__" {
+			if line == MsgDisconnected {
 				log.Printf("bizhawk ipc: disconnected detected from readLoop (ipc handler); marking ipcReady=false and continuing")
 				if c.bipc != nil {
 					c.bipc.SetReady(false)
@@ -520,9 +521,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 			log.Printf("lua incoming: %s", line)
 			if strings.HasPrefix(line, "HELLO") {
 				log.Printf("ipc handler: received HELLO from lua, sending SYNC")
-				if c.bipc != nil {
-					c.bipc.SetReady(true)
-				}
+				c.bipc.SetReady(true)
 				running, playerGame, err := c.api.FetchServerState(c.cfg["name"])
 				if err != nil {
 					log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)

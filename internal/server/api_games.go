@@ -13,7 +13,7 @@ import (
 func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
 		s.mu.Lock()
-		resp := map[string]any{"main_games": s.state.MainGames, "games": s.state.Games}
+		resp := map[string]any{"main_games": s.state.MainGames, "game_instances": s.state.GameSwapInstances, "games": s.state.Games}
 		s.mu.Unlock()
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(resp); err != nil {
@@ -29,6 +29,16 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.mu.Lock()
+		// Support legacy and new payloads:
+		// - { "games": ["a","b"] } -> updates s.state.Games (sync mode list)
+		// - { "main_games": [...], "game_instances": [...] } -> existing behavior
+		if gms, ok := raw["games"]; ok {
+			b, _ := json.Marshal(gms)
+			var games []string
+			if err := json.Unmarshal(b, &games); err == nil {
+				s.state.Games = games
+			}
+		}
 		if mg, ok := raw["main_games"]; ok {
 			b, _ := json.Marshal(mg)
 			var entries []types.GameEntry
@@ -36,11 +46,11 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 				s.state.MainGames = entries
 			}
 		}
-		if g, ok := raw["games"]; ok {
-			b, _ := json.Marshal(g)
-			var games []string
-			if err := json.Unmarshal(b, &games); err == nil {
-				s.state.Games = games
+		if gi, ok := raw["game_instances"]; ok {
+			b, _ := json.Marshal(gi)
+			var instances []types.GameSwapInstance
+			if err := json.Unmarshal(b, &instances); err == nil {
+				s.state.GameSwapInstances = instances
 			}
 		}
 		s.state.UpdatedAt = time.Now()
@@ -49,7 +59,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("saveState error: %v\n", err)
 		}
 		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{"games": s.state.Games, "main_games": s.state.MainGames}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{"game_instances": s.state.GameSwapInstances, "main_games": s.state.MainGames}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)
 		}

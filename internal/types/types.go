@@ -96,20 +96,20 @@ type ServerState struct {
 	NextSwapAt      int64 `json:"next_swap_at,omitempty"`
 	MinIntervalSecs int   `json:"min_interval_secs,omitempty"`
 	MaxIntervalSecs int   `json:"max_interval_secs,omitempty"`
-	// Games is the active list of game file names to shuffle through.
-	// Keep the JSON key "games" for backwards compatibility with the UI.
-	Games []string `json:"games"`
 	// MainGames is the main catalog of games on the server. Each entry
 	// describes the primary file and any additional files that clients
 	// should also download when preparing this game.
 	MainGames []GameEntry       `json:"main_games,omitempty"`
 	Players   map[string]Player `json:"players"`
 	UpdatedAt time.Time         `json:"updated_at"`
+
+	Games             []string           `json:"games,omitempty"`
+	GameSwapInstances []GameSwapInstance `json:"game_instances,omitempty"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
-// File is the primary filename; ExtraFiles lists additional files the client
-// should download when preparing the game (for example assets or patches).
+// File is the primary filename; ExtraFiles lists additional files that clients
+// should also download when preparing this game (for example assets or patches).
 type GameEntry struct {
 	File       string   `json:"file"`
 	ExtraFiles []string `json:"extra_files,omitempty"`
@@ -118,9 +118,15 @@ type GameEntry struct {
 // Player represents a connected client
 type Player struct {
 	Name      string `json:"name"`
-	Current   string `json:"current_game"`
 	HasFiles  bool   `json:"has_files"`
 	Connected bool   `json:"connected"`
+	Game      string `json:"game,omitempty"`
 	// PingMs stores the last measured round-trip time to the player in milliseconds.
 	PingMs int `json:"ping_ms,omitempty"`
+}
+
+type GameSwapInstance struct {
+	ID     string `json:"id"`
+	Game   string `json:"game"`
+	Player string `json:"player,omitempty"`
 }

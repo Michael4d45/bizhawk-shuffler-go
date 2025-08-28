@@ -30,13 +30,16 @@ type Server struct {
 func New() *Server {
 	s := &Server{
 		state: types.ServerState{
-			Running:     false,
-			SwapEnabled: true,
-			Mode:        types.GameModeSync,
-			Games:       []string{},
-			MainGames:   []types.GameEntry{},
-			Players:     map[string]types.Player{},
-			UpdatedAt:   time.Now(),
+			Running:           false,
+			SwapEnabled:       true,
+			Mode:              types.GameModeSync,
+			MainGames:         []types.GameEntry{},
+			GameSwapInstances: []types.GameSwapInstance{},
+			Games:             []string{},
+			Players:           map[string]types.Player{},
+			UpdatedAt:         time.Now(),
+			MinIntervalSecs:   5,
+			MaxIntervalSecs:   300,
 		},
 		conns:       make(map[*websocket.Conn]*wsClient),
 		players:     make(map[string]*wsClient),
@@ -60,6 +63,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/clear_saves", s.apiClearSaves)
 	mux.HandleFunc("/api/toggle_swaps", s.apiToggleSwaps)
 	mux.HandleFunc("/api/do_swap", s.apiDoSwap)
+	mux.HandleFunc("/api/mode/setup", s.apiModeSetup)
 	mux.HandleFunc("/api/mode", s.apiMode)
 	mux.HandleFunc("/files/", s.handleFiles)
 	mux.HandleFunc("/upload", s.handleUpload)
@@ -89,12 +93,6 @@ func (s *Server) broadcast(cmd types.Command) {
 		}
 	}
 }
-
-// SaveState persists state to disk.
-func (s *Server) SaveState() error { return s.saveState() }
-
-// State returns a copy of the current ServerState.
-func (s *Server) State() types.ServerState { s.mu.Lock(); defer s.mu.Unlock(); return s.state }
 
 // UpdateHostIfChanged sets host in state if different and persists.
 func (s *Server) UpdateHostIfChanged(host string) {
@@ -138,25 +136,16 @@ func (s *Server) UpdatePortIfChanged(port int) {
 // PersistedPort returns the persisted port if present.
 func (s *Server) PersistedPort() int { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Port }
 
-// currentGameForPlayer determines what game a player should be playing now.
-// Order of determination:
-// 1) If the player's Current field is set in persisted state, return that.
-// 2) Delegate to the current game mode handler for mode-specific logic.
-// The function does not modify state; callers may persist any changes if desired.
 func (s *Server) currentGameForPlayer(player string) string {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	// 1) persisted per-player current
-	if p, ok := s.state.Players[player]; ok {
-		if p.Current != "" {
-			return p.Current
+	// 1) If there is a game instance assigned to this player, return its game
+	for _, inst := range s.state.GameSwapInstances {
+		if inst.Player == player && inst.Game != "" {
+			return inst.Game
 		}
 	}
-	// 2) delegate to game mode handler
-	handler, err := getGameModeHandler(s.state.Mode)
-	if err != nil {
-		// Fallback to sync mode behavior if unknown mode
-		handler = &SyncModeHandler{}
-	}
-	return handler.GetCurrentGameForPlayer(s, player)
+	// 2) delegate to game mode handler for defaults
+	handler := s.GetGameModeHandler()
+	return handler.GetCurrentGameForPlayer(player)
 }

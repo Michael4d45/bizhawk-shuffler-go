@@ -12,8 +12,8 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
-	"github.com/michael4d45/bizshuffle/internal"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
@@ -166,15 +166,10 @@ func (a *API) DownloadSave(player, filename string) error {
 	return err
 }
 
-// NewDownloader constructs the internal.Downloader using the API base URL.
-func (a *API) NewDownloader(destDir string) *internal.Downloader {
-	return internal.NewDownloader(a.BaseURL, destDir)
-}
-
 // GamesResponse mirrors the server /api/games response.
 type GamesResponse struct {
-	Games     []string          `json:"games"`
-	MainGames []types.GameEntry `json:"main_games"`
+	GameInstances []types.GameSwapInstance `json:"game_instances"`
+	MainGames     []types.GameEntry        `json:"main_games"`
 }
 
 // GetGames fetches /api/games and returns the parsed response.
@@ -199,11 +194,11 @@ func (a *API) GetGames() (GamesResponse, error) {
 }
 
 // UpdateGames posts new games and main_games to the server.
-func (a *API) UpdateGames(games []string, mainGames []types.GameEntry) error {
+func (a *API) UpdateGames(instances []types.GameSwapInstance, mainGames []types.GameEntry) error {
 	if a.BaseURL == "" {
 		return fmt.Errorf("no server configured")
 	}
-	body := map[string]any{"games": games, "main_games": mainGames}
+	body := map[string]any{"game_instances": instances, "main_games": mainGames}
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/games", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
@@ -265,11 +260,11 @@ func (a *API) SetInterval(min, max int) error {
 }
 
 // SwapPlayer sends a swap command for a single player and returns the result.
-func (a *API) SwapPlayer(player, game string) (string, error) {
+func (a *API) SwapPlayerToInstance(player, instanceID string) (string, error) {
 	if a.BaseURL == "" {
 		return "", fmt.Errorf("no server configured")
 	}
-	body := map[string]string{"player": player, "game": game}
+	body := map[string]string{"player": player, "instance_id": instanceID}
 	b, _ := json.Marshal(body)
 	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/swap_player", bytes.NewReader(b))
 	req.Header.Set("Content-Type", "application/json")
@@ -405,4 +400,58 @@ func (a *API) UploadFile(localPath string) error {
 // BizhawkFilesURL returns the URL to download BizhawkFiles.zip from the server.
 func (a *API) BizhawkFilesURL() string {
 	return a.BaseURL + "/api/BizhawkFiles.zip"
+}
+
+// EnsureFile ensures the named file exists locally, downloading it from the server if missing.
+// name is the relative path under /files/ on the server (e.g. "games/foo.zip").
+func (a *API) EnsureFile(ctx context.Context, name string) error {
+	dest := filepath.Join("./roms", filepath.FromSlash(name))
+	if _, err := os.Stat(dest); err == nil {
+		return nil // exists
+	}
+	// ensure directory
+	if err := os.MkdirAll(filepath.Dir(dest), 0755); err != nil {
+		return err
+	}
+	// build URL
+	fetch := a.BaseURL
+	if len(fetch) > 0 && fetch[len(fetch)-1] == '/' {
+		fetch = fetch[:len(fetch)-1]
+	}
+	fetch += "/files/" + name
+
+	// try up to 3 times
+	var lastErr error
+	for i := 0; i < 3; i++ {
+		req, _ := http.NewRequestWithContext(ctx, "GET", fetch, nil)
+		resp, err := a.HTTPClient.Do(req)
+		if err != nil {
+			lastErr = err
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		if resp.StatusCode != 200 {
+			lastErr = fmt.Errorf("bad status: %s", resp.Status)
+			_ = resp.Body.Close()
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		out, err := os.Create(dest)
+		if err != nil {
+			_ = resp.Body.Close()
+			return err
+		}
+		_, err = io.Copy(out, resp.Body)
+		_ = resp.Body.Close()
+		if err := out.Close(); err != nil {
+			_ = err
+		}
+		if err != nil {
+			lastErr = err
+			time.Sleep(500 * time.Millisecond)
+			continue
+		}
+		return nil
+	}
+	return lastErr
 }

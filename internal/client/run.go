@@ -12,12 +12,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
-	"os/signal"
-	"runtime"
 	"strings"
-	"syscall"
-
-	"github.com/michael4d45/bizshuffle/internal"
 )
 
 // ErrNotFound is returned when a requested remote save/file is not present on the server
@@ -32,7 +27,7 @@ type Client struct {
 	wsClient     *WSClient
 	api          *API
 	bhController *BizHawkController
-	bipc         *internal.BizhawkIPC
+	bipc         *BizhawkIPC
 }
 
 // New creates and initializes a Client from CLI args.
@@ -121,7 +116,7 @@ func New(args []string) (*Client, error) {
 
 	httpClient := &http.Client{Timeout: 0}
 
-	bipc := internal.NewBizhawkIPC("127.0.0.1", 55355)
+	bipc := NewBizhawkIPC("127.0.0.1", 55355)
 
 	// create a controller with a temporary API (no base URL) to perform any
 	// installation/download steps before the real server API is known.
@@ -158,61 +153,36 @@ func New(args []string) (*Client, error) {
 
 // Run starts the client's runtime: opens connections, starts goroutines and
 // blocks until shutdown completes.
-func (c *Client) Run() error {
+func (c *Client) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
-	origCancel := cancel
-	cancel = func() {
-		pcs := make([]uintptr, 8)
-		n := runtime.Callers(2, pcs)
-		caller := "unknown"
-		if n > 0 {
-			frames := runtime.CallersFrames(pcs[:n])
-			if f, ok := frames.Next(); ok {
-				caller = fmt.Sprintf("%s %s:%d", f.Function, f.File, f.Line)
-			}
-		}
-		buf := make([]byte, 1<<12)
-		m := runtime.Stack(buf, false)
-		log.Printf("top-level cancel() invoked (guarded) by %s; stack snapshot:\n%s", caller, string(buf[:m]))
-	}
 	defer cancel()
 
-	log.Printf("run: starting with guarded cancel; wsURL=%s server=%s player=%s goroutines=%d", c.wsClient.wsURL, c.api.BaseURL, c.cfg["name"], runtime.NumGoroutine())
-	defer func() {
-		buf := make([]byte, 1<<12)
-		m := runtime.Stack(buf, true)
-		log.Printf("run: exiting; goroutines=%d; stack snapshot:\n%s", runtime.NumGoroutine(), string(buf[:m]))
+	go func() {
+		log.Printf("[Client] client starting")
+		if err := c.bhController.LaunchAndManage(ctx, cancel); err != nil {
+			log.Printf("LaunchAndManage error: %v", err)
+		}
 	}()
 
-	sigs := make(chan os.Signal, 1)
-	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
-
+	log.Printf("[Client] starting bizhawk ipc")
 	if err := c.bipc.Start(ctx); err != nil {
-		log.Printf("bizhawk ipc start: %v", err)
-		return err
+		log.Printf("bizhawk ipc start error: %v", err)
 	} else {
 		log.Printf("bizhawk ipc started")
 	}
-	defer func() { _ = c.bipc.Close(); log.Printf("closing bizhawk ipc") }()
+	defer func() {
+		_ = c.bipc.Close()
+		log.Printf("closing bizhawk ipc")
+	}()
 
+	log.Printf("[Client] starting bizhawk ipc")
+	c.bhController.StartIPCGoroutine(ctx)
+
+	log.Printf("[Client] starting websocket client")
 	c.wsClient.Start(ctx, c.cfg)
 	defer c.wsClient.Stop()
 
-	c.bhController.StartIPCGoroutine(ctx)
-
-	// Delegate BizHawk launch and lifecycle management to the controller.
-	if err := c.bhController.LaunchAndManage(ctx, origCancel, sigs); err != nil {
-		// LaunchAndManage already calls origCancel() on failure where appropriate.
-		if c.logFile != nil {
-			_ = c.logFile.Close()
-		}
-		return err
-	}
-
-	if c.logFile != nil {
-		_ = c.logFile.Close()
-	}
-	return nil
+	<-ctx.Done()
 }
 
 // InitLogging sets up global logging and returns the opened log file which the

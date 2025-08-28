@@ -210,13 +210,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.state.Players[name] = types.Player{Name: name, Connected: true}
 				s.conns[c] = client
 				s.players[name] = client
-				games := append([]string{}, s.state.Games...)
+				instances := append([]types.GameSwapInstance{}, s.state.GameSwapInstances...)
 				mainGames := append([]types.GameEntry{}, s.state.MainGames...)
 				s.mu.Unlock()
 				if err := s.saveState(); err != nil {
 					fmt.Printf("saveState error: %v\n", err)
 				}
-				payload := map[string]any{"games": games, "main_games": mainGames}
+				payload := map[string]any{"game_instances": instances, "main_games": mainGames}
 				select {
 				case client.sendCh <- types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())}:
 				default:
@@ -225,20 +225,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				// can load the correct ROM on startup. If we determine a game and the
 				// player's persisted Current is empty, persist the assignment.
 				if game := s.currentGameForPlayer(name); game != "" {
-					// persist if not already present
-					s.mu.Lock()
-					pl := s.state.Players[name]
-					if pl.Current == "" {
-						pl.Current = game
-						s.state.Players[name] = pl
-						s.state.UpdatedAt = time.Now()
-						s.mu.Unlock()
-						if err := s.saveState(); err != nil {
-							fmt.Printf("saveState error: %v\n", err)
-						}
-					} else {
-						s.mu.Unlock()
-					}
 					startPayload := map[string]any{"game": game}
 					select {
 					case client.sendCh <- types.Command{Cmd: types.CmdStart, Payload: startPayload, ID: fmt.Sprintf("init-%d", time.Now().UnixNano())}:

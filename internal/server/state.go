@@ -28,6 +28,9 @@ func (s *Server) loadState() {
 		log.Printf("failed to decode state file %s: %v", "state.json", err)
 		return
 	}
+	if tmp.GameSwapInstances == nil {
+		tmp.GameSwapInstances = []types.GameSwapInstance{}
+	}
 	if tmp.Games == nil {
 		tmp.Games = []string{}
 	}

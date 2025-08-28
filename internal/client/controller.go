@@ -7,20 +7,19 @@ import (
 	"sync"
 	"time"
 
-	"github.com/michael4d45/bizshuffle/internal"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
 // Controller wires dependencies and handles incoming commands.
 type Controller struct {
 	cfg       Config
-	bipc      *internal.BizhawkIPC
-	dl        *internal.Downloader
+	bipc      *BizhawkIPC
+	api       *API
 	writeJSON func(types.Command) error
 }
 
-func NewController(cfg Config, bipc *internal.BizhawkIPC, dl *internal.Downloader, writeJSON func(types.Command) error) *Controller {
-	return &Controller{cfg: cfg, bipc: bipc, dl: dl, writeJSON: writeJSON}
+func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error) *Controller {
+	return &Controller{cfg: cfg, bipc: bipc, api: api, writeJSON: writeJSON}
 }
 
 // Handle processes a single incoming command. It launches goroutines for
@@ -53,7 +52,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			if game != "" {
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-				if err := c.dl.EnsureFile(ctx2, game); err != nil {
+				if err := c.api.EnsureFile(ctx2, game); err != nil {
 					cancel2()
 					sendNack(id, "download failed: "+err.Error())
 					return
@@ -89,7 +88,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 			log.Printf("ensuring ROM present for game=%s", game)
-			if err := c.dl.EnsureFile(ctx2, game); err != nil {
+			if err := c.api.EnsureFile(ctx2, game); err != nil {
 				cancel2()
 				sendNack(id, "download failed: "+err.Error())
 				return
@@ -121,21 +120,25 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	case types.CmdGamesUpdate:
 		go func(payload any) {
 			required := make(map[string]struct{})
-			active := make(map[string]struct{})
+			// Build set of instance games we need
+			instanceGames := make(map[string]struct{})
 			if m, ok := payload.(map[string]any); ok {
-				if gs, ok := m["games"].([]any); ok {
-					for _, gi := range gs {
-						if sname, ok := gi.(string); ok {
-							required[sname] = struct{}{}
-							active[sname] = struct{}{}
+				if gis, ok := m["game_instances"].([]any); ok {
+					for _, gi := range gis {
+						if im, ok := gi.(map[string]any); ok {
+							if g, ok2 := im["game"].(string); ok2 && g != "" {
+								instanceGames[g] = struct{}{}
+								required[g] = struct{}{}
+							}
 						}
 					}
 				}
+				// extras from main_games when primary is in instanceGames
 				if mg, ok := m["main_games"].([]any); ok {
 					for _, mei := range mg {
 						if em, ok := mei.(map[string]any); ok {
 							if f, ok := em["file"].(string); ok {
-								if _, isActive := active[f]; isActive {
+								if _, isActive := instanceGames[f]; isActive {
 									if extras, ok := em["extra_files"].([]any); ok {
 										for _, ex := range extras {
 											if exs, ok := ex.(string); ok {
@@ -158,7 +161,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					defer wg.Done()
 					ctx2, cancel2 := context.WithTimeout(ctx, 60*time.Second)
 					defer cancel2()
-					if err := c.dl.EnsureFile(ctx2, fname); err != nil {
+					if err := c.api.EnsureFile(ctx2, fname); err != nil {
 						errCh <- fmt.Errorf("failed to download %s: %w", fname, err)
 						return
 					}

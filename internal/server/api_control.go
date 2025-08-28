@@ -52,7 +52,7 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
-	s.state.Games = []string{}
+	s.state.GameSwapInstances = []types.GameSwapInstance{}
 	s.state.Running = false
 	s.state.UpdatedAt = time.Now()
 	s.mu.Unlock()
@@ -126,6 +126,24 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 		if err := s.saveState(); err != nil {
 			fmt.Printf("saveState error: %v\n", err)
 		}
+		if _, err := w.Write([]byte("ok")); err != nil {
+			fmt.Printf("write response error: %v\n", err)
+		}
+		return
+	}
+	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+// apiMode sets or reads the swap mode
+func (s *Server) apiModeSetup(w http.ResponseWriter, r *http.Request) {
+	if r.Method == http.MethodPost {
+
+		handler := s.GetGameModeHandler()
+		if err := handler.SetupState(); err != nil {
+			http.Error(w, "something went wrong "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)
 		}

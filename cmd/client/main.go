@@ -12,7 +12,5 @@ func main() {
 	if err != nil {
 		log.Fatalf("client init failed: %v", err)
 	}
-	if err := c.Run(); err != nil {
-		log.Fatalf("client failed: %v", err)
-	}
+	c.Run()
 }

@@ -4,22 +4,16 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
-
-	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
 // performSwap dispatches to the appropriate mode implementation.
 func (s *Server) performSwap() error {
-	s.mu.Lock()
-	mode := s.state.Mode
-	s.mu.Unlock()
-
-	handler, err := getGameModeHandler(mode)
-	if err != nil {
+	handler := s.GetGameModeHandler()
+	// Call the mode-specific swap handler.
+	if err := handler.HandleSwap(); err != nil {
 		return err
 	}
-
-	return handler.HandleSwap(s)
+	return nil
 }
 
 // schedulerLoop schedules automatic swaps when enabled.
@@ -55,7 +49,6 @@ func (s *Server) schedulerLoop() {
 		if err := s.saveState(); err != nil {
 			fmt.Printf("saveState error: %v\n", err)
 		}
-		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"next_swap_at": nextAt, "updated_at": time.Now()}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		timer := time.NewTimer(time.Duration(interval) * time.Second)
 		select {
 		case <-timer.C:

@@ -10,34 +10,79 @@ import (
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
-// apiSwapPlayer: POST {player:..., game:...}
+// apiSwapPlayer: POST {player:..., instance_id:...}
+// If instance_id is provided, assign that instance to the player and swap to its game.
 func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 	var b struct {
-		Player string `json:"player"`
-		Game   string `json:"game"`
+		Player     string `json:"player"`
+		InstanceID string `json:"instance_id"`
+		Game       string `json:"game"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	// Persist the new current game for the player and broadcast state update
-	s.mu.Lock()
-	p, ok := s.state.Players[b.Player]
-	if !ok {
-		p = types.Player{Name: b.Player}
+	// Determine the game file to swap to. Prefer explicit game in request, otherwise use instance lookup.
+	var gameFile string
+	if b.Game != "" {
+		gameFile = b.Game
+		// ensure player exists and mark connected
+		s.mu.Lock()
+		p, ok := s.state.Players[b.Player]
+		if !ok {
+			p = types.Player{Name: b.Player}
+		}
+		p.Connected = true
+		s.state.Players[b.Player] = p
+		s.state.UpdatedAt = time.Now()
+		s.mu.Unlock()
+	} else if b.InstanceID != "" {
+		// Look up instance by id and assign to player if provided
+		s.mu.Lock()
+		found := false
+		for i, inst := range s.state.GameSwapInstances {
+			if inst.ID == b.InstanceID {
+				s.state.GameSwapInstances[i].Player = b.Player
+				gameFile = inst.Game
+				found = true
+				break
+			}
+		}
+		// ensure player entry exists
+		p, ok := s.state.Players[b.Player]
+		if !ok {
+			p = types.Player{Name: b.Player}
+		}
+		p.Connected = true
+		s.state.Players[b.Player] = p
+		s.state.UpdatedAt = time.Now()
+		s.mu.Unlock()
+		if !found {
+			http.Error(w, "instance not found", http.StatusBadRequest)
+			return
+		}
 	}
-	p.Current = b.Game
-	s.state.Players[b.Player] = p
-	s.state.UpdatedAt = time.Now()
-	s.mu.Unlock()
 
+	// If neither game nor instance provided, it's a bad request
+	if gameFile == "" {
+		http.Error(w, "missing game or instance_id", http.StatusBadRequest)
+		return
+	}
+
+	// Let the mode handler update server state appropriately for this player-level swap
+	handler := s.GetGameModeHandler()
+	if err := handler.HandlePlayerSwap(b.Player, gameFile, b.InstanceID); err != nil {
+		http.Error(w, "handler: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	// Build swap command and send to client
 	cmdID := fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), b.Player)
-	cmd := types.Command{Cmd: types.CmdSwap, ID: cmdID, Payload: map[string]string{"game": b.Game}}
+	cmd := types.Command{Cmd: types.CmdSwap, ID: cmdID, Payload: map[string]string{"game": gameFile}}
 	res, err := s.sendAndWait(b.Player, cmd, 20*time.Second)
 	if err != nil {
 		if errors.Is(err, ErrTimeout) {
@@ -47,6 +92,12 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// Persist state and broadcast update
+	if err := s.saveState(); err != nil {
+		fmt.Printf("saveState error: %v\n", err)
+	}
+	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+
 	if err := json.NewEncoder(w).Encode(map[string]string{"result": res}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}
