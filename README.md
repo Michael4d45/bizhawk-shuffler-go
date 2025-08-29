@@ -134,6 +134,25 @@ Client UX & installation notes
 
 - The client is a simple Go binary. Wanting a one-click installer: packaging for Windows (NSIS or similar) can wrap the binary and drop a shortcut. The client will write `client_config.json` in the working directory; you can change this to %APPDATA% or user profile dir later.
 
+Download Progress Display
+
+The client now features a pacman-style download progress display that shows real-time information for file downloads:
+
+```
+ gcc-15.2.1+r22+gc4e96a094636-1-x86_64              54.1 MiB  3.00 MiB/s 00:18 [##############################################] 100%
+ linux-6.16.4.arch1-1-x86_64                        142.4 MiB  6.17 MiB/s 00:23 [##############################################] 100%
+ linux-firmware-intel-20250808-1-any                103.6 MiB  2.76 MiB/s 00:38 [##############################################] 100%
+```
+
+Features:
+- Real-time progress bars with visual completion indicators
+- File size and download speed display
+- Estimated time remaining (ETA)
+- Automatic download of extra files associated with main games
+- Thread-safe progress tracking for concurrent downloads
+
+The client maintains a cache of main games configuration from the server, allowing it to automatically download any extra files (assets, patches, etc.) when downloading primary game files.
+
 Command-line flags
 
 - Server: `--host` and `--port` to override listening address (these override config file if present).

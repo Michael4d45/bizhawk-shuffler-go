@@ -26,3 +26,4 @@ web/BizhawkFiles/*
 
 # Server artifacts
 state.json
+files/
