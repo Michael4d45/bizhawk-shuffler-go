@@ -158,15 +158,23 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 		go func(payload any) {
 			required := make(map[string]struct{})
 			// Build set of instance games we need
-			instanceGames := make(map[string]struct{})
+			games := make(map[string]struct{})
 			if m, ok := payload.(map[string]any); ok {
 				if gis, ok := m["game_instances"].([]any); ok {
 					for _, gi := range gis {
 						if im, ok := gi.(map[string]any); ok {
 							if g, ok2 := im["game"].(string); ok2 && g != "" {
-								instanceGames[g] = struct{}{}
+								games[g] = struct{}{}
 								required[g] = struct{}{}
 							}
+						}
+					}
+				}
+				if gg, ok := m["games"].([]any); ok {
+					for _, gi := range gg {
+						if g, ok := gi.(string); ok {
+							games[g] = struct{}{}
+							required[g] = struct{}{}
 						}
 					}
 				}
@@ -175,7 +183,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					for _, mei := range mg {
 						if em, ok := mei.(map[string]any); ok {
 							if f, ok := em["file"].(string); ok {
-								if _, isActive := instanceGames[f]; isActive {
+								if _, isActive := games[f]; isActive {
 									if extras, ok := em["extra_files"].([]any); ok {
 										for _, ex := range extras {
 											if exs, ok := ex.(string); ok {

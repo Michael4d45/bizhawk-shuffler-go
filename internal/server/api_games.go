@@ -65,7 +65,11 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			fmt.Printf("saveState error: %v\n", err)
 		}
 		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{"game_instances": s.state.GameSwapInstances, "main_games": s.state.MainGames}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{
+			"game_instances": s.state.GameSwapInstances,
+			"main_games":     s.state.MainGames,
+			"games":          s.state.Games,
+		}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)
 		}
