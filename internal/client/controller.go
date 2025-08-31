@@ -17,11 +17,23 @@ type Controller struct {
 	cfg       Config
 	bipc      *BizhawkIPC
 	api       *API
+	enhanced  *EnhancedAPI
 	writeJSON func(types.Command) error
+	// mainGames caches the server's main games list for extra_files lookup
+	mainGames []types.GameEntry
+	mu        sync.RWMutex // protects mainGames
 }
 
 func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error) *Controller {
-	return &Controller{cfg: cfg, bipc: bipc, api: api, writeJSON: writeJSON}
+	c := &Controller{
+		cfg:       cfg,
+		bipc:      bipc,
+		api:       api,
+		writeJSON: writeJSON,
+		mainGames: make([]types.GameEntry, 0),
+	}
+	c.enhanced = NewEnhancedAPI(api, c)
+	return c
 }
 
 // Handle processes a single incoming command. It launches goroutines for
@@ -57,7 +69,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				return
 			} else {
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-				if err := c.api.EnsureFile(ctx2, game); err != nil {
+				if err := c.enhanced.EnsureFileWithProgress(ctx2, game); err != nil {
 					cancel2()
 					sendNack(id, "download failed: "+err.Error())
 					return
@@ -103,7 +115,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 			log.Printf("ensuring ROM present for game=%s", game)
-			if err := c.api.EnsureFile(ctx2, game); err != nil {
+			if err := c.enhanced.EnsureFileWithProgress(ctx2, game); err != nil {
 				cancel2()
 				sendNack(id, "download failed: "+err.Error())
 				return
@@ -159,7 +171,33 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			required := make(map[string]struct{})
 			// Build set of instance games we need
 			games := make(map[string]struct{})
+			var mainGames []types.GameEntry
+
 			if m, ok := payload.(map[string]any); ok {
+				// Parse and cache main_games first
+				if mg, ok := m["main_games"].([]any); ok {
+					for _, mei := range mg {
+						if em, ok := mei.(map[string]any); ok {
+							var entry types.GameEntry
+							if f, ok := em["file"].(string); ok {
+								entry.File = f
+							}
+							if extras, ok := em["extra_files"].([]any); ok {
+								for _, ex := range extras {
+									if exs, ok := ex.(string); ok {
+										entry.ExtraFiles = append(entry.ExtraFiles, exs)
+									}
+								}
+							}
+							if entry.File != "" {
+								mainGames = append(mainGames, entry)
+							}
+						}
+					}
+				}
+				// Update the cached main games
+				c.SetMainGames(mainGames)
+
 				if gis, ok := m["game_instances"].([]any); ok {
 					for _, gi := range gis {
 						if im, ok := gi.(map[string]any); ok {
@@ -179,20 +217,10 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					}
 				}
 				// extras from main_games when primary is in instanceGames
-				if mg, ok := m["main_games"].([]any); ok {
-					for _, mei := range mg {
-						if em, ok := mei.(map[string]any); ok {
-							if f, ok := em["file"].(string); ok {
-								if _, isActive := games[f]; isActive {
-									if extras, ok := em["extra_files"].([]any); ok {
-										for _, ex := range extras {
-											if exs, ok := ex.(string); ok {
-												required[exs] = struct{}{}
-											}
-										}
-									}
-								}
-							}
+				for _, entry := range mainGames {
+					if _, isActive := games[entry.File]; isActive {
+						for _, extra := range entry.ExtraFiles {
+							required[extra] = struct{}{}
 						}
 					}
 				}
@@ -206,7 +234,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					defer wg.Done()
 					ctx2, cancel2 := context.WithTimeout(ctx, 60*time.Second)
 					defer cancel2()
-					if err := c.api.EnsureFile(ctx2, fname); err != nil {
+					if err := c.enhanced.EnsureFileWithProgress(ctx2, fname); err != nil {
 						errCh <- fmt.Errorf("failed to download %s: %w", fname, err)
 						return
 					}
@@ -273,5 +301,39 @@ func (c *Controller) EnsureSaveState(instanceID string) error {
 		log.Printf("Successfully downloaded save state for instance %s", instanceID)
 	}
 
+	return nil
+}
+
+// GetMainGames returns a copy of the cached main games list
+func (c *Controller) GetMainGames() []types.GameEntry {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	result := make([]types.GameEntry, len(c.mainGames))
+	copy(result, c.mainGames)
+	return result
+}
+
+// SetMainGames updates the cached main games list
+func (c *Controller) SetMainGames(mainGames []types.GameEntry) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+
+	c.mainGames = make([]types.GameEntry, len(mainGames))
+	copy(c.mainGames, mainGames)
+}
+
+// GetExtraFilesForGame returns the extra files for a given primary game file
+func (c *Controller) GetExtraFilesForGame(game string) []string {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+
+	for _, entry := range c.mainGames {
+		if entry.File == game {
+			result := make([]string, len(entry.ExtraFiles))
+			copy(result, entry.ExtraFiles)
+			return result
+		}
+	}
 	return nil
 }
