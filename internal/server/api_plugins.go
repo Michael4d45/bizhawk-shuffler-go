@@ -167,7 +167,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 
 	pluginName := strings.TrimSuffix(header.Filename, ".lua")
 	pluginDir := filepath.Join("./plugins/available", pluginName)
-	
+
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		http.Error(w, "failed to create plugin dir: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -218,14 +218,14 @@ func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
 	if err != nil {
 		// If no meta.json, create a basic plugin entry
 		return &types.Plugin{
-			Name:       pluginName,
-			Version:    "unknown",
+			Name:        pluginName,
+			Version:     "unknown",
 			Description: "Plugin without metadata",
-			Author:     "Unknown",
-			Enabled:    false,
-			EntryPoint: "plugin.lua",
-			Status:     types.PluginStatusDisabled,
-			Path:       pluginDir,
+			Author:      "Unknown",
+			Enabled:     false,
+			EntryPoint:  "plugin.lua",
+			Status:      types.PluginStatusDisabled,
+			Path:        pluginDir,
 		}
 	}
 	defer metaFile.Close()
@@ -247,15 +247,15 @@ func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
 func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
 	parts := strings.Split(path, "/")
-	
+
 	if len(parts) < 2 {
 		http.Error(w, "invalid plugin action path", http.StatusBadRequest)
 		return
 	}
-	
+
 	pluginName := parts[0]
 	action := parts[1]
-	
+
 	switch action {
 	case "enable":
 		s.handlePluginEnableByName(w, r, pluginName)

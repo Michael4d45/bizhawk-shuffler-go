@@ -77,13 +77,13 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/swap_player", s.apiSwapPlayer)
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
-	
+
 	// Plugin management routes
 	mux.HandleFunc("/api/plugins", s.handlePluginsList)
 	mux.HandleFunc("/api/plugins/upload", s.handlePluginUpload)
 	// Plugin enable/disable routes - these need to handle the plugin name in the URL path
 	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
-	
+
 	// Save state management endpoints
 	mux.HandleFunc("/save/upload", s.handleSaveUpload)
 	mux.HandleFunc("/save/", s.handleSaveDownload)

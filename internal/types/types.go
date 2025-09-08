@@ -145,7 +145,7 @@ type ServerState struct {
 	// MainGames is the main catalog of games on the server. Each entry
 	// describes the primary file and any additional files that clients
 	// should also download when preparing this game.
-	MainGames []GameEntry       `json:"main_games,omitempty"`
+	MainGames []GameEntry `json:"main_games,omitempty"`
 	// Plugins contains the current plugin configuration and status
 	Plugins   map[string]Plugin `json:"plugins,omitempty"`
 	Players   map[string]Player `json:"players"`
@@ -182,16 +182,16 @@ type GameSwapInstance struct {
 
 // Plugin represents a Lua plugin that can be loaded into BizHawk
 type Plugin struct {
-	Name         string            `json:"name"`
-	Version      string            `json:"version"`
-	Description  string            `json:"description"`
-	Author       string            `json:"author"`
-	Enabled      bool              `json:"enabled"`
-	EntryPoint   string            `json:"entry_point"`
-	Dependencies []string          `json:"dependencies,omitempty"`
-	Config       map[string]any    `json:"config,omitempty"`
-	Status       PluginStatus      `json:"status"`
-	Path         string            `json:"path"`
+	Name         string         `json:"name"`
+	Version      string         `json:"version"`
+	Description  string         `json:"description"`
+	Author       string         `json:"author"`
+	Enabled      bool           `json:"enabled"`
+	EntryPoint   string         `json:"entry_point"`
+	Dependencies []string       `json:"dependencies,omitempty"`
+	Config       map[string]any `json:"config,omitempty"`
+	Status       PluginStatus   `json:"status"`
+	Path         string         `json:"path"`
 }
 
 // PluginStatus represents the current status of a plugin
@@ -199,7 +199,7 @@ type PluginStatus string
 
 const (
 	PluginStatusDisabled PluginStatus = "disabled"
-	PluginStatusEnabled  PluginStatus = "enabled" 
+	PluginStatusEnabled  PluginStatus = "enabled"
 	PluginStatusLoading  PluginStatus = "loading"
 	PluginStatusError    PluginStatus = "error"
 )
