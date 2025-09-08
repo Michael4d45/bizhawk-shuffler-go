@@ -7,8 +7,21 @@ local PORT = 55355
 
 local ROM_DIR = "./roms"
 local SAVE_DIR = "./saves"
+local PLUGIN_DIR = "./plugins/available"
 
 console.log("Shuffler server starting (listening)...")
+
+-- Simple plugin loading system (basic implementation)
+local loaded_plugins = {}
+
+local function load_plugins()
+    -- This is a placeholder for basic plugin loading
+    -- In the future, this would scan the plugin directory and load enabled plugins
+    console.log("Plugin system initialized (basic implementation)")
+end
+
+-- Initialize plugin system
+load_plugins()
 
 local function now()
     return socket.gettime()
