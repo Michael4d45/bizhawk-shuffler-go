@@ -118,9 +118,14 @@
               Connected clients & current game
             </p>
           </div>
-          <button @click="refreshState()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-            Refresh
-          </button>
+          <div class="flex gap-2">
+            <button @click="messageAll()" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500">
+              Message All
+            </button>
+            <button @click="refreshState()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Refresh
+            </button>
+          </div>
         </div>
         <ul class="space-y-2">
           <template x-for="(p, name) in state.players" :key="name">
@@ -172,6 +177,10 @@
                   class="px-2 py-1 rounded text-xs font-semibold transition whitespace-nowrap"
                   :class="p.selectedGame ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
                   Swap
+                </button>
+                <button @click="messagePlayer(name)"
+                  class="px-2 py-1 rounded text-xs font-semibold transition bg-blue-600 hover:bg-blue-500">
+                  Message
                 </button>
                 <button @click="removePlayer(name)"
                   class="px-2 py-1 rounded text-xs font-semibold transition bg-red-600 hover:bg-red-500">
@@ -1033,6 +1042,54 @@
             }
           } catch (e) {
             this.log('remove_player err ' + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async messagePlayer(player) {
+          if (!player) return;
+          const message = prompt(`Send message to ${player}:`);
+          if (!message) return;
+          this.loadingAction = 'message:' + player;
+          try {
+            const res = await fetch('/api/message_player', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ player, message })
+            });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              this.log(`message sent to ${player}: "${message}"`);
+            } else {
+              this.log(`/api/message_player failed for ${player}`);
+            }
+          } catch (e) {
+            this.log('message_player err ' + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async messageAll() {
+          const message = prompt('Send message to all players:');
+          if (!message) return;
+          this.loadingAction = 'message_all';
+          try {
+            const res = await fetch('/api/message_all', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message })
+            });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              this.log(`message sent to all players: "${message}"`);
+              if (body && body.results) {
+                this.log(`message results: ${JSON.stringify(body.results)}`);
+              }
+            } else {
+              this.log('/api/message_all failed');
+            }
+          } catch (e) {
+            this.log('message_all err ' + e.message);
           } finally {
             this.loadingAction = null;
           }

@@ -15,6 +15,7 @@ const (
 	CmdStart          CommandName = "start"
 	CmdPause          CommandName = "pause"
 	CmdSwap           CommandName = "swap"
+	CmdMessage        CommandName = "message"
 	CmdAck            CommandName = "ack"
 	CmdNack           CommandName = "nack"
 	CmdStatus         CommandName = "status"
