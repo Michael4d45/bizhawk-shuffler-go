@@ -259,7 +259,6 @@
             </template>
           </div>
 
-          <!-- Add new instance form -->
           <div class="mt-4 p-3 bg-slate-800/40 rounded">
             <h3 class="text-sm text-gray-300 mb-2">Add New Instance</h3>
             <div class="flex items-center gap-2">
@@ -276,8 +275,69 @@
               </button>
             </div>
           </div>
+
+          <div class="mt-3 flex gap-2 items-center">
+            <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Catalog
+            </button>
+            <button @click="setupGameMode()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Set up game mode
+            </button>
+          </div>
         </section>
       </template>
+
+      <!-- Plugins -->
+      <section
+        :class="showPluginsExpanded ? 'flex-1 flex flex-col bg-card border border-white/10 p-4 rounded-lg shadow' : 'bg-card border border-white/10 p-4 rounded-lg shadow'"
+        class="transition-all">
+        <div class="flex justify-between items-center">
+          <h2 class="text-sm text-gray-400">Plugins</h2>
+          <button @click="toggleSection('plugins')" class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
+            <span x-text="showPluginsExpanded ? 'Collapse' : 'Expand'"></span>
+          </button>
+        </div>
+        
+        <div :class="showPluginsExpanded ? 'mt-2 flex-1 overflow-auto space-y-2' : 'mt-2 space-y-2 max-h-40 overflow-auto'">
+          <template x-for="(plugin, name) in plugins" :key="name">
+            <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
+              <div class="flex-1">
+                <div class="flex items-center gap-2">
+                  <span class="text-sm font-medium" x-text="plugin.name"></span>
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                    :class="plugin.status === 'enabled' ? 'bg-green-400 text-black' : plugin.status === 'error' ? 'bg-red-400 text-black' : 'bg-slate-600 text-gray-300'"
+                    x-text="plugin.status"></span>
+                </div>
+                <div class="text-xs text-gray-400" x-text="plugin.description || 'No description'"></div>
+                <div class="text-xs text-gray-500" x-text="'v' + (plugin.version || '1.0.0') + ' by ' + (plugin.author || 'Unknown')"></div>
+              </div>
+              <div class="flex gap-1">
+                <button @click="togglePlugin(name, !plugin.enabled)" 
+                  :disabled="loadingAction === 'plugin:' + name"
+                  class="text-xs px-2 py-1 rounded transition-colors"
+                  :class="plugin.enabled ? 'bg-orange-500 hover:bg-orange-400 text-black' : 'bg-green-500 hover:bg-green-400 text-black'"
+                  x-text="plugin.enabled ? 'Disable' : 'Enable'">
+                </button>
+              </div>
+            </div>
+          </template>
+          
+          <div x-show="Object.keys(plugins).length === 0" class="text-sm text-gray-500 text-center py-4">
+            No plugins found. Upload a plugin to get started.
+          </div>
+        </div>
+
+        <div class="mt-3 flex gap-2 items-center">
+          <input type="file" id="plugin-upload" accept=".lua" class="hidden" @change="uploadPlugin($event)">
+          <button @click="document.getElementById('plugin-upload').click()" 
+            class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500 text-sm">
+            Upload Plugin
+          </button>
+          <button @click="refreshPlugins()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600 text-sm">
+            Refresh
+          </button>
+        </div>
+      </section>
 
       <!-- Logs -->
       <section class="bg-card border border-white/10 p-4 rounded-lg shadow">
@@ -365,6 +425,7 @@
         // accordion state: only one of games or saves can be expanded at once
         showGamesExpanded: false,
         showSavesExpanded: false,
+        showPluginsExpanded: false,
         loaded: false,
         state: { running: false, games: [], players: {} },
         // UI-managed list of game instances for CRUD
@@ -375,6 +436,7 @@
         // main catalog and available files under /files
         mainGames: [],
         files: [],
+        plugins: {},
         newMain: { primary: "", extras: [] },
         saves: {},
         logs: [],
@@ -477,6 +539,7 @@
           this.loaded = true;
           await this.refreshFilesList();
           await this.refreshMainGames();
+          await this.refreshPlugins();
           this.startWS();
           // load server mode
           this.fetchMode();
@@ -1154,15 +1217,89 @@
         toggleSection(name) {
           if (name === 'games') {
             this.showGamesExpanded = !this.showGamesExpanded;
-            if (this.showGamesExpanded) this.showSavesExpanded = false;
+            if (this.showGamesExpanded) {
+              this.showSavesExpanded = false;
+              this.showPluginsExpanded = false;
+            }
           } else if (name === 'saves') {
             this.showSavesExpanded = !this.showSavesExpanded;
-            if (this.showSavesExpanded) this.showGamesExpanded = false;
+            if (this.showSavesExpanded) {
+              this.showGamesExpanded = false;
+              this.showPluginsExpanded = false;
+            }
+          } else if (name === 'plugins') {
+            this.showPluginsExpanded = !this.showPluginsExpanded;
+            if (this.showPluginsExpanded) {
+              this.showGamesExpanded = false;
+              this.showSavesExpanded = false;
+            }
           }
           // small timeout to allow layout changes then refresh scrollable lists if needed
           setTimeout(() => {
             // nothing heavy here; future hooks could recalc virtual lists
           }, 100);
+        },
+
+        // Plugin management functions
+        async refreshPlugins() {
+          try {
+            const res = await fetch('/api/plugins');
+            if (res.ok) {
+              const body = await res.json();
+              this.plugins = body.plugins || {};
+            }
+          } catch (e) {
+            this.log('refresh plugins err: ' + e.message);
+          }
+        },
+
+        async togglePlugin(name, enable) {
+          const action = enable ? 'enable' : 'disable';
+          this.loadingAction = 'plugin:' + name;
+          try {
+            const res = await fetch(`/api/plugins/${name}/${action}`, { method: 'POST' });
+            if (res.ok) {
+              this.log(`Plugin ${name} ${action}d`);
+              await this.refreshPlugins();
+            } else {
+              this.log(`Failed to ${action} plugin ${name}`);
+            }
+          } catch (e) {
+            this.log(`Plugin ${action} err: ` + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+
+        async uploadPlugin(event) {
+          const file = event.target.files[0];
+          if (!file) return;
+
+          this.loadingAction = 'plugin-upload';
+          try {
+            const formData = new FormData();
+            formData.append('plugin', file);
+            
+            const res = await fetch('/api/plugins/upload', {
+              method: 'POST',
+              body: formData
+            });
+            
+            if (res.ok) {
+              const message = await res.text();
+              this.log(message);
+              await this.refreshPlugins();
+            } else {
+              const error = await res.text();
+              this.log('Plugin upload failed: ' + error);
+            }
+          } catch (e) {
+            this.log('Upload error: ' + e.message);
+          } finally {
+            this.loadingAction = null;
+            // Reset the file input
+            event.target.value = '';
+          }
         },
       };
     }

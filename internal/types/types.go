@@ -61,6 +61,10 @@ func (f FileState) String() string {
 	return string(f)
 }
 
+func (ps PluginStatus) String() string {
+	return string(ps)
+}
+
 func (c CommandName) MarshalJSON() ([]byte, error) {
 	return json.Marshal(string(c))
 }
@@ -100,6 +104,19 @@ func (f *FileState) UnmarshalJSON(b []byte) error {
 	return nil
 }
 
+func (ps PluginStatus) MarshalJSON() ([]byte, error) {
+	return json.Marshal(string(ps))
+}
+
+func (ps *PluginStatus) UnmarshalJSON(b []byte) error {
+	var s string
+	if err := json.Unmarshal(b, &s); err != nil {
+		return err
+	}
+	*ps = PluginStatus(s)
+	return nil
+}
+
 // Command is the common websocket message envelope
 type Command struct {
 	Cmd     CommandName `json:"cmd"`
@@ -129,7 +146,9 @@ type ServerState struct {
 	// MainGames is the main catalog of games on the server. Each entry
 	// describes the primary file and any additional files that clients
 	// should also download when preparing this game.
-	MainGames []GameEntry       `json:"main_games,omitempty"`
+	MainGames []GameEntry `json:"main_games,omitempty"`
+	// Plugins contains the current plugin configuration and status
+	Plugins   map[string]Plugin `json:"plugins,omitempty"`
 	Players   map[string]Player `json:"players"`
 	UpdatedAt time.Time         `json:"updated_at"`
 
@@ -161,3 +180,27 @@ type GameSwapInstance struct {
 	Game      string    `json:"game"`
 	FileState FileState `json:"file_state"`
 }
+
+// Plugin represents a Lua plugin that can be loaded into BizHawk
+type Plugin struct {
+	Name         string         `json:"name"`
+	Version      string         `json:"version"`
+	Description  string         `json:"description"`
+	Author       string         `json:"author"`
+	Enabled      bool           `json:"enabled"`
+	EntryPoint   string         `json:"entry_point"`
+	Dependencies []string       `json:"dependencies,omitempty"`
+	Config       map[string]any `json:"config,omitempty"`
+	Status       PluginStatus   `json:"status"`
+	Path         string         `json:"path"`
+}
+
+// PluginStatus represents the current status of a plugin
+type PluginStatus string
+
+const (
+	PluginStatusDisabled PluginStatus = "disabled"
+	PluginStatusEnabled  PluginStatus = "enabled"
+	PluginStatusLoading  PluginStatus = "loading"
+	PluginStatusError    PluginStatus = "error"
+)
