@@ -2,7 +2,6 @@ package server
 
 import (
 	"errors"
-	"fmt"
 	"math/rand"
 	"time"
 
@@ -34,27 +33,24 @@ func (h *SyncModeHandler) HandleSwap() error {
 	}
 	// In sync mode, set all players to the same game
 	h.server.mu.Lock()
-	defer h.server.mu.Unlock()
+	// First loop: Update player states
 	for name, player := range h.server.state.Players {
 		player.Game = game
 		h.server.state.Players[name] = player
-		if player.Connected {
-			payload := map[string]string{"game": game}
-			// Notify connected players about the game change
-			if _, err := h.server.sendAndWait(name, types.Command{
-				Cmd:     types.CmdSwap,
-				Payload: payload,
-				ID:      fmt.Sprintf("swap-%d", time.Now().UnixNano()),
-			}, 20*time.Second); err != nil {
-				if errors.Is(err, ErrTimeout) {
-					fmt.Printf("swap timeout for %s\n", name)
-				} else {
-					fmt.Printf("sendAndWait error: %v\n", err)
-				}
-			}
-		}
 	}
 	h.server.state.UpdatedAt = time.Now()
+	// Gather info: Collect connected players
+	connectedPlayers := []string{}
+	for name, player := range h.server.state.Players {
+		if player.Connected {
+			connectedPlayers = append(connectedPlayers, name)
+		}
+	}
+	h.server.mu.Unlock()
+	// Second loop: Execute notifications for connected players
+	for _, name := range connectedPlayers {
+		h.server.sendSwap(name, game, "")
+	}
 	return nil
 }
 

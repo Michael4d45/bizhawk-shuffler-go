@@ -77,13 +77,13 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/swap_player", s.apiSwapPlayer)
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
-
 	// Plugin management routes
 	mux.HandleFunc("/api/plugins", s.handlePluginsList)
 	mux.HandleFunc("/api/plugins/upload", s.handlePluginUpload)
 	// Plugin enable/disable routes - these need to handle the plugin name in the URL path
 	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
-
+	mux.HandleFunc("/api/message_player", s.apiMessagePlayer)
+	mux.HandleFunc("/api/message_all", s.apiMessageAll)
 	// Save state management endpoints
 	mux.HandleFunc("/save/upload", s.handleSaveUpload)
 	mux.HandleFunc("/save/", s.handleSaveDownload)
@@ -130,13 +130,14 @@ func (s *Server) PersistedHost() string { s.mu.Lock(); defer s.mu.Unlock(); retu
 // UpdatePortIfChanged sets port in state if different and persists.
 func (s *Server) UpdatePortIfChanged(port int) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.state.Port == port {
+		s.mu.Unlock()
 		return
 	}
 	s.state.Port = port
 	s.state.UpdatedAt = time.Now()
 	st := s.state
+	s.mu.Unlock()
 	if err := s.saveState(); err != nil {
 		log.Printf("failed to persist port: %v", err)
 	} else {

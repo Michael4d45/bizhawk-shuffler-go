@@ -118,9 +118,14 @@
               Connected clients & current game
             </p>
           </div>
-          <button @click="refreshState()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-            Refresh
-          </button>
+          <div class="flex gap-2">
+            <button @click="messageAll()" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500">
+              Message All
+            </button>
+            <button @click="refreshState()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Refresh
+            </button>
+          </div>
         </div>
         <ul class="space-y-2">
           <template x-for="(p, name) in state.players" :key="name">
@@ -173,6 +178,10 @@
                   :class="p.selectedGame ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
                   Swap
                 </button>
+                <button @click="messagePlayer(name)"
+                  class="px-2 py-1 rounded text-xs font-semibold transition bg-blue-600 hover:bg-blue-500">
+                  Message
+                </button>
                 <button @click="removePlayer(name)"
                   class="px-2 py-1 rounded text-xs font-semibold transition bg-red-600 hover:bg-red-500">
                   Remove
@@ -192,6 +201,9 @@
             <h2 class="text-sm text-gray-400">Games</h2>
             <button @click="toggleSection('games')" class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
               <span x-text="showGamesExpanded ? 'Collapse' : 'Expand'"></span>
+            </button>
+            <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Catalog
             </button>
           </div>
           <!-- Saved instances list -->
@@ -223,6 +235,9 @@
             <button @click="toggleSection('games')" class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">
               <span x-text="showGamesExpanded ? 'Collapse' : 'Expand'"></span>
             </button>
+            <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Catalog
+            </button>
           </div>
           <!-- Saved instances list -->
           <div
@@ -244,13 +259,12 @@
             </template>
           </div>
 
-          <!-- Add new instance form -->
           <div class="mt-4 p-3 bg-slate-800/40 rounded">
             <h3 class="text-sm text-gray-300 mb-2">Add New Instance</h3>
             <div class="flex items-center gap-2">
               <input class="bg-slate-700 rounded px-2 py-1 text-sm w-48" type="text" placeholder="Instance ID"
                 x-model="newInstance.id" />
-              <select x-model="newInstance.game" class="bg-slate-700 rounded px-2 py-1 text-sm max-w-[12rem]">
+              <select x-model="newInstance.game" @change="autofillId()" class="bg-slate-700 rounded px-2 py-1 text-sm max-w-[12rem]">
                 <option value="">-- select file --</option>
                 <template x-for="f in gamesList" :key="f">
                   <option :value="f" x-text="f"></option>
@@ -263,14 +277,12 @@
           </div>
 
           <div class="mt-3 flex gap-2 items-center">
-            <div class="flex gap-2 items-center">
-              <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-                Catalog
-              </button>
-              <button @click="setupGameMode()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-                Set up game mode
-              </button>
-            </div>
+            <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Catalog
+            </button>
+            <button @click="setupGameMode()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Set up game mode
+            </button>
           </div>
         </section>
       </template>
@@ -928,6 +940,16 @@
           this.newInstance = { id: "", game: "" }; // Reset the form
         },
 
+        autofillId() {
+          if (this.newInstance.game) {
+            // Generate ID from game filename: remove extension and sanitize
+            const base = this.newInstance.game.replace(/\.[^/.]+$/, ""); // remove extension
+            this.newInstance.id = base.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase(); // sanitize
+          } else {
+            this.newInstance.id = "";
+          }
+        },
+
         async saveInstances() {
           try {
             // Ensure all instances are marked as saved when we attempt to save
@@ -950,16 +972,6 @@
           } catch (e) {
             this.log('save instances err: ' + e.message);
           }
-        },
-
-        async setupGameMode() {
-          await fetch('/api/mode/setup', { method: 'POST' })
-            .then((response) => {
-              this.log("game mode setup")
-            })
-            .catch((err) => {
-              this.log("error setting up game mode")
-            })
         },
 
         async saveInterval() {
@@ -1088,6 +1100,54 @@
             }
           } catch (e) {
             this.log('remove_player err ' + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async messagePlayer(player) {
+          if (!player) return;
+          const message = prompt(`Send message to ${player}:`);
+          if (!message) return;
+          this.loadingAction = 'message:' + player;
+          try {
+            const res = await fetch('/api/message_player', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ player, message })
+            });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              this.log(`message sent to ${player}: "${message}"`);
+            } else {
+              this.log(`/api/message_player failed for ${player}`);
+            }
+          } catch (e) {
+            this.log('message_player err ' + e.message);
+          } finally {
+            this.loadingAction = null;
+          }
+        },
+        async messageAll() {
+          const message = prompt('Send message to all players:');
+          if (!message) return;
+          this.loadingAction = 'message_all';
+          try {
+            const res = await fetch('/api/message_all', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ message })
+            });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              this.log(`message sent to all players: "${message}"`);
+              if (body && body.results) {
+                this.log(`message results: ${JSON.stringify(body.results)}`);
+              }
+            } else {
+              this.log('/api/message_all failed');
+            }
+          } catch (e) {
+            this.log('message_all err ' + e.message);
           } finally {
             this.loadingAction = null;
           }

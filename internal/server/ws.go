@@ -202,9 +202,13 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		if cmd.Cmd == types.CmdHello {
 			if pl, ok := cmd.Payload.(map[string]any); ok {
-				name := "player"
+				name := ""
 				if v, ok := pl["name"].(string); ok {
 					name = v
+				}
+				if name == "" {
+					log.Printf("CmdHello missing name in payload")
+					continue
 				}
 				player := s.currentPlayer(name)
 				player.Connected = true
@@ -225,6 +229,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				payload := map[string]any{
 					"game_instances": instances,
 					"main_games":     mainGames,
+					"games":          s.state.Games,
 				}
 				select {
 				case client.sendCh <- types.Command{
@@ -240,7 +245,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if player.Game != "" {
 					startPayload := map[string]any{
 						"game":       player.Game,
-						"instanceID": player.InstanceID,
+						"instance_id": player.InstanceID,
 					}
 					select {
 					case client.sendCh <- types.Command{
