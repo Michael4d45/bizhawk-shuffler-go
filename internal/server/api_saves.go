@@ -137,7 +137,7 @@ func (s *Server) setInstanceFileState(instanceID string, state types.FileState) 
 		}
 	}
 	s.mu.Unlock()
-	s.saveState()
+	_ = s.saveState()
 }
 
 // waitForFileReady waits for the file state to become ready or none, with timeout
