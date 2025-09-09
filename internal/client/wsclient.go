@@ -228,6 +228,7 @@ func (w *WSClient) runController(ctx context.Context, controller *Controller) {
 				return
 			}
 			log.Printf("server->client cmd: %s", cmd.Cmd)
+			log.Printf("cmd payload: %+v", cmd.Payload)
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
