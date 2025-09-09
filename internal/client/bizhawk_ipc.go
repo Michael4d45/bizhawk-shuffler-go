@@ -399,7 +399,11 @@ func (b *BizhawkIPC) SendResume(ctx context.Context) error {
 }
 
 func (b *BizhawkIPC) SendMessage(ctx context.Context, msg string) error {
-	return b.SendCommand(ctx, "MSG", msg)
+	return b.SendCommand(ctx, "MSG", msg, "3.0", "10", "10", "12", "#FFFFFF", "#000000")
+}
+
+func (b *BizhawkIPC) SendStyledMessage(ctx context.Context, msg string, duration float64, x, y, fontsize int, fg, bg string) error {
+	return b.SendCommand(ctx, "MSG", msg, fmt.Sprintf("%.1f", duration), strconv.Itoa(x), strconv.Itoa(y), strconv.Itoa(fontsize), fg, bg)
 }
 
 // SetReady sets the internal ready flag. Callers should use this to mark

@@ -258,9 +258,34 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	case types.CmdMessage:
 		go func(id string) {
 			message := ""
+			duration := 3.0
+			x := 10
+			y := 10
+			fontsize := 12
+			fg := "#FFFFFF"
+			bg := "#000000"
+
 			if m, ok := cmd.Payload.(map[string]any); ok {
 				if msg, ok := m["message"].(string); ok {
 					message = msg
+				}
+				if d, ok := m["duration"].(float64); ok {
+					duration = d
+				}
+				if px, ok := m["x"].(float64); ok {
+					x = int(px)
+				}
+				if py, ok := m["y"].(float64); ok {
+					y = int(py)
+				}
+				if fs, ok := m["fontsize"].(float64); ok {
+					fontsize = int(fs)
+				}
+				if f, ok := m["fg"].(string); ok {
+					fg = f
+				}
+				if b, ok := m["bg"].(string); ok {
+					bg = b
 				}
 			}
 			if message == "" {
@@ -269,7 +294,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
 			defer cancel2()
-			if err := c.bipc.SendMessage(ctx2, message); err != nil {
+			if err := c.bipc.SendStyledMessage(ctx2, message, duration, x, y, fontsize, fg, bg); err != nil {
 				sendNack(id, err.Error())
 				return
 			}

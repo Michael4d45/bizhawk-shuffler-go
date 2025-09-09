@@ -419,6 +419,78 @@
     </div>
   </div>
 
+  <!-- Message Composer Modal -->
+  <div x-show="showMessageComposer" x-transition class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-card rounded-lg w-11/12 max-w-md p-4">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold">Compose Message</h3>
+        <button @click="closeMessageComposer()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">×</button>
+      </div>
+      
+      <div class="space-y-4">
+        <div>
+          <label class="block text-sm text-gray-400 mb-1">Message Text</label>
+          <textarea x-model="messageComposer.text" 
+            class="w-full bg-slate-700 rounded px-2 py-1 text-white resize-none" 
+            rows="3" placeholder="Enter your message..."></textarea>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Duration (seconds)</label>
+            <input x-model.number="messageComposer.duration" type="number" min="1" max="60" 
+              class="w-full bg-slate-700 rounded px-2 py-1 text-white" />
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Font Size</label>
+            <input x-model.number="messageComposer.fontsize" type="number" min="8" max="48" 
+              class="w-full bg-slate-700 rounded px-2 py-1 text-white" />
+          </div>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">X Position</label>
+            <input x-model.number="messageComposer.x" type="number" min="0" max="800" 
+              class="w-full bg-slate-700 rounded px-2 py-1 text-white" />
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Y Position</label>
+            <input x-model.number="messageComposer.y" type="number" min="0" max="600" 
+              class="w-full bg-slate-700 rounded px-2 py-1 text-white" />
+          </div>
+        </div>
+        
+        <div class="grid grid-cols-2 gap-4">
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Text Color</label>
+            <input x-model="messageComposer.fg" type="color" 
+              class="w-full bg-slate-700 rounded px-2 py-1 h-9" />
+          </div>
+          <div>
+            <label class="block text-sm text-gray-400 mb-1">Background Color</label>
+            <input x-model="messageComposer.bg" type="color" 
+              class="w-full bg-slate-700 rounded px-2 py-1 h-9" />
+          </div>
+        </div>
+      </div>
+      
+      <div class="mt-6 flex gap-2 justify-end">
+        <button @click="resetMessageComposer()" class="px-4 py-2 rounded bg-gray-600 hover:bg-gray-500">
+          Reset
+        </button>
+        <button @click="closeMessageComposer()" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">
+          Cancel
+        </button>
+        <button @click="sendComposedMessage()" 
+          :disabled="!messageComposer.text.trim()"
+          class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-gray-500">
+          Send Message
+        </button>
+      </div>
+    </div>
+  </div>
+
   <script>
     function app() {
       return {
@@ -445,6 +517,18 @@
         toast: "",
         selectedGames: [],
         ws: null, // store websocket instance
+        // Message composer modal state
+        showMessageComposer: false,
+        messageComposer: {
+          text: "",
+          duration: 3,
+          x: 10,
+          y: 10,
+          fontsize: 12,
+          fg: "#FFFFFF",
+          bg: "#000000"
+        },
+        messageTarget: null, // 'player' or 'all', and player name if player
         sessionButtons: [
           { label: "Start", path: "/api/start", class: "bg-green-500 text-black" },
           { label: "Pause", path: "/api/pause", class: "bg-slate-700" },
@@ -1106,51 +1190,10 @@
         },
         async messagePlayer(player) {
           if (!player) return;
-          const message = prompt(`Send message to ${player}:`);
-          if (!message) return;
-          this.loadingAction = 'message:' + player;
-          try {
-            const res = await fetch('/api/message_player', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ player, message })
-            });
-            if (res.ok) {
-              const body = await res.json().catch(() => null);
-              this.log(`message sent to ${player}: "${message}"`);
-            } else {
-              this.log(`/api/message_player failed for ${player}`);
-            }
-          } catch (e) {
-            this.log('message_player err ' + e.message);
-          } finally {
-            this.loadingAction = null;
-          }
+          this.openMessageComposer('player', player);
         },
         async messageAll() {
-          const message = prompt('Send message to all players:');
-          if (!message) return;
-          this.loadingAction = 'message_all';
-          try {
-            const res = await fetch('/api/message_all', {
-              method: 'POST',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ message })
-            });
-            if (res.ok) {
-              const body = await res.json().catch(() => null);
-              this.log(`message sent to all players: "${message}"`);
-              if (body && body.results) {
-                this.log(`message results: ${JSON.stringify(body.results)}`);
-              }
-            } else {
-              this.log('/api/message_all failed');
-            }
-          } catch (e) {
-            this.log('message_all err ' + e.message);
-          } finally {
-            this.loadingAction = null;
-          }
+          this.openMessageComposer('all');
         },
         startWS() {
           if (this.ws && this.ws.readyState <= 1) {
@@ -1299,6 +1342,72 @@
             this.loadingAction = null;
             // Reset the file input
             event.target.value = '';
+          }
+        },
+        // Message composer functions
+        openMessageComposer(target, playerName = null) {
+          this.messageTarget = { type: target, player: playerName };
+          this.showMessageComposer = true;
+        },
+        closeMessageComposer() {
+          this.showMessageComposer = false;
+          // Keep values for next time - don't reset
+          this.messageTarget = null;
+        },
+        resetMessageComposer() {
+          this.messageComposer = {
+            text: "",
+            duration: 3,
+            x: 10,
+            y: 10,
+            fontsize: 12,
+            fg: "#FFFFFF",
+            bg: "#000000"
+          };
+        },
+        async sendComposedMessage() {
+          if (!this.messageComposer.text.trim()) return;
+          
+          this.loadingAction = 'message-compose';
+          try {
+            const payload = {
+              message: this.messageComposer.text,
+              duration: this.messageComposer.duration,
+              x: this.messageComposer.x,
+              y: this.messageComposer.y,
+              fontsize: this.messageComposer.fontsize,
+              fg: this.messageComposer.fg,
+              bg: this.messageComposer.bg
+            };
+            
+            let url, logMsg;
+            if (this.messageTarget.type === 'player') {
+              url = '/api/message_player';
+              payload.player = this.messageTarget.player;
+              logMsg = `message sent to ${this.messageTarget.player}`;
+            } else {
+              url = '/api/message_all';
+              logMsg = 'message sent to all players';
+            }
+            
+            const res = await fetch(url, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(payload)
+            });
+            
+            if (res.ok) {
+              this.log(logMsg + ': "' + this.messageComposer.text + '"');
+              // Don't close modal - keep it open for more messages
+              // Clear just the text field for convenience
+              this.messageComposer.text = "";
+            } else {
+              this.log('Message send failed');
+            }
+          } catch (e) {
+            this.log('Message send error: ' + e.message);
+          } finally {
+            this.loadingAction = null;
           }
         },
       };
