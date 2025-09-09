@@ -76,6 +76,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/swap_player", s.apiSwapPlayer)
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
+	mux.HandleFunc("/api/message_player", s.apiMessagePlayer)
+	mux.HandleFunc("/api/message_all", s.apiMessageAll)
 	// Save state management endpoints
 	mux.HandleFunc("/save/upload", s.handleSaveUpload)
 	mux.HandleFunc("/save/", s.handleSaveDownload)

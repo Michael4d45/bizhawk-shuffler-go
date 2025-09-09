@@ -255,6 +255,26 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			_ = c.writeJSON(types.Command{Cmd: types.CmdGamesUpdateAck, ID: fmt.Sprintf("%d", time.Now().UnixNano()), Payload: ackPayload})
 		}(cmd.Payload)
+	case types.CmdMessage:
+		go func(id string) {
+			message := ""
+			if m, ok := cmd.Payload.(map[string]any); ok {
+				if msg, ok := m["message"].(string); ok {
+					message = msg
+				}
+			}
+			if message == "" {
+				sendNack(id, "missing message")
+				return
+			}
+			ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel2()
+			if err := c.bipc.SendMessage(ctx2, message); err != nil {
+				sendNack(id, err.Error())
+				return
+			}
+			sendAck(id)
+		}(cmd.ID)
 	default:
 		sendAck(cmd.ID)
 	}
