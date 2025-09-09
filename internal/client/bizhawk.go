@@ -517,25 +517,35 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 			if strings.HasPrefix(line, "HELLO") {
 				log.Printf("ipc handler: received HELLO from lua, sending SYNC")
 				c.bipc.SetReady(true)
-				running, playerGame, instanceID, err := c.api.FetchServerState(c.cfg["name"])
-				if err != nil {
-					log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)
-					running = true
-					playerGame = ""
+
+				running := c.bipc.running
+				game := c.bipc.game
+				instanceID := c.bipc.instanceID
+				var err error
+				if game != "" && running {
+					log.Printf("ipc handler: BizHawk restarted, re-sending START for game %q instance %q", game, instanceID)
+				} else {
+					running, game, instanceID, err = c.api.FetchServerState(c.cfg["name"])
+					if err != nil {
+						log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)
+						running = true
+						game = ""
+					}
 				}
-				if playerGame == "" {
+				if game == "" {
 					log.Printf("ipc handler: no current game for player from server state; sending empty game")
 				}
 				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
 				if err := c.api.EnsureSaveState(instanceID); err != nil {
 					log.Printf("ipc handler: EnsureSaveState failed: %v", err)
 				}
-				if err := c.bipc.SendSync(ctx2, playerGame, instanceID, running); err != nil {
+				if err := c.bipc.SendSync(ctx2, game, instanceID, running); err != nil {
 					log.Printf("ipc handler: SendSync failed: %v", err)
 				} else {
-					log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", playerGame, running)
+					log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", game, running)
 				}
 				cancel2()
+
 			}
 		}
 		log.Printf("bizhawk ipc: incoming channel closed or handler goroutine exiting; marking ipcReady=false")

@@ -35,6 +35,10 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", chosenHost, chosenPort)
 	mux := http.NewServeMux()
 	s.RegisterRoutes(mux)
-	log.Printf("Starting server on %s", addr)
+	protocol := "http"
+	if chosenPort == 443 || chosenPort == 8443 {
+		protocol = "https"
+	}
+	log.Printf("Starting server on %s://%s", protocol, addr)
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

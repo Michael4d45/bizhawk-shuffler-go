@@ -137,6 +137,10 @@ func (a *API) UploadSaveState(instanceID string) error {
 // DownloadSave downloads a save file for player/filename into ./saves/player.
 // Returns ErrNotFound when the server responds 404.
 func (a *API) EnsureSaveState(instanceID string) error {
+	if instanceID == "" {
+		return nil
+	}
+
 	p := "/save/" + url.PathEscape(instanceID+".state")
 	fetch := a.BaseURL + p
 	req, _ := http.NewRequestWithContext(a.Ctx, "GET", fetch, nil)

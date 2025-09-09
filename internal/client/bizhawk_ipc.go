@@ -50,6 +50,8 @@ type BizhawkIPC struct {
 	ready   bool
 
 	instanceID string
+	game       string
+	running    bool
 }
 
 // NewBizhawkIPC creates an instance targeting host:port
@@ -360,7 +362,9 @@ func (b *BizhawkIPC) SendSync(ctx context.Context, game string, instanceID strin
 	if running {
 		state = "running"
 	}
+	b.game = game
 	b.instanceID = instanceID
+	b.running = running
 	return b.SendCommand(ctx, "SYNC", game, instanceID, state)
 }
 
@@ -379,14 +383,18 @@ func (b *BizhawkIPC) SendSwap(ctx context.Context, game string, instanceID strin
 
 func (b *BizhawkIPC) SendStart(ctx context.Context, game string, instanceID string) error {
 	b.instanceID = instanceID
+	b.game = game
+	b.running = true
 	return b.SendCommand(ctx, "START", game, instanceID)
 }
 
 func (b *BizhawkIPC) SendPause(ctx context.Context) error {
+	b.running = false
 	return b.SendCommand(ctx, "PAUSE")
 }
 
 func (b *BizhawkIPC) SendResume(ctx context.Context) error {
+	b.running = true
 	return b.SendCommand(ctx, "RESUME")
 }
 
