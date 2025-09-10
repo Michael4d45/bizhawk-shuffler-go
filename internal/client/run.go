@@ -13,8 +13,12 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
+
+	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
 // ErrNotFound is returned when a requested remote save/file is not present on the server
@@ -30,6 +34,8 @@ type Client struct {
 	api          *API
 	bhController *BizHawkController
 	bipc         *BizhawkIPC
+	// TODO: Add discovery listener field
+	discoveryListener *DiscoveryListener
 }
 
 // New creates and initializes a Client from CLI args.
@@ -69,6 +75,39 @@ func New(args []string) (*Client, error) {
 			serverURL = s
 			break
 		}
+
+		// Try discovery first
+		fmt.Println("Attempting to discover servers on the network...")
+		startTime := time.Now()
+		discoveredURL, err := discoverServerWithPrompt(cfg)
+		discoveryDuration := time.Since(startTime)
+		log.Printf("[Client] Discovery completed in %v", discoveryDuration)
+		if err != nil {
+			log.Printf("Discovery failed: %v", err)
+			fmt.Println("Falling back to manual entry...")
+		} else if discoveredURL != "" {
+			// Validate and save discovered URL just like manual entry
+			u, err := url.Parse(discoveredURL)
+			if err != nil {
+				fmt.Printf("invalid discovered server URL: %v\n", err)
+				fmt.Println("Falling back to manual entry...")
+			} else {
+				switch u.Scheme {
+				case "ws":
+					u.Scheme = "http"
+				case "wss":
+					u.Scheme = "https"
+				}
+				u.Path = ""
+				u.RawQuery = ""
+				u.Fragment = ""
+				cfg["server"] = u.String()
+				serverURL = u.String()
+				break
+			}
+		}
+
+		// Fallback to manual entry
 		fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
 		line, _ := reader.ReadString('\n')
 		serverURL = strings.TrimSpace(line)
@@ -155,6 +194,8 @@ func New(args []string) (*Client, error) {
 		api:          api,
 		bhController: bhController,
 		bipc:         bipc,
+		// TODO: Initialize discovery listener
+		discoveryListener: nil,
 	}
 
 	return c, nil
@@ -297,4 +338,191 @@ func MonitorProcess(cmd *exec.Cmd, onExit func(error)) {
 		}
 		onExit(err)
 	}()
+}
+
+// TODO: Add methods for managing discovery listener
+// StartDiscovery initializes and starts the discovery listener
+func (c *Client) StartDiscovery(ctx context.Context) error {
+	if c.discoveryListener != nil {
+		return c.discoveryListener.Start(ctx)
+	}
+
+	// Create default discovery config
+	config := types.GetDefaultDiscoveryConfig()
+
+	// Initialize listener
+	c.discoveryListener = NewDiscoveryListener(config)
+	return c.discoveryListener.Start(ctx)
+}
+
+// StopDiscovery stops the discovery listener
+func (c *Client) StopDiscovery() error {
+	if c.discoveryListener != nil {
+		return c.discoveryListener.Stop()
+	}
+	return nil
+}
+
+// PromptForServerWithDiscovery shows server selection menu with discovered servers
+func (c *Client) PromptForServerWithDiscovery() (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Parse timeout from config
+	timeoutStr := c.cfg["discovery_timeout_seconds"]
+	timeoutSeconds := 10 // default
+	if timeoutStr != "" {
+		if parsed, err := strconv.Atoi(timeoutStr); err == nil && parsed > 0 {
+			timeoutSeconds = parsed
+		}
+	}
+
+	// Start discovery in background
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := c.StartDiscovery(ctx); err != nil {
+		log.Printf("Failed to start discovery: %v", err)
+	}
+
+	// Wait a bit for servers to be discovered
+	time.Sleep(2 * time.Second)
+
+	// Get discovered servers
+	servers := c.discoveryListener.GetDiscoveredServers()
+
+	// Stop discovery
+	if err := c.StopDiscovery(); err != nil {
+		log.Printf("Error stopping discovery: %v", err)
+	}
+
+	if len(servers) == 0 {
+		fmt.Println("No servers discovered on the network.")
+	} else {
+		fmt.Println("Discovered servers:")
+		for i, server := range servers {
+			fmt.Printf("%d. %s (%s:%d)\n", i+1, server.Name, server.Host, server.Port)
+		}
+		fmt.Println("0. Enter server manually")
+	}
+
+	fmt.Print("Select server (number or 0 for manual): ")
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "0" || len(servers) == 0 {
+		// Manual entry
+		return promptForServerManually(reader)
+	}
+
+	// Parse selection
+	index := 0
+	if _, err := fmt.Sscanf(input, "%d", &index); err != nil || index < 1 || index > len(servers) {
+		fmt.Println("Invalid selection, using manual entry.")
+		return promptForServerManually(reader)
+	}
+
+	selectedServer := servers[index-1]
+	return selectedServer.GetServerURL(), nil
+}
+
+// discoverServerWithPrompt performs server discovery and prompts user for selection
+func discoverServerWithPrompt(cfg Config) (string, error) {
+	reader := bufio.NewReader(os.Stdin)
+
+	// Parse timeout from config
+	timeoutStr := cfg["discovery_timeout_seconds"]
+	timeoutSeconds := 10 // default
+	if timeoutStr != "" {
+		if parsed, err := strconv.Atoi(timeoutStr); err == nil && parsed > 0 {
+			timeoutSeconds = parsed
+		}
+	}
+
+	// Create discovery config
+	config := types.GetDefaultDiscoveryConfig()
+
+	// Create discovery listener
+	listener := NewDiscoveryListener(config)
+
+	// Start discovery in background
+	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
+	defer cancel()
+
+	if err := listener.Start(ctx); err != nil {
+		return "", fmt.Errorf("failed to start discovery: %w", err)
+	}
+
+	// Wait a bit for servers to be discovered (longer than broadcast interval)
+	time.Sleep(8 * time.Second)
+
+	// Get discovered servers
+	servers := listener.GetDiscoveredServers()
+
+	// Stop discovery
+	if err := listener.Stop(); err != nil {
+		log.Printf("Error stopping discovery: %v", err)
+	}
+
+	if len(servers) == 0 {
+		fmt.Println("No servers discovered on the network.")
+		return "", nil // Return empty string to trigger manual entry
+	}
+
+	fmt.Println("Discovered servers:")
+	for i, server := range servers {
+		fmt.Printf("%d. %s (%s:%d)\n", i+1, server.Name, server.Host, server.Port)
+	}
+	fmt.Println("0. Enter server manually")
+
+	fmt.Print("Select server (number or 0 for manual): ")
+	input, _ := reader.ReadString('\n')
+	input = strings.TrimSpace(input)
+
+	if input == "0" {
+		return "", nil // User chose manual entry
+	}
+
+	// Parse selection
+	index := 0
+	if _, err := fmt.Sscanf(input, "%d", &index); err != nil || index < 1 || index > len(servers) {
+		fmt.Println("Invalid selection, using manual entry.")
+		return "", nil
+	}
+
+	selectedServer := servers[index-1]
+	return selectedServer.GetServerURL(), nil
+}
+
+// promptForServerManually prompts the user to manually enter a server URL
+func promptForServerManually(reader *bufio.Reader) (string, error) {
+	for {
+		fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
+		line, _ := reader.ReadString('\n')
+		serverURL := strings.TrimSpace(line)
+		if serverURL == "" {
+			fmt.Println("server URL cannot be empty")
+			continue
+		}
+		if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://") {
+			// ok
+		} else {
+			fmt.Println("server URL must start with ws://, wss://, http:// or https://")
+			continue
+		}
+		u, err := url.Parse(serverURL)
+		if err != nil {
+			fmt.Printf("invalid server URL: %v\n", err)
+			continue
+		}
+		switch u.Scheme {
+		case "ws":
+			u.Scheme = "http"
+		case "wss":
+			u.Scheme = "https"
+		}
+		u.Path = ""
+		u.RawQuery = ""
+		u.Fragment = ""
+		return u.String(), nil
+	}
 }

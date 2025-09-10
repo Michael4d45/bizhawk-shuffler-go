@@ -1,9 +1,44 @@
+// TODO: Add discovery message structures and server info types
+// - DiscoveryMessage: UDP broadcast message containing server info
+// - ServerInfo: Basic server information (host, port, name, version)
+// - DiscoveryConfig: Configuration for discovery behavior (multicast address, interval, enabled)
+
 package types
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 )
+
+// DiscoveryMessage represents a UDP broadcast message sent by servers
+type DiscoveryMessage struct {
+	Type       string    `json:"type"`        // "bizshuffle_server"
+	Version    string    `json:"version"`     // Protocol version
+	ServerName string    `json:"server_name"` // Human-readable server name
+	Host       string    `json:"host"`        // Server host/IP
+	Port       int       `json:"port"`        // Server port
+	Timestamp  time.Time `json:"timestamp"`   // When message was sent
+	ServerID   string    `json:"server_id"`   // Unique server identifier
+}
+
+// ServerInfo contains basic information about a discovered server
+type ServerInfo struct {
+	Name     string    `json:"name"`
+	Host     string    `json:"host"`
+	Port     int       `json:"port"`
+	Version  string    `json:"version"`
+	LastSeen time.Time `json:"last_seen"`
+	ServerID string    `json:"server_id"`
+}
+
+// DiscoveryConfig holds configuration for LAN discovery
+type DiscoveryConfig struct {
+	Enabled              bool   `json:"enabled"`
+	MulticastAddress     string `json:"multicast_address"`      // e.g., "239.255.255.250:1900"
+	BroadcastIntervalSec int    `json:"broadcast_interval_sec"` // How often to broadcast (seconds)
+	ListenTimeoutSec     int    `json:"listen_timeout_sec"`     // How long to listen for broadcasts (seconds)
+}
 
 // CommandName enumerates allowed websocket command names. Use string constants
 // so code can use the literal values directly without parsing.
@@ -204,3 +239,49 @@ const (
 	PluginStatusLoading  PluginStatus = "loading"
 	PluginStatusError    PluginStatus = "error"
 )
+
+// IsExpired checks if the server info is older than the given duration
+func (s *ServerInfo) IsExpired(maxAge time.Duration) bool {
+	return time.Since(s.LastSeen) > maxAge
+}
+
+// GetServerURL returns the WebSocket URL for this server
+func (s *ServerInfo) GetServerURL() string {
+	return fmt.Sprintf("ws://%s:%d/ws", s.Host, s.Port)
+}
+
+// NewDiscoveryMessage creates a new discovery message
+func NewDiscoveryMessage(host string, port int, serverName string) *DiscoveryMessage {
+	return &DiscoveryMessage{
+		Type:       "bizshuffle_server",
+		Version:    "1.0",
+		ServerName: serverName,
+		Host:       host,
+		Port:       port,
+		Timestamp:  time.Now(),
+		ServerID:   fmt.Sprintf("%s:%d", host, port), // Simple ID based on host:port
+	}
+}
+
+// IsValid checks if the discovery message is valid and recent
+func (d *DiscoveryMessage) IsValid() bool {
+	// Check if message is recent (within last 30 seconds)
+	if time.Since(d.Timestamp) > 30*time.Second {
+		return false
+	}
+	// Check required fields
+	if d.Type != "bizshuffle_server" || d.Host == "" || d.Port <= 0 {
+		return false
+	}
+	return true
+}
+
+// GetDefaultDiscoveryConfig returns default discovery configuration
+func GetDefaultDiscoveryConfig() *DiscoveryConfig {
+	return &DiscoveryConfig{
+		Enabled:              true,
+		MulticastAddress:     "239.255.255.250:1900",
+		BroadcastIntervalSec: 5,
+		ListenTimeoutSec:     10,
+	}
+}

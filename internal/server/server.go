@@ -1,6 +1,7 @@
 package server
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"net/http"
@@ -12,9 +13,6 @@ import (
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
-// ErrTimeout is exported so callers can detect timeout waiting for a client ack/nack.
-var ErrTimeout = fmt.Errorf("timeout waiting for result")
-
 // Server encapsulates all state and connected websocket clients.
 type Server struct {
 	mu          sync.Mutex
@@ -24,7 +22,12 @@ type Server struct {
 	upgrader    websocket.Upgrader
 	pending     map[string]chan string
 	schedulerCh chan struct{}
+	// TODO: Add broadcaster field: *DiscoveryBroadcaster
+	broadcaster *DiscoveryBroadcaster
 }
+
+// ErrTimeout is exported so callers can detect timeout waiting for a client ack/nack.
+var ErrTimeout = fmt.Errorf("timeout waiting for result")
 
 // New creates and initializes a Server, loading state and starting the scheduler.
 func New() *Server {
@@ -147,6 +150,55 @@ func (s *Server) UpdatePortIfChanged(port int) {
 
 // PersistedPort returns the persisted port if present.
 func (s *Server) PersistedPort() int { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Port }
+
+// TODO: Add methods for managing discovery broadcaster
+// StartBroadcaster initializes and starts the discovery broadcaster
+func (s *Server) StartBroadcaster(ctx context.Context) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.broadcaster != nil {
+		return s.broadcaster.Start(ctx)
+	}
+
+	// Create default discovery config
+	config := types.GetDefaultDiscoveryConfig()
+
+	// Get server info
+	host := s.state.Host
+	if host == "" {
+		host = "127.0.0.1" // fallback
+	}
+	port := s.state.Port
+	if port == 0 {
+		port = 8080 // fallback
+	}
+	serverName := s.GetServerName()
+
+	// Initialize broadcaster
+	s.broadcaster = NewDiscoveryBroadcaster(config, host, port, serverName)
+	return s.broadcaster.Start(ctx)
+}
+
+// StopBroadcaster stops the discovery broadcaster
+func (s *Server) StopBroadcaster() error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	if s.broadcaster != nil {
+		return s.broadcaster.Stop()
+	}
+	return nil
+}
+
+// GetServerName returns a human-readable name for this server
+func (s *Server) GetServerName() string {
+	hostname, err := os.Hostname()
+	if err != nil {
+		hostname = "BizShuffle"
+	}
+	return fmt.Sprintf("%s Server", hostname)
+}
 
 func (s *Server) currentPlayer(player string) types.Player {
 	playerInfo := s.GetGameForPlayer(player)

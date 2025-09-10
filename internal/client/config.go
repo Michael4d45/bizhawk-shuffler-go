@@ -1,3 +1,11 @@
+// TODO: Implement LAN server discovery listener
+// - Add DiscoveryListener struct with UDP connection
+// - Implement Start() method to begin listening for broadcasts
+// - Implement Stop() method to clean up UDP connection
+// - Collect discovered servers in a map or slice
+// - Handle incoming UDP messages and parse server info
+// - Provide method to get list of discovered servers
+
 package client
 
 import (
@@ -67,6 +75,13 @@ func (c Config) normalizeServer() {
 	}
 }
 
+// TODO: Add discovery configuration options
+// - Add discovery_enabled flag to server config
+// - Add broadcast_interval_seconds to server config
+// - Add multicast_address to server config (default: 239.255.255.250:1900)
+// - Add discovery_timeout_seconds to client config
+// - Update EnsureDefaults() to set discovery defaults
+
 // EnsureDefaults populates default values for commonly used keys if missing.
 // Returns an error when a default cannot be chosen for the current platform.
 func (c Config) EnsureDefaults() error {
@@ -98,6 +113,19 @@ func (c Config) EnsureDefaults() error {
 		} else {
 			c["bizhawk_path"] = filepath.Join(installDir, "EmuHawkMono.sh")
 		}
+	}
+	// TODO: Set discovery configuration defaults
+	if c["discovery_enabled"] == "" {
+		c["discovery_enabled"] = "true"
+	}
+	if c["discovery_timeout_seconds"] == "" {
+		c["discovery_timeout_seconds"] = "10"
+	}
+	if c["multicast_address"] == "" {
+		c["multicast_address"] = "239.255.255.250:1900"
+	}
+	if c["broadcast_interval_seconds"] == "" {
+		c["broadcast_interval_seconds"] = "5"
 	}
 	return nil
 }
