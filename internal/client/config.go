@@ -1,11 +1,3 @@
-// TODO: Implement LAN server discovery listener
-// - Add DiscoveryListener struct with UDP connection
-// - Implement Start() method to begin listening for broadcasts
-// - Implement Stop() method to clean up UDP connection
-// - Collect discovered servers in a map or slice
-// - Handle incoming UDP messages and parse server info
-// - Provide method to get list of discovered servers
-
 package client
 
 import (
@@ -15,7 +7,9 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
+	"time"
 )
 
 // Config is a simple map-backed configuration used by the client code. We use
@@ -75,13 +69,6 @@ func (c Config) normalizeServer() {
 	}
 }
 
-// TODO: Add discovery configuration options
-// - Add discovery_enabled flag to server config
-// - Add broadcast_interval_seconds to server config
-// - Add multicast_address to server config (default: 239.255.255.250:1900)
-// - Add discovery_timeout_seconds to client config
-// - Update EnsureDefaults() to set discovery defaults
-
 // EnsureDefaults populates default values for commonly used keys if missing.
 // Returns an error when a default cannot be chosen for the current platform.
 func (c Config) EnsureDefaults() error {
@@ -114,7 +101,6 @@ func (c Config) EnsureDefaults() error {
 			c["bizhawk_path"] = filepath.Join(installDir, "EmuHawkMono.sh")
 		}
 	}
-	// TODO: Set discovery configuration defaults
 	if c["discovery_enabled"] == "" {
 		c["discovery_enabled"] = "true"
 	}
@@ -127,5 +113,82 @@ func (c Config) EnsureDefaults() error {
 	if c["broadcast_interval_seconds"] == "" {
 		c["broadcast_interval_seconds"] = "5"
 	}
+	// P2P save state config defaults
+	if c["p2p_enabled"] == "" { // default disabled until maturity
+		c["p2p_enabled"] = "false"
+	}
+	if c["save_p2p_piece_size"] == "" {
+		c["save_p2p_piece_size"] = "65536" // 64KB
+	}
+	if c["save_p2p_timeout"] == "" {
+		c["save_p2p_timeout"] = "30s"
+	}
+	if c["save_p2p_max_peers"] == "" {
+		c["save_p2p_max_peers"] = "10"
+	}
+	if c["save_p2p_upload_limit"] == "" {
+		c["save_p2p_upload_limit"] = "0" // 0 = unlimited
+	}
 	return nil
+}
+
+// P2PEnabled returns true if P2P is enabled in config.
+func (c Config) P2PEnabled() bool { return strings.ToLower(c["p2p_enabled"]) == "true" }
+
+// SaveP2PPieceSize returns validated piece size (defaults applied if invalid).
+func (c Config) SaveP2PPieceSize() int {
+	v := 65536
+	if ps := strings.TrimSpace(c["save_p2p_piece_size"]); ps != "" {
+		if n, err := strconv.Atoi(ps); err == nil {
+			if n >= 16384 && n <= 1_048_576 { // 16KB - 1MB
+				v = n
+			}
+		}
+	}
+	return v
+}
+
+// SaveP2PTimeout returns duration for P2P operations.
+func (c Config) SaveP2PTimeout() time.Duration {
+	d := 30 * time.Second
+	if ts := strings.TrimSpace(c["save_p2p_timeout"]); ts != "" {
+		if dur, err := time.ParseDuration(ts); err == nil {
+			if dur >= 10*time.Second && dur <= 5*time.Minute {
+				d = dur
+			}
+		}
+	}
+	return d
+}
+
+// SaveP2PMaxPeers returns maximum peers per swarm.
+func (c Config) SaveP2PMaxPeers() int {
+	v := 10
+	if mp := strings.TrimSpace(c["save_p2p_max_peers"]); mp != "" {
+		if n, err := strconv.Atoi(mp); err == nil && n >= 1 && n <= 200 {
+			v = n
+		}
+	}
+	return v
+}
+
+// SaveP2PUploadLimit returns upload limit in bytes/sec (0 = unlimited).
+func (c Config) SaveP2PUploadLimit() int64 {
+	if ul := strings.TrimSpace(c["save_p2p_upload_limit"]); ul != "" {
+		// Accept suffixes KB/MB for convenience
+		lower := strings.ToLower(ul)
+		mult := int64(1)
+		if strings.HasSuffix(lower, "kb") {
+			mult = 1024
+			lower = strings.TrimSuffix(lower, "kb")
+		} else if strings.HasSuffix(lower, "mb") {
+			mult = 1024 * 1024
+			lower = strings.TrimSuffix(lower, "mb")
+		}
+		lower = strings.TrimSpace(lower)
+		if n, err := strconv.ParseInt(lower, 10, 64); err == nil && n >= 0 {
+			return n * mult
+		}
+	}
+	return 0
 }

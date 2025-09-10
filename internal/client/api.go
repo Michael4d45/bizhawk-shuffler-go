@@ -455,3 +455,121 @@ func (a *API) EnsureFile(ctx context.Context, name string) error {
 	}
 	return lastErr
 }
+
+// --- P2P Save State Helper Methods (alpha) ---
+// These provide minimal HTTP-based coordination for the save state P2P layer.
+// They intentionally avoid caching/advanced retry logic for now; callers can
+// wrap with their own throttling if needed.
+
+// GetSaveStateManifest fetches /api/p2p/save-manifest and returns the manifest.
+func (a *API) GetSaveStateManifest() (types.SaveStateManifest, error) {
+	var m types.SaveStateManifest
+	if a.BaseURL == "" {
+		return m, fmt.Errorf("no server configured")
+	}
+	req, _ := http.NewRequestWithContext(a.Ctx, http.MethodGet, a.BaseURL+"/api/p2p/save-manifest", nil)
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return m, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return m, fmt.Errorf("manifest status %s: %s", resp.Status, string(b))
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&m); err != nil {
+		return m, err
+	}
+	return m, nil
+}
+
+// GetSaveStatePeers fetches peers advertising an instance. If instanceID empty, it
+// requests a tracker summary snapshot for debugging.
+func (a *API) GetSaveStatePeers(instanceID string) ([]types.PeerInfo, error) {
+	if a.BaseURL == "" {
+		return nil, fmt.Errorf("no server configured")
+	}
+	u := a.BaseURL + "/api/p2p/save-peers"
+	if instanceID != "" {
+		u += "?instance_id=" + url.QueryEscape(instanceID)
+	}
+	req, _ := http.NewRequestWithContext(a.Ctx, http.MethodGet, u, nil)
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		b, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("peers status %s: %s", resp.Status, string(b))
+	}
+	// The endpoint returns either []PeerInfo or a snapshot map when instanceID empty.
+	if instanceID == "" {
+		// ignore snapshot for now; return empty slice (callers can request specific instance later)
+		return []types.PeerInfo{}, nil
+	}
+	var peers []types.PeerInfo
+	if err := json.NewDecoder(resp.Body).Decode(&peers); err != nil {
+		return nil, err
+	}
+	return peers, nil
+}
+
+// AnnounceSaveStates announces the list of save state versions the client currently seeds.
+// instances may contain zero entries (keep-alive). Only fields InstanceID, Hash, Size are sent.
+func (a *API) AnnounceSaveStates(peerID string, instances []types.SaveStateVersion) error {
+	if a.BaseURL == "" {
+		return fmt.Errorf("no server configured")
+	}
+	body := struct {
+		PeerID    string `json:"peer_id"`
+		Instances []struct {
+			InstanceID string `json:"instance_id"`
+			Hash       string `json:"hash,omitempty"`
+			Size       int64  `json:"size,omitempty"`
+		} `json:"instances"`
+	}{PeerID: peerID}
+	for _, v := range instances {
+		body.Instances = append(body.Instances, struct {
+			InstanceID string `json:"instance_id"`
+			Hash       string `json:"hash,omitempty"`
+			Size       int64  `json:"size,omitempty"`
+		}{InstanceID: v.InstanceID, Hash: v.Hash, Size: v.Size})
+	}
+	b, _ := json.Marshal(body)
+	req, _ := http.NewRequestWithContext(a.Ctx, http.MethodPost, a.BaseURL+"/api/p2p/save-announce", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("announce failed: %s %s", resp.Status, string(data))
+	}
+	return nil
+}
+
+// ReportSaveStateStatus sends optional client metrics. For now metrics is an arbitrary map.
+func (a *API) ReportSaveStateStatus(metrics map[string]any) error {
+	if a.BaseURL == "" {
+		return fmt.Errorf("no server configured")
+	}
+	if metrics == nil {
+		metrics = map[string]any{"ts": time.Now().Unix()}
+	}
+	b, _ := json.Marshal(metrics)
+	req, _ := http.NewRequestWithContext(a.Ctx, http.MethodPost, a.BaseURL+"/api/p2p/save-status", bytes.NewReader(b))
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("status failed: %s %s", resp.Status, string(data))
+	}
+	return nil
+}

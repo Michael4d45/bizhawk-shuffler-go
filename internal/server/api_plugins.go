@@ -69,8 +69,8 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	// For now, just save as a simple .lua file in the plugins/available directory
-	// TODO: Support proper plugin packages with metadata
+	// Current alpha: accept raw .lua upload. Future: support packaged plugin bundles
+	// (metadata + assets) with validation and versioning.
 	if !strings.HasSuffix(header.Filename, ".lua") {
 		http.Error(w, "only .lua files supported currently", http.StatusBadRequest)
 		return

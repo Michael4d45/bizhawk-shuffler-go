@@ -1,6 +1,8 @@
 package server
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"net/http"
@@ -61,15 +63,48 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = out.Close() }()
 
-	// Copy file content
-	if _, err := io.Copy(out, file); err != nil {
+	// Copy file content while computing hash & size
+	hasher := sha256.New()
+	written, err := io.Copy(io.MultiWriter(out, hasher), file)
+	if err != nil {
 		s.setInstanceFileState(instanceID, types.FileStateNone)
 		http.Error(w, "write save file: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	// Set state to ready after successful upload
-	s.setInstanceFileState(instanceID, types.FileStateReady)
+	sum := hasher.Sum(nil)
+	hashHex := hex.EncodeToString(sum)
+
+	// Update instance metadata under lock
+	s.mu.Lock()
+	updated := false
+	pieceSize := s.state.SaveStatePieceSize
+	if pieceSize == 0 {
+		pieceSize = 64 * 1024 // default 64KB
+	}
+	for i, inst := range s.state.GameSwapInstances {
+		if inst.ID == instanceID {
+			s.state.GameSwapInstances[i].SaveHash = hashHex
+			s.state.GameSwapInstances[i].SaveSize = written
+			s.state.GameSwapInstances[i].SaveUpdated = time.Now()
+			s.state.GameSwapInstances[i].SavePieceLen = pieceSize
+			s.state.GameSwapInstances[i].FileState = types.FileStateReady
+			s.state.SaveStateManifestVersion++
+			s.state.UpdatedAt = time.Now()
+			updated = true
+			break
+		}
+	}
+	s.mu.Unlock()
+	if !updated {
+		// Instance not found: unexpected but handle gracefully rather than failing upload
+		fmt.Printf("[save_upload][warn] instance %s not found when updating metadata\n", instanceID)
+	} else {
+		fmt.Printf("[save_upload][info] instance=%s hash=%s size=%d manifest_version=%d\n", instanceID, hashHex[:12], written, s.state.SaveStateManifestVersion)
+	}
+
+	// Notify clients manifest changed (ignore if no connections)
+	s.broadcastP2PManifestUpdate()
 
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)

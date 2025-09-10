@@ -1,13 +1,5 @@
 package client
 
-// TODO: Implement LAN server discovery listener
-// - Add DiscoveryListener struct with UDP connection
-// - Implement Start() method to begin listening for broadcasts
-// - Implement Stop() method to clean up UDP connection
-// - Collect discovered servers in a map or slice
-// - Handle incoming UDP messages and parse server info
-// - Provide method to get list of discovered servers
-
 import (
 	"context"
 	"encoding/json"
@@ -34,7 +26,6 @@ type DiscoveryListener struct {
 
 // NewDiscoveryListener creates a new discovery listener
 func NewDiscoveryListener(config *types.DiscoveryConfig) *DiscoveryListener {
-	// TODO: Initialize listener with configuration
 	return &DiscoveryListener{
 		config:     config,
 		discovered: make(map[string]*types.ServerInfo),
@@ -122,7 +113,6 @@ func (dl *DiscoveryListener) listen(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		default:
-			// TODO: Set read deadline
 			if err := dl.conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
 				log.Printf("Failed to set read deadline: %v", err)
 				continue
@@ -154,12 +144,10 @@ func (dl *DiscoveryListener) listen(ctx context.Context) {
 
 			log.Printf("[DiscoveryListener] Received BizShuffle server message from %s: server=%s (%s:%d)", addr, msg.ServerName, msg.Host, msg.Port)
 
-			// TODO: Validate message
 			if !msg.IsValid() {
 				continue
 			}
 
-			// TODO: Create server info
 			serverInfo := &types.ServerInfo{
 				Name:     msg.ServerName,
 				Host:     msg.Host,
@@ -169,7 +157,6 @@ func (dl *DiscoveryListener) listen(ctx context.Context) {
 				ServerID: msg.ServerID,
 			}
 
-			// TODO: Add or update server
 			dl.addOrUpdateServer(serverInfo)
 		}
 	}

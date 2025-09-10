@@ -18,6 +18,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/michael4d45/bizshuffle/internal/client/p2p"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
@@ -30,11 +31,10 @@ type Client struct {
 	cfg     Config
 	logFile *os.File
 
-	wsClient     *WSClient
-	api          *API
-	bhController *BizHawkController
-	bipc         *BizhawkIPC
-	// TODO: Add discovery listener field
+	wsClient          *WSClient
+	api               *API
+	bhController      *BizHawkController
+	bipc              *BizhawkIPC
 	discoveryListener *DiscoveryListener
 }
 
@@ -188,16 +188,30 @@ func New(args []string) (*Client, error) {
 	wsClient := NewWSClient(wsURL, api, bipc)
 
 	c := &Client{
-		cfg:          cfg,
-		logFile:      logFile,
-		wsClient:     wsClient,
-		api:          api,
-		bhController: bhController,
-		bipc:         bipc,
-		// TODO: Initialize discovery listener
+		cfg:               cfg,
+		logFile:           logFile,
+		wsClient:          wsClient,
+		api:               api,
+		bhController:      bhController,
+		bipc:              bipc,
 		discoveryListener: nil,
 	}
 
+	// P2P announce loop (HTTP tracker announce). Disabled unless p2p_enabled=true.
+	if cfg.P2PEnabled() {
+		interval := 30 * time.Second
+		ann := p2p.NewAnnounceClient(api.BaseURL, cfg["name"], api.HTTPClient, interval)
+		ctx2, cancelAnn := context.WithCancel(context.Background())
+		ann.Start(ctx2)
+		// Cancel announce loop when main process exits (best-effort cleanup)
+		go func() {
+			<-ctx2.Done()
+			cancelAnn()
+		}()
+		log.Printf("[P2P][init] announce loop started interval=%s", interval)
+	} else {
+		log.Printf("[P2P][init] disabled")
+	}
 	return c, nil
 }
 
@@ -340,7 +354,6 @@ func MonitorProcess(cmd *exec.Cmd, onExit func(error)) {
 	}()
 }
 
-// TODO: Add methods for managing discovery listener
 // StartDiscovery initializes and starts the discovery listener
 func (c *Client) StartDiscovery(ctx context.Context) error {
 	if c.discoveryListener != nil {

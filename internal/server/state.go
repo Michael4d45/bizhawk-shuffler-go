@@ -53,6 +53,13 @@ func (s *Server) loadState() {
 		player.Connected = false
 		tmp.Players[name] = player
 	}
+	// Initialize/validate P2P defaults (backwards compatible for prior state.json files)
+	if tmp.SaveStatePieceSize <= 0 {
+		tmp.SaveStatePieceSize = 64 * 1024 // 64KB default
+	}
+	if tmp.SaveStateP2PTimeoutSec <= 0 {
+		tmp.SaveStateP2PTimeoutSec = 30
+	}
 	s.mu.Lock()
 	s.state = tmp
 	s.mu.Unlock()

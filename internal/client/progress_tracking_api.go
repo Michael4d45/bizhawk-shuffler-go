@@ -24,6 +24,8 @@ func NewProgressTrackingAPI(api *API, controller *Controller) *ProgressTrackingA
 	}
 }
 
+// Future: integrate save state P2P progress (peer counts, transfer speeds, fallback mode).
+
 // EnsureFileWithProgress ensures the named file exists locally, downloading it with progress display.
 // Also downloads any extra_files associated with the main file if available.
 func (ea *ProgressTrackingAPI) EnsureFileWithProgress(ctx context.Context, name string) error {

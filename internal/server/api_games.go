@@ -70,6 +70,15 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			"main_games":     s.state.MainGames,
 			"games":          s.state.Games,
 		}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		// Regenerate manifest asynchronously (lightweight scan) & broadcast if version increments
+		go func() {
+			if changed, err := s.RegenerateSaveManifest(); err != nil {
+				fmt.Printf("[P2P][manifest][unexpected] regen error after games update: %v\n", err)
+			} else if changed {
+				fmt.Printf("[P2P][manifest] regenerated after games update new_version=%d\n", s.CurrentManifestVersion())
+				s.broadcastP2PManifestUpdate()
+			}
+		}()
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)
 		}

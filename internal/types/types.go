@@ -1,8 +1,3 @@
-// TODO: Add discovery message structures and server info types
-// - DiscoveryMessage: UDP broadcast message containing server info
-// - ServerInfo: Basic server information (host, port, name, version)
-// - DiscoveryConfig: Configuration for discovery behavior (multicast address, interval, enabled)
-
 package types
 
 import (
@@ -59,6 +54,10 @@ const (
 	CmdStateUpdate    CommandName = "state_update"
 	CmdClearSaves     CommandName = "clear_saves"
 	CmdReset          CommandName = "reset"
+	// P2P-specific websocket commands (initial implementation scope)
+	CmdP2PManifestUpdate   CommandName = "p2p_manifest_update"
+	CmdP2PSaveStateRequest CommandName = "p2p_save_state_request"
+	CmdP2PSaveStateStatus  CommandName = "p2p_save_state_status"
 )
 
 // GameMode enumerates the available game swapping modes. Use string constants
@@ -189,6 +188,15 @@ type ServerState struct {
 
 	Games             []string           `json:"games,omitempty"`
 	GameSwapInstances []GameSwapInstance `json:"game_instances,omitempty"`
+
+	// --- P2P Save State Configuration & Manifest Metadata ---
+	P2PEnabled bool `json:"p2p_enabled,omitempty"`
+	// Preferred piece size clients should use for P2P chunking
+	SaveStatePieceSize int `json:"save_state_piece_size,omitempty"`
+	// Timeout in seconds clients should wait before falling back to HTTP
+	SaveStateP2PTimeoutSec int `json:"save_state_p2p_timeout_sec,omitempty"`
+	// Monotonic manifest version increments when any save version changes
+	SaveStateManifestVersion int64 `json:"save_state_manifest_version,omitempty"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
@@ -214,6 +222,11 @@ type GameSwapInstance struct {
 	ID        string    `json:"id"`
 	Game      string    `json:"game"`
 	FileState FileState `json:"file_state"`
+	// Version metadata for current authoritative save state (if any)
+	SaveHash     string    `json:"save_hash,omitempty"`
+	SaveSize     int64     `json:"save_size,omitempty"`
+	SaveUpdated  time.Time `json:"save_updated,omitempty"`
+	SavePieceLen int       `json:"save_piece_len,omitempty"`
 }
 
 // Plugin represents a Lua plugin that can be loaded into BizHawk
@@ -284,4 +297,55 @@ func GetDefaultDiscoveryConfig() *DiscoveryConfig {
 		BroadcastIntervalSec: 5,
 		ListenTimeoutSec:     10,
 	}
+}
+
+// P2P Save State Types & Interfaces
+// This section defines stable public structs used by both server and client to
+// coordinate save state versioning and (future) peer-to-peer distribution.
+// Remaining work expected elsewhere (not here):
+//   - Implement server peer tracker (announce + peer listing)
+//   - Implement client SaveStateFetcher P2P variant
+//   - Wire broadcast of CmdP2PManifestUpdate on manifest changes
+//   - Add piece-level hashing (optional future optimization)
+
+// SaveStateVersion holds version metadata for a save state.
+type SaveStateVersion struct {
+	InstanceID string    `json:"instance_id"`
+	Hash       string    `json:"hash"`
+	Size       int64     `json:"size"`
+	UpdatedAt  time.Time `json:"updated_at"`
+	PieceSize  int       `json:"piece_size,omitempty"`
+}
+
+// SaveStateManifest lists all current save state versions.
+type SaveStateManifest struct {
+	Version   int64              `json:"version"`
+	Generated time.Time          `json:"generated"`
+	Saves     []SaveStateVersion `json:"saves"`
+	PieceSize int                `json:"piece_size"`
+}
+
+// PeerInfo describes a peer advertising save states.
+type PeerInfo struct {
+	ID        string   `json:"id"`
+	Addr      string   `json:"addr"`
+	Instances []string `json:"instances"`
+	LastSeen  int64    `json:"last_seen"`
+}
+
+// P2PSaveStateConfig provides client-side tuning.
+type P2PSaveStateConfig struct {
+	Enabled        bool          `json:"enabled"`
+	PieceSize      int           `json:"piece_size"`
+	Timeout        time.Duration `json:"timeout"`
+	MaxPeers       int           `json:"max_peers"`
+	UploadLimitBps int64         `json:"upload_limit_bps"`
+}
+
+// SaveStateFetcher abstracts retrieval and upload of save states.
+type SaveStateFetcher interface {
+	EnsureSaveState(instanceID string) error
+	UploadSaveState(instanceID string) error
+	ValidateSaveStateVersion(instanceID string) (bool, error)
+	GetSaveStateVersion(instanceID string) (SaveStateVersion, error)
 }

@@ -279,6 +279,58 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+// --- P2P Broadcast Helpers ---
+// These helpers encapsulate sending P2P-related websocket commands. They are
+// intentionally lightweight; higher-level coordination (e.g. deciding peer
+// lists) will live in a future P2P manager.
+
+// broadcastP2PManifestUpdate notifies clients that manifest version changed.
+func (s *Server) broadcastP2PManifestUpdate() {
+	s.mu.Lock()
+	version := s.state.SaveStateManifestVersion
+	count := 0
+	for _, inst := range s.state.GameSwapInstances {
+		if inst.SaveHash != "" && inst.SaveSize > 0 {
+			count++
+		}
+	}
+	s.mu.Unlock()
+	cmd := types.Command{
+		Cmd: types.CmdP2PManifestUpdate,
+		Payload: map[string]any{
+			"version":          version,
+			"save_state_count": count,
+			"ts":               time.Now().Unix(),
+		},
+		ID: fmt.Sprintf("p2p_manifest_update_%d", time.Now().UnixNano()),
+	}
+	s.broadcast(cmd)
+}
+
+// broadcastP2PSaveStateRequest tells clients a particular save state should be ensured.
+// peers is optional and currently unused (empty slice) until tracker integration exists.
+func (s *Server) broadcastP2PSaveStateRequest(instanceID string, peers []types.PeerInfo) {
+	payload := map[string]any{
+		"instance_id": instanceID,
+		"peers":       peers,
+	}
+	cmd := types.Command{Cmd: types.CmdP2PSaveStateRequest, Payload: payload, ID: fmt.Sprintf("p2p_req_%s_%d", instanceID, time.Now().UnixNano())}
+	s.broadcast(cmd)
+}
+
+// broadcastP2PSaveStateStatus broadcasts aggregate swarm metrics (stub values for now).
+func (s *Server) broadcastP2PSaveStateStatus(activePeers int) {
+	payload := map[string]any{
+		"swarm_health": map[string]any{
+			"active_peers": activePeers,
+			// more metrics can be added later
+		},
+		"ts": time.Now().Unix(),
+	}
+	cmd := types.Command{Cmd: types.CmdP2PSaveStateStatus, Payload: payload, ID: fmt.Sprintf("p2p_status_%d", time.Now().UnixNano())}
+	s.broadcast(cmd)
+}
+
 // sendToPlayer enqueues a command to a player's websocket send queue.
 func (s *Server) sendToPlayer(player string, cmd types.Command) error {
 	s.mu.Lock()

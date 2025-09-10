@@ -22,6 +22,8 @@ type Controller struct {
 	// mainGames caches the server's main games list for extra_files lookup
 	mainGames []types.GameEntry
 	mu        sync.RWMutex // protects mainGames
+	// saveStateFetcher abstracts save state upload/download (HTTP or future P2P)
+	saveStateFetcher types.SaveStateFetcher
 }
 
 func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error) *Controller {
@@ -33,8 +35,13 @@ func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.
 		mainGames: make([]types.GameEntry, 0),
 	}
 	c.progressTracking = NewProgressTrackingAPI(api, c)
+	// Initialize fetcher (currently HTTP only). P2P-enabled path will wrap this later.
+	c.saveStateFetcher = &HTTPSaveStateFetcher{api: api}
 	return c
 }
+
+// Note: saveStateFetcher abstraction in place (currently HTTP only). Future composite
+// implementation will wrap this to attempt peer retrieval before HTTP fallback.
 
 // Handle processes a single incoming command. It launches goroutines for
 // commands that should run asynchronously (keeps original behavior).
@@ -306,47 +313,59 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 }
 
 func (c *Controller) EnsureSaveState(instanceID string) error {
-	log.Println("Ensuring save state for instanceID:", instanceID)
-
-	// Create saves directory if it doesn't exist
+	log.Println("[save_orchestrate] instanceID=", instanceID)
+	// Always ensure directory exists
 	if err := os.MkdirAll("./saves", 0755); err != nil {
-		log.Printf("Failed to create saves directory: %v", err)
+		log.Printf("[save_orchestrate][unexpected] mkdir ./saves err=%v", err)
 		return err
 	}
-
-	// 1. Upload old instance if it exists (current player's save state)
-	go func() {
-		if c.bipc.instanceID != "" {
-			log.Printf("Uploading save state for old instance: %s", c.bipc.instanceID)
-			err := c.api.UploadSaveState(c.bipc.instanceID)
-			if err != nil {
-				log.Printf("Failed to upload old save state for instance %s: %v", c.bipc.instanceID, err)
+	// Upload old instance asynchronously if present
+	prev := c.bipc.instanceID
+	if prev != "" {
+		go func(oldID string) {
+			start := time.Now()
+			if err := c.saveStateFetcher.UploadSaveState(oldID); err != nil {
+				log.Printf("[save_upload][unexpected] instance=%s err=%v", oldID, err)
 			} else {
-				log.Printf("Successfully uploaded save state for instance %s", c.bipc.instanceID)
+				log.Printf("[save_upload] instance=%s ok duration=%s", oldID, time.Since(start).Truncate(time.Millisecond))
 			}
-		}
-	}()
-
-	if instanceID == "" {
-		log.Println("No instanceID provided, skipping save state orchestration")
+		}(prev)
+	}
+	if instanceID == "" { // nothing to download
+		log.Printf("[save_orchestrate] no new instance (resume only)")
 		return nil
 	}
-
-	// 2. Download new instance save state (synchronous, blocking)
-	log.Printf("Downloading save state for new instance: %s", instanceID)
-	err := c.api.EnsureSaveState(instanceID)
-	if err != nil {
+	start := time.Now()
+	if err := c.saveStateFetcher.EnsureSaveState(instanceID); err != nil {
 		if err == ErrNotFound {
-			log.Printf("Save state for instance %s not found on server (this is OK, Lua will create one)", instanceID)
-		} else {
-			log.Printf("Failed to download save state for instance %s: %v", instanceID, err)
-			return err
+			log.Printf("[save_download][expected] instance=%s missing on server (will be created)", instanceID)
+			return nil
 		}
-	} else {
-		log.Printf("Successfully downloaded save state for instance %s", instanceID)
+		log.Printf("[save_download][unexpected] instance=%s err=%v", instanceID, err)
+		return err
 	}
-
+	log.Printf("[save_download] instance=%s ok duration=%s", instanceID, time.Since(start).Truncate(time.Millisecond))
 	return nil
+}
+
+// HTTPSaveStateFetcher implements types.SaveStateFetcher using existing API HTTP endpoints.
+type HTTPSaveStateFetcher struct {
+	api *API
+}
+
+func (h *HTTPSaveStateFetcher) EnsureSaveState(instanceID string) error {
+	return h.api.EnsureSaveState(instanceID)
+}
+func (h *HTTPSaveStateFetcher) UploadSaveState(instanceID string) error {
+	return h.api.UploadSaveState(instanceID)
+}
+func (h *HTTPSaveStateFetcher) ValidateSaveStateVersion(instanceID string) (bool, error) {
+	// Basic implementation: always return true (no local cache verification yet)
+	return true, nil
+}
+func (h *HTTPSaveStateFetcher) GetSaveStateVersion(instanceID string) (types.SaveStateVersion, error) {
+	// Not yet implemented: would require manifest lookup; return zero + not found
+	return types.SaveStateVersion{}, fmt.Errorf("not implemented")
 }
 
 // GetMainGames returns a copy of the cached main games list
