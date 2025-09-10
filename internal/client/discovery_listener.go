@@ -295,7 +295,9 @@ func (dl *DiscoveryListener) handleLocalConnection(ctx context.Context, conn *ne
 		select {
 		case <-ctx.Done():
 			log.Printf("[DiscoveryListener] Local connection stopping due to context cancellation")
-			conn.Close()
+			if err := conn.Close(); err != nil {
+				log.Printf("[DiscoveryListener] Error closing local connection: %v", err)
+			}
 			return
 		default:
 			// Set read deadline to allow context cancellation

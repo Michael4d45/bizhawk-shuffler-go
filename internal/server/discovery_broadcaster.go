@@ -139,9 +139,11 @@ func (db *DiscoveryBroadcaster) broadcast() error {
 			log.Printf("[DiscoveryBroadcaster] Failed to create local connection: %v", err)
 		} else {
 			_, err = localConn.Write(data)
-			localConn.Close()
 			if err != nil {
 				log.Printf("[DiscoveryBroadcaster] Unicast send error: %v", err)
+			}
+			if closeErr := localConn.Close(); closeErr != nil {
+				log.Printf("[DiscoveryBroadcaster] Error closing local connection: %v", closeErr)
 			}
 		}
 	}
