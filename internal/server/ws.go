@@ -244,7 +244,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 				if player.Game != "" {
 					startPayload := map[string]any{
-						"game":       player.Game,
+						"game":        player.Game,
 						"instance_id": player.InstanceID,
 					}
 					select {

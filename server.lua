@@ -332,20 +332,21 @@ local function handle_line(line)
             local game, instance = parts[4], parts[5]
             instance_id = instance
             safe_exec_and_ack(id, function()
-                    do_start(game)
+                do_start(game)
             end)
         elseif cmd == "PAUSE" then
             safe_exec_and_ack(id, function()
-                 do_pause()
+                do_pause()
             end)
         elseif cmd == "RESUME" then
             safe_exec_and_ack(id, function()
                 do_resume()
             end)
         elseif cmd == "MSG" then
-            local text = join_from(parts, 4)
             safe_exec_and_ack(id, function()
-                show_message(text, 3)
+                show_message(parts[4] or "", tonumber(parts[5]) or 3.0, tonumber(parts[6]) or 10,
+                    tonumber(parts[7]) or 10, tonumber(parts[8]) or 12, parts[9] or "#FFFFFFFF",
+                    parts[10] or "#FF000000")
             end)
         elseif cmd == "SYNC" then
             local game, instance, state = parts[4], parts[5], parts[6]
