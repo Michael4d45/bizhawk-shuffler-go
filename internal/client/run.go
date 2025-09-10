@@ -444,7 +444,7 @@ func discoverServerWithPrompt(cfg Config) (string, error) {
 	// Create discovery listener
 	listener := NewDiscoveryListener(config)
 
-	// Start discovery in background
+	// Start discovery with context timeout
 	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(timeoutSeconds)*time.Second)
 	defer cancel()
 
@@ -452,13 +452,13 @@ func discoverServerWithPrompt(cfg Config) (string, error) {
 		return "", fmt.Errorf("failed to start discovery: %w", err)
 	}
 
-	// Wait a bit for servers to be discovered (longer than broadcast interval)
-	time.Sleep(8 * time.Second)
+	// Wait for context to finish (timeout or cancel)
+	<-ctx.Done()
 
-	// Get discovered servers
+	// Get discovered servers after timeout
 	servers := listener.GetDiscoveredServers()
 
-	// Stop discovery
+	// Stop discovery (should be a no-op if already stopped)
 	if err := listener.Stop(); err != nil {
 		log.Printf("Error stopping discovery: %v", err)
 	}

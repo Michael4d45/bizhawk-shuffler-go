@@ -26,6 +26,7 @@ type DiscoveryListener struct {
 	discovered    map[string]*types.ServerInfo
 	mu            sync.RWMutex
 	conn          *net.UDPConn
+	localConn     *net.UDPConn // Store localhost connection for cleanup
 	running       bool
 	cancel        context.CancelFunc
 	onServerFound func(*types.ServerInfo) // Callback for when a server is discovered
@@ -49,13 +50,13 @@ func (dl *DiscoveryListener) Start(ctx context.Context) error {
 		return nil // Already running
 	}
 
-	// Set up multicast connection
-	if err := dl.setupMulticastConnection(); err != nil {
-		return err
-	}
-
 	dl.running = true
 	ctx, dl.cancel = context.WithCancel(ctx)
+
+	// Set up multicast connection
+	if err := dl.setupMulticastConnection(ctx); err != nil {
+		return err
+	}
 
 	// Start listening goroutine
 	go dl.listen(ctx)
@@ -80,9 +81,16 @@ func (dl *DiscoveryListener) Stop() error {
 
 	if dl.conn != nil {
 		if err := dl.conn.Close(); err != nil {
-			log.Printf("[DiscoveryListener] Error closing connection: %v", err)
+			log.Printf("[DiscoveryListener] Error closing multicast connection: %v", err)
 		}
 		dl.conn = nil
+	}
+
+	if dl.localConn != nil {
+		if err := dl.localConn.Close(); err != nil {
+			log.Printf("[DiscoveryListener] Error closing localhost connection: %v", err)
+		}
+		dl.localConn = nil
 	}
 
 	log.Printf("[DiscoveryListener] Stopped listening at %s", time.Now().Format("15:04:05.000"))
@@ -131,14 +139,20 @@ func (dl *DiscoveryListener) listen(ctx context.Context) {
 			log.Printf("[DiscoveryListener] Received %d bytes from %s", n, addr)
 			log.Printf("[DiscoveryListener] Raw data: %q", string(buffer[:n]))
 
-			// TODO: Parse discovery message
+			// Try to parse as JSON discovery message
 			var msg types.DiscoveryMessage
 			if err := json.Unmarshal(buffer[:n], &msg); err != nil {
-				log.Printf("Failed to unmarshal discovery message from %s: %v", addr, err)
+				log.Printf("[DiscoveryListener] Failed to parse message from %s as JSON: %v", addr, err)
 				continue
 			}
 
-			log.Printf("[DiscoveryListener] Received message from %s: type=%s, server=%s (%s:%d)", addr, msg.Type, msg.ServerName, msg.Host, msg.Port)
+			// Validate that this is a BizShuffle server message
+			if msg.Type != "bizshuffle_server" {
+				log.Printf("[DiscoveryListener] Ignoring non-BizShuffle message from %s (type: %s)", addr, msg.Type)
+				continue
+			}
+
+			log.Printf("[DiscoveryListener] Received BizShuffle server message from %s: server=%s (%s:%d)", addr, msg.ServerName, msg.Host, msg.Port)
 
 			// TODO: Validate message
 			if !msg.IsValid() {
@@ -162,7 +176,7 @@ func (dl *DiscoveryListener) listen(ctx context.Context) {
 }
 
 // setupMulticastConnection sets up the UDP multicast connection
-func (dl *DiscoveryListener) setupMulticastConnection() error {
+func (dl *DiscoveryListener) setupMulticastConnection(ctx context.Context) error {
 	addr, err := net.ResolveUDPAddr("udp", dl.config.MulticastAddress)
 	if err != nil {
 		return err
@@ -231,8 +245,9 @@ func (dl *DiscoveryListener) setupMulticastConnection() error {
 			log.Printf("[DiscoveryListener] Failed to listen on localhost:1901: %v", err)
 		} else {
 			log.Printf("[DiscoveryListener] Also listening on localhost:1901")
+			dl.localConn = localConn
 			// Start a goroutine to handle localhost packets
-			go dl.handleLocalConnection(localConn)
+			go dl.handleLocalConnection(ctx, localConn)
 		}
 	}
 
@@ -274,46 +289,65 @@ func (dl *DiscoveryListener) addOrUpdateServer(info *types.ServerInfo) {
 }
 
 // handleLocalConnection handles packets from the localhost unicast connection
-func (dl *DiscoveryListener) handleLocalConnection(conn *net.UDPConn) {
+func (dl *DiscoveryListener) handleLocalConnection(ctx context.Context, conn *net.UDPConn) {
 	buffer := make([]byte, 2048)
 	for {
-		n, addr, err := conn.ReadFromUDP(buffer)
-		if err != nil {
-			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+		select {
+		case <-ctx.Done():
+			log.Printf("[DiscoveryListener] Local connection stopping due to context cancellation")
+			conn.Close()
+			return
+		default:
+			// Set read deadline to allow context cancellation
+			if err := conn.SetReadDeadline(time.Now().Add(time.Second)); err != nil {
+				log.Printf("[DiscoveryListener] Failed to set read deadline on local connection: %v", err)
 				continue
 			}
-			log.Printf("[DiscoveryListener] Local connection error: %v", err)
-			return
+
+			n, addr, err := conn.ReadFromUDP(buffer)
+			if err != nil {
+				if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+					continue // Timeout is expected, continue listening
+				}
+				log.Printf("[DiscoveryListener] Local connection error: %v", err)
+				return
+			}
+
+			log.Printf("[DiscoveryListener] Received %d bytes from localhost %s", n, addr)
+			log.Printf("[DiscoveryListener] Raw data: %q", string(buffer[:n]))
+
+			// Try to parse as JSON discovery message
+			var msg types.DiscoveryMessage
+			if err := json.Unmarshal(buffer[:n], &msg); err != nil {
+				log.Printf("[DiscoveryListener] Failed to parse localhost message from %s as JSON: %v", addr, err)
+				continue
+			}
+
+			// Validate that this is a BizShuffle server message
+			if msg.Type != "bizshuffle_server" {
+				log.Printf("[DiscoveryListener] Ignoring non-BizShuffle localhost message from %s (type: %s)", addr, msg.Type)
+				continue
+			}
+
+			log.Printf("[DiscoveryListener] Received BizShuffle server message from localhost %s: server=%s (%s:%d)", addr, msg.ServerName, msg.Host, msg.Port)
+
+			// Validate message
+			if !msg.IsValid() {
+				continue
+			}
+
+			// Create server info
+			serverInfo := &types.ServerInfo{
+				Name:     msg.ServerName,
+				Host:     msg.Host,
+				Port:     msg.Port,
+				Version:  msg.Version,
+				LastSeen: time.Now(),
+				ServerID: msg.ServerID,
+			}
+
+			// Add or update server
+			dl.addOrUpdateServer(serverInfo)
 		}
-
-		log.Printf("[DiscoveryListener] Received %d bytes from localhost %s", n, addr)
-		log.Printf("[DiscoveryListener] Raw data: %q", string(buffer[:n]))
-
-		// Parse the message (reuse the same logic as the main listener)
-		var msg types.DiscoveryMessage
-		if err := json.Unmarshal(buffer[:n], &msg); err != nil {
-			log.Printf("Failed to unmarshal discovery message from localhost %s: %v", addr, err)
-			continue
-		}
-
-		log.Printf("[DiscoveryListener] Received message from localhost %s: type=%s, server=%s (%s:%d)", addr, msg.Type, msg.ServerName, msg.Host, msg.Port)
-
-		// Validate message
-		if !msg.IsValid() {
-			continue
-		}
-
-		// Create server info
-		serverInfo := &types.ServerInfo{
-			Name:     msg.ServerName,
-			Host:     msg.Host,
-			Port:     msg.Port,
-			Version:  msg.Version,
-			LastSeen: time.Now(),
-			ServerID: msg.ServerID,
-		}
-
-		// Add or update server
-		dl.addOrUpdateServer(serverInfo)
 	}
 }

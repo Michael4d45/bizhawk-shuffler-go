@@ -131,7 +131,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 	// Clear players' InstanceID for a fresh assignment
 	for n, p := range h.server.state.Players {
 		// If player had an assigned instance, set that instance state to pending (in transition)
-		if p.InstanceID != "" {
+		if p.InstanceID != "" && p.Connected {
 			h.server.mu.Unlock()
 			h.server.setInstanceFileState(p.InstanceID, types.FileStatePending)
 			h.server.mu.Lock()
@@ -243,13 +243,15 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 		return errors.New("instance not found")
 	}
 	var foundPlayer string
-	for playerName, player := range h.server.state.Players {
-		if player.InstanceID == foundInst.ID {
+	for playerName, swappingPlayer := range h.server.state.Players {
+		if swappingPlayer.InstanceID == foundInst.ID && playerName != player {
 			// Clear previous assignment
-			player.Game = ""
-			player.InstanceID = ""
-			h.server.state.Players[playerName] = player
-			foundPlayer = playerName
+			swappingPlayer.Game = ""
+			swappingPlayer.InstanceID = ""
+			h.server.state.Players[playerName] = swappingPlayer
+			if swappingPlayer.Connected {
+				foundPlayer = playerName
+			}
 			break
 		}
 	}
