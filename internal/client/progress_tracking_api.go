@@ -10,15 +10,15 @@ import (
 	"time"
 )
 
-// EnhancedAPI extends the API with progress tracking and extra files support
-type EnhancedAPI struct {
+// ProgressTrackingAPI extends the API with progress tracking and extra files support
+type ProgressTrackingAPI struct {
 	*API
 	controller *Controller
 }
 
-// NewEnhancedAPI creates an enhanced API that can access controller state
-func NewEnhancedAPI(api *API, controller *Controller) *EnhancedAPI {
-	return &EnhancedAPI{
+// NewProgressTrackingAPI creates a progress tracking API that can access controller state
+func NewProgressTrackingAPI(api *API, controller *Controller) *ProgressTrackingAPI {
+	return &ProgressTrackingAPI{
 		API:        api,
 		controller: controller,
 	}
@@ -26,7 +26,7 @@ func NewEnhancedAPI(api *API, controller *Controller) *EnhancedAPI {
 
 // EnsureFileWithProgress ensures the named file exists locally, downloading it with progress display.
 // Also downloads any extra_files associated with the main file if available.
-func (ea *EnhancedAPI) EnsureFileWithProgress(ctx context.Context, name string) error {
+func (ea *ProgressTrackingAPI) EnsureFileWithProgress(ctx context.Context, name string) error {
 	// First ensure the main file
 	if err := ea.ensureFileWithProgressInternal(ctx, name); err != nil {
 		return err
@@ -46,7 +46,7 @@ func (ea *EnhancedAPI) EnsureFileWithProgress(ctx context.Context, name string) 
 }
 
 // ensureFileWithProgressInternal downloads a single file with progress tracking
-func (ea *EnhancedAPI) ensureFileWithProgressInternal(ctx context.Context, name string) error {
+func (ea *ProgressTrackingAPI) ensureFileWithProgressInternal(ctx context.Context, name string) error {
 	dest := filepath.Join("./roms", filepath.FromSlash(name))
 	if _, err := os.Stat(dest); err == nil {
 		return nil // exists
@@ -78,7 +78,7 @@ func (ea *EnhancedAPI) ensureFileWithProgressInternal(ctx context.Context, name 
 }
 
 // downloadFileWithProgress downloads a file with progress tracking
-func (ea *EnhancedAPI) downloadFileWithProgress(ctx context.Context, url, dest, displayName string) error {
+func (ea *ProgressTrackingAPI) downloadFileWithProgress(ctx context.Context, url, dest, displayName string) error {
 	req, err := http.NewRequestWithContext(ctx, "GET", url, nil)
 	if err != nil {
 		return err

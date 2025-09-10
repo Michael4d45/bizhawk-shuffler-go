@@ -14,11 +14,11 @@ import (
 
 // Controller wires dependencies and handles incoming commands.
 type Controller struct {
-	cfg       Config
-	bipc      *BizhawkIPC
-	api       *API
-	enhanced  *EnhancedAPI
-	writeJSON func(types.Command) error
+	cfg              Config
+	bipc             *BizhawkIPC
+	api              *API
+	progressTracking *ProgressTrackingAPI
+	writeJSON        func(types.Command) error
 	// mainGames caches the server's main games list for extra_files lookup
 	mainGames []types.GameEntry
 	mu        sync.RWMutex // protects mainGames
@@ -32,7 +32,7 @@ func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.
 		writeJSON: writeJSON,
 		mainGames: make([]types.GameEntry, 0),
 	}
-	c.enhanced = NewEnhancedAPI(api, c)
+	c.progressTracking = NewProgressTrackingAPI(api, c)
 	return c
 }
 
@@ -69,7 +69,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				return
 			} else {
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-				if err := c.enhanced.EnsureFileWithProgress(ctx2, game); err != nil {
+				if err := c.progressTracking.EnsureFileWithProgress(ctx2, game); err != nil {
 					cancel2()
 					sendNack(id, "download failed: "+err.Error())
 					return
@@ -115,7 +115,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 			log.Printf("ensuring ROM present for game=%s", game)
-			if err := c.enhanced.EnsureFileWithProgress(ctx2, game); err != nil {
+			if err := c.progressTracking.EnsureFileWithProgress(ctx2, game); err != nil {
 				cancel2()
 				sendNack(id, "download failed: "+err.Error())
 				return
@@ -234,7 +234,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					defer wg.Done()
 					ctx2, cancel2 := context.WithTimeout(ctx, 60*time.Second)
 					defer cancel2()
-					if err := c.enhanced.EnsureFileWithProgress(ctx2, fname); err != nil {
+					if err := c.progressTracking.EnsureFileWithProgress(ctx2, fname); err != nil {
 						errCh <- fmt.Errorf("failed to download %s: %w", fname, err)
 						return
 					}
