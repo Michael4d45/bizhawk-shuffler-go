@@ -12,7 +12,9 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"os/signal"
 	"strings"
+	"syscall"
 )
 
 // ErrNotFound is returned when a requested remote save/file is not present on the server
@@ -164,6 +166,15 @@ func (c *Client) Run() {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Set up signal handling as a backup to BizHawkController's signal handling
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigs
+		log.Printf("[Client] received signal %v, initiating shutdown", sig)
+		cancel()
+	}()
+
 	go func() {
 		log.Printf("[Client] client starting")
 		if err := c.bhController.LaunchAndManage(ctx, cancel); err != nil {
@@ -190,6 +201,7 @@ func (c *Client) Run() {
 	defer c.wsClient.Stop()
 
 	<-ctx.Done()
+	log.Printf("[Client] shutdown complete")
 }
 
 // InitLogging sets up global logging and returns the opened log file which the

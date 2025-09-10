@@ -504,53 +504,64 @@ func TerminateProcess(cmdPtr **exec.Cmd, mu *sync.Mutex, grace time.Duration) {
 func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 	// Use API.FetchServerState to query the server state for this client/player.
 	go func() {
-		for line := range c.bipc.Incoming() {
-			if line == MsgDisconnected {
-				log.Printf("bizhawk ipc: disconnected detected from readLoop (ipc handler); marking ipcReady=false and continuing")
-				if c.bipc != nil {
-					c.bipc.SetReady(false)
-				}
-				// don't cancel the main context here; allow reconnect logic to run
-				continue
-			}
-			log.Printf("lua incoming: %s", line)
-			if strings.HasPrefix(line, "HELLO") {
-				log.Printf("ipc handler: received HELLO from lua, sending SYNC")
-				c.bipc.SetReady(true)
-
-				running := c.bipc.running
-				game := c.bipc.game
-				instanceID := c.bipc.instanceID
-				var err error
-				if game != "" && running {
-					log.Printf("ipc handler: BizHawk restarted, re-sending START for game %q instance %q", game, instanceID)
-				} else {
-					running, game, instanceID, err = c.api.FetchServerState(c.cfg["name"])
-					if err != nil {
-						log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)
-						running = true
-						game = ""
+		for {
+			select {
+			case <-ctx.Done():
+				log.Printf("bizhawk ipc: StartIPCGoroutine context cancelled, exiting")
+				return
+			case line, ok := <-c.bipc.Incoming():
+				if !ok {
+					// Channel closed
+					log.Printf("bizhawk ipc: incoming channel closed or handler goroutine exiting; marking ipcReady=false")
+					if c.bipc != nil {
+						c.bipc.SetReady(false)
 					}
+					return
 				}
-				if game == "" {
-					log.Printf("ipc handler: no current game for player from server state; sending empty game")
-				}
-				ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
-				if err := c.api.EnsureSaveState(instanceID); err != nil {
-					log.Printf("ipc handler: EnsureSaveState failed: %v", err)
-				}
-				if err := c.bipc.SendSync(ctx2, game, instanceID, running); err != nil {
-					log.Printf("ipc handler: SendSync failed: %v", err)
-				} else {
-					log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", game, running)
-				}
-				cancel2()
 
+				if line == MsgDisconnected {
+					log.Printf("bizhawk ipc: disconnected detected from readLoop (ipc handler); marking ipcReady=false and continuing")
+					if c.bipc != nil {
+						c.bipc.SetReady(false)
+					}
+					// don't cancel the main context here; allow reconnect logic to run
+					continue
+				}
+				log.Printf("lua incoming: %s", line)
+				if strings.HasPrefix(line, "HELLO") {
+					log.Printf("ipc handler: received HELLO from lua, sending SYNC")
+					c.bipc.SetReady(true)
+
+					running := c.bipc.running
+					game := c.bipc.game
+					instanceID := c.bipc.instanceID
+					var err error
+					if game != "" && running {
+						log.Printf("ipc handler: BizHawk restarted, re-sending START for game %q instance %q", game, instanceID)
+					} else {
+						running, game, instanceID, err = c.api.FetchServerState(c.cfg["name"])
+						if err != nil {
+							log.Printf("ipc handler: FetchServerState failed: %v; defaulting running=true, empty game", err)
+							running = true
+							game = ""
+						}
+					}
+					if game == "" {
+						log.Printf("ipc handler: no current game for player from server state; sending empty game")
+					}
+					ctx2, cancel2 := context.WithTimeout(context.Background(), 5*time.Second)
+					if err := c.api.EnsureSaveState(instanceID); err != nil {
+						log.Printf("ipc handler: EnsureSaveState failed: %v", err)
+					}
+					if err := c.bipc.SendSync(ctx2, game, instanceID, running); err != nil {
+						log.Printf("ipc handler: SendSync failed: %v", err)
+					} else {
+						log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", game, running)
+					}
+					cancel2()
+
+				}
 			}
-		}
-		log.Printf("bizhawk ipc: incoming channel closed or handler goroutine exiting; marking ipcReady=false")
-		if c.bipc != nil {
-			c.bipc.SetReady(false)
 		}
 	}()
 }

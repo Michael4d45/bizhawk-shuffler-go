@@ -176,10 +176,20 @@ func (b *BizhawkIPC) SendCommand(ctx context.Context, parts ...string) error {
 // readLoop reads incoming lines and dispatches them
 func (b *BizhawkIPC) readLoop(ctx context.Context) {
 	for {
+		// Check context first
+		select {
+		case <-ctx.Done():
+			log.Printf("bizhawk ipc: readLoop context cancelled, exiting")
+			return
+		default:
+		}
+
 		b.mu.Lock()
 		r := b.reader
+		conn := b.conn
 		b.mu.Unlock()
-		if r == nil {
+
+		if r == nil || conn == nil {
 			// try reconnect
 			if err := b.connect(); err != nil {
 				log.Printf("bizhawk ipc: connect failed in readLoop: %v", err)
@@ -191,11 +201,26 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 					continue
 				}
 			}
+			b.mu.Lock()
 			r = b.reader
+			conn = b.conn
+			b.mu.Unlock()
 		}
+
+		// Set a read deadline to make ReadString cancellable
+		if conn != nil {
+			_ = conn.SetReadDeadline(time.Now().Add(1 * time.Second))
+		}
+
 		line, err := r.ReadString('\n')
 		if err != nil {
-			// connection closed; clear conn and retry
+			// Check if this is a timeout (which is expected for context checking)
+			if netErr, ok := err.(net.Error); ok && netErr.Timeout() {
+				// This is just our periodic timeout, continue the loop
+				continue
+			}
+
+			// connection closed or real error; clear conn and retry
 			log.Printf("bizhawk ipc: readLoop detected read error: %v; will clear conn and notify", err)
 			b.mu.Lock()
 			if b.conn != nil {
@@ -329,6 +354,17 @@ func (b *BizhawkIPC) resendLoop(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
+			log.Printf("bizhawk ipc: resendLoop context cancelled, exiting")
+			// Notify any remaining pending commands
+			b.mu.Lock()
+			for id, pc := range b.pending {
+				select {
+				case pc.ch <- errors.New("ipc shutdown"):
+				default:
+				}
+				delete(b.pending, id)
+			}
+			b.mu.Unlock()
 			return
 		case <-ticker.C:
 			now := time.Now()

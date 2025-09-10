@@ -92,6 +92,9 @@ func (w *WSClient) Stop() {
 	}
 	w.connMu.Unlock()
 	w.wg.Wait()
+
+	// Close cmdCh to unblock runController if needed
+	close(w.cmdCh)
 }
 
 // Send enqueues a command for sending. Returns error if client is stopped.
@@ -191,6 +194,7 @@ func (w *WSClient) writer(conn *websocket.Conn, done chan struct{}) {
 			}
 			log.Printf("wsclient: sent cmd: %v", cmd)
 		case <-w.ctx.Done():
+			log.Printf("wsclient: writer context cancelled, exiting")
 			return
 		}
 	}
@@ -198,6 +202,23 @@ func (w *WSClient) writer(conn *websocket.Conn, done chan struct{}) {
 
 // reader receives commands from the websocket and enqueues them.
 func (w *WSClient) reader(conn *websocket.Conn) {
+	defer log.Printf("wsclient: reader exiting")
+
+	// Create a channel to signal when we should stop
+	done := make(chan struct{})
+	defer close(done)
+
+	// Goroutine to handle context cancellation
+	go func() {
+		select {
+		case <-w.ctx.Done():
+			// Close the connection to unblock ReadJSON
+			_ = conn.Close()
+		case <-done:
+			// Reader is exiting normally
+		}
+	}()
+
 	for {
 		var cmd types.Command
 		if err := conn.ReadJSON(&cmd); err != nil {

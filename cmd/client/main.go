@@ -13,4 +13,5 @@ func main() {
 		log.Fatalf("client init failed: %v", err)
 	}
 	c.Run()
+	log.Println("[main] client.Run() returned, exiting process")
 }
