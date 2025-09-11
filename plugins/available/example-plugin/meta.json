@@ -4,7 +4,7 @@
   "description": "Example plugin demonstrating basic functionality",
   "author": "BizHawk Shuffler Team",
   "bizhawk_version": ">=2.8.0",
-  "enabled": false,
+  "enabled": true,
   "entry_point": "plugin.lua",
   "hooks": ["on_init", "on_frame", "on_game_start"]
 }

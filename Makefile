@@ -16,6 +16,8 @@ server:
 	$(GO) build -o $(BIN_DIR)/server/bizshuffle-server$(EXT) ./cmd/server
 	@mkdir -p $(BIN_DIR)/server/web
 	@cp -r web/* $(BIN_DIR)/server/web/ 2> /dev/null || true
+	@mkdir -p $(BIN_DIR)/server/plugins
+	@cp -r plugins/* $(BIN_DIR)/server/plugins/ 2> /dev/null || true
 
 client:
 	@mkdir -p $(BIN_DIR)

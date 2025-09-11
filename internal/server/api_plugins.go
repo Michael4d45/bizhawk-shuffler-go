@@ -170,13 +170,77 @@ func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
 func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/plugins/")
 	parts := strings.Split(path, "/")
-
-	if len(parts) < 2 {
+	if len(parts) == 0 || parts[0] == "" {
 		http.Error(w, "invalid plugin action path", http.StatusBadRequest)
 		return
 	}
 
 	pluginName := parts[0]
+
+	// If the path is exactly /api/plugins/{name}, support GET (details) and DELETE (remove)
+	if len(parts) == 1 {
+		switch r.Method {
+		case http.MethodGet:
+			// Return plugin metadata (merge persisted state if present)
+			p := s.loadPluginMetadata(pluginName)
+			if p == nil {
+				http.Error(w, "plugin not found", http.StatusNotFound)
+				return
+			}
+			// Merge state (enabled/status) if present
+			s.withRLock(func() {
+				if s.state.Plugins != nil {
+					if sp, ok := s.state.Plugins[pluginName]; ok {
+						// prefer state for Enabled/Status and Path
+						p.Enabled = sp.Enabled
+						if sp.Status != "" {
+							p.Status = sp.Status
+						}
+						if sp.Path != "" {
+							p.Path = sp.Path
+						}
+					}
+				}
+			})
+			w.Header().Set("Content-Type", "application/json")
+			if err := json.NewEncoder(w).Encode(p); err != nil {
+				log.Printf("encode plugin detail error: %v", err)
+			}
+			return
+		case http.MethodDelete:
+			// Delete plugin files and remove from state
+			pluginDir := filepath.Join("./plugins/available", pluginName)
+			// Remove directory on disk
+			if err := os.RemoveAll(pluginDir); err != nil {
+				log.Printf("failed to remove plugin dir %s: %v", pluginDir, err)
+				http.Error(w, "failed to remove plugin: "+err.Error(), http.StatusInternalServerError)
+				return
+			}
+			s.withLock(func() {
+				if s.state.Plugins != nil {
+					delete(s.state.Plugins, pluginName)
+				}
+			})
+			if err := s.saveState(); err != nil {
+				log.Printf("saveState error after plugin delete: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			if _, err := w.Write([]byte("ok")); err != nil {
+				log.Printf("write response error: %v", err)
+			}
+			return
+		default:
+			http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
+	}
+
+	// Otherwise treat as action path: /api/plugins/{name}/{action}
+	if len(parts) < 2 {
+		http.Error(w, "invalid plugin action path", http.StatusBadRequest)
+		return
+	}
+
 	action := parts[1]
 
 	switch action {
@@ -234,8 +298,12 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 		if s.state.Plugins == nil {
 			s.state.Plugins = make(map[string]types.Plugin)
 		}
-		plugin, exists := s.state.Plugins[pluginName]
-		if !exists {
+		// Avoid shadowing the outer 'exists' variable. Use a local ok and set
+		// the outer flag so it is visible after the closure.
+		plugin, ok := s.state.Plugins[pluginName]
+		if ok {
+			exists = true
+		} else {
 			if p := s.loadPluginMetadata(pluginName); p != nil {
 				plugin = *p
 				exists = true
