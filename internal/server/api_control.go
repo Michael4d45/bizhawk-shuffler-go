@@ -12,12 +12,9 @@ import (
 
 // apiStart toggles running=true and notifies clients
 func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	s.state.Running = true
-	s.state.UpdatedAt = time.Now()
-	s.mu.Unlock()
-	if err := s.saveState(); err != nil {
-		// non-fatal; log for visibility
+	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.Running = true
+	}); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
 	s.broadcast(types.Command{Cmd: types.CmdStart, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
@@ -32,11 +29,9 @@ func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
 
 // apiPause toggles running=false and notifies clients
 func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	s.state.Running = false
-	s.state.UpdatedAt = time.Now()
-	s.mu.Unlock()
-	if err := s.saveState(); err != nil {
+	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.Running = false
+	}); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
 	s.broadcast(types.Command{Cmd: types.CmdPause, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
@@ -50,12 +45,10 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	s.state.GameSwapInstances = []types.GameSwapInstance{}
-	s.state.Running = false
-	s.state.UpdatedAt = time.Now()
-	s.mu.Unlock()
-	if err := s.saveState(); err != nil {
+	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.GameSwapInstances = []types.GameSwapInstance{}
+		st.Running = false
+	}); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
 	s.broadcast(types.Command{Cmd: types.CmdReset, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
@@ -78,14 +71,12 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	s.state.SwapEnabled = !s.state.SwapEnabled
-	if !s.state.SwapEnabled {
-		s.state.NextSwapAt = 0
-	}
-	s.state.UpdatedAt = time.Now()
-	s.mu.Unlock()
-	if err := s.saveState(); err != nil {
+	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.SwapEnabled = !st.SwapEnabled
+		if !st.SwapEnabled {
+			st.NextSwapAt = 0
+		}
+	}); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
 	select {
@@ -100,9 +91,8 @@ func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
 // apiMode sets or reads the swap mode
 func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {
-		s.mu.Lock()
-		mode := s.state.Mode
-		s.mu.Unlock()
+		var mode types.GameMode
+		s.withRLock(func() { mode = s.state.Mode })
 		if err := json.NewEncoder(w).Encode(map[string]any{"mode": mode}); err != nil {
 			fmt.Printf("encode response error: %v\n", err)
 		}
@@ -116,10 +106,10 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.mu.Lock()
-		s.state.Mode = b.Mode
-		s.state.UpdatedAt = time.Now()
-		s.mu.Unlock()
+		s.withLock(func() {
+			s.state.Mode = b.Mode
+			s.state.UpdatedAt = time.Now()
+		})
 		if err := s.saveState(); err != nil {
 			fmt.Printf("saveState error: %v\n", err)
 		}

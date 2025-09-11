@@ -15,7 +15,7 @@ import (
 
 // Server encapsulates all state and connected websocket clients.
 type Server struct {
-	mu          sync.Mutex
+	mu          sync.RWMutex
 	state       types.ServerState
 	conns       map[*websocket.Conn]*wsClient
 	players     map[string]*wsClient
@@ -94,12 +94,12 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 
 // broadcast sends a command to all currently connected players.
 func (s *Server) broadcast(cmd types.Command) {
-	s.mu.Lock()
+	s.mu.RLock()
 	clients := make([]*wsClient, 0, len(s.players))
 	for _, cl := range s.players {
 		clients = append(clients, cl)
 	}
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	for _, cl := range clients {
 		select {
 		case cl.sendCh <- cmd:
@@ -111,15 +111,22 @@ func (s *Server) broadcast(cmd types.Command) {
 
 // UpdateHostIfChanged sets host in state if different and persists.
 func (s *Server) UpdateHostIfChanged(host string) {
-	s.mu.Lock()
-	if s.state.Host == host {
-		s.mu.Unlock()
+	// Update under lock, but copy state out before releasing so we can persist
+	var changed bool
+	var st types.ServerState
+	s.withLock(func() {
+		if s.state.Host == host {
+			changed = false
+			return
+		}
+		s.state.Host = host
+		s.state.UpdatedAt = time.Now()
+		st = s.state
+		changed = true
+	})
+	if !changed {
 		return
 	}
-	s.state.Host = host
-	s.state.UpdatedAt = time.Now()
-	st := s.state
-	s.mu.Unlock()
 	if err := s.saveState(); err != nil {
 		log.Printf("failed to persist host: %v", err)
 	} else {
@@ -128,19 +135,26 @@ func (s *Server) UpdateHostIfChanged(host string) {
 }
 
 // PersistedHost returns the persisted host if present.
-func (s *Server) PersistedHost() string { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Host }
+func (s *Server) PersistedHost() string { return s.SnapshotState().Host }
 
 // UpdatePortIfChanged sets port in state if different and persists.
 func (s *Server) UpdatePortIfChanged(port int) {
-	s.mu.Lock()
-	if s.state.Port == port {
-		s.mu.Unlock()
+	// Update under lock, but copy state out before releasing so we can persist
+	var changed bool
+	var st types.ServerState
+	s.withLock(func() {
+		if s.state.Port == port {
+			changed = false
+			return
+		}
+		s.state.Port = port
+		s.state.UpdatedAt = time.Now()
+		st = s.state
+		changed = true
+	})
+	if !changed {
 		return
 	}
-	s.state.Port = port
-	s.state.UpdatedAt = time.Now()
-	st := s.state
-	s.mu.Unlock()
 	if err := s.saveState(); err != nil {
 		log.Printf("failed to persist port: %v", err)
 	} else {
@@ -149,46 +163,49 @@ func (s *Server) UpdatePortIfChanged(port int) {
 }
 
 // PersistedPort returns the persisted port if present.
-func (s *Server) PersistedPort() int { s.mu.Lock(); defer s.mu.Unlock(); return s.state.Port }
+func (s *Server) PersistedPort() int { return s.SnapshotState().Port }
 
 // TODO: Add methods for managing discovery broadcaster
 // StartBroadcaster initializes and starts the discovery broadcaster
 func (s *Server) StartBroadcaster(ctx context.Context) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	var startedErr error
+	s.withLock(func() {
+		if s.broadcaster != nil {
+			startedErr = s.broadcaster.Start(ctx)
+			return
+		}
+		// Create default discovery config
+		config := types.GetDefaultDiscoveryConfig()
 
-	if s.broadcaster != nil {
-		return s.broadcaster.Start(ctx)
+		// Get server info
+		host := s.state.Host
+		if host == "" {
+			host = "127.0.0.1" // fallback
+		}
+		port := s.state.Port
+		if port == 0 {
+			port = 8080 // fallback
+		}
+		serverName := s.GetServerName()
+
+		// Initialize broadcaster
+		s.broadcaster = NewDiscoveryBroadcaster(config, host, port, serverName)
+	})
+	if startedErr != nil {
+		return startedErr
 	}
-
-	// Create default discovery config
-	config := types.GetDefaultDiscoveryConfig()
-
-	// Get server info
-	host := s.state.Host
-	if host == "" {
-		host = "127.0.0.1" // fallback
-	}
-	port := s.state.Port
-	if port == 0 {
-		port = 8080 // fallback
-	}
-	serverName := s.GetServerName()
-
-	// Initialize broadcaster
-	s.broadcaster = NewDiscoveryBroadcaster(config, host, port, serverName)
 	return s.broadcaster.Start(ctx)
 }
 
 // StopBroadcaster stops the discovery broadcaster
 func (s *Server) StopBroadcaster() error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.broadcaster != nil {
-		return s.broadcaster.Stop()
-	}
-	return nil
+	var stopErr error
+	s.withLock(func() {
+		if s.broadcaster != nil {
+			stopErr = s.broadcaster.Stop()
+		}
+	})
+	return stopErr
 }
 
 // GetServerName returns a human-readable name for this server
@@ -198,6 +215,21 @@ func (s *Server) GetServerName() string {
 		hostname = "BizShuffle"
 	}
 	return fmt.Sprintf("%s Server", hostname)
+}
+
+// withLock executes fn while holding the write lock. This centralizes
+// locking to avoid manual mu.Lock()/mu.Unlock() footguns in callers.
+func (s *Server) withLock(fn func()) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	fn()
+}
+
+// withRLock executes fn while holding the read lock.
+func (s *Server) withRLock(fn func()) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	fn()
 }
 
 func (s *Server) currentPlayer(player string) types.Player {

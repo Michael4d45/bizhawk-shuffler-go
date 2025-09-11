@@ -31,34 +31,32 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 	var gameFile string
 	if b.Game != "" {
 		gameFile = b.Game
-		// ensure player exists and mark connected
-		s.mu.Lock()
-		p, ok := s.state.Players[b.Player]
-		if !ok {
-			p = types.Player{Name: b.Player}
-		}
-		s.state.Players[b.Player] = p
-		s.state.UpdatedAt = time.Now()
-		s.mu.Unlock()
+		// ensure player exists
+		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+			if _, ok := st.Players[b.Player]; !ok {
+				st.Players[b.Player] = types.Player{Name: b.Player}
+			}
+		})
 	} else if b.InstanceID != "" {
 		// Look up instance by id and assign to player if provided
-		s.mu.Lock()
-		found := false
-		for _, inst := range s.state.GameSwapInstances {
+		var found bool
+		// Find instance using snapshot of instances (no write lock needed)
+		_, _, instances := s.SnapshotGames()
+		for _, inst := range instances {
 			if inst.ID == b.InstanceID {
 				gameFile = inst.Game
 				found = true
 				break
 			}
 		}
-		// ensure player entry exists
-		p, ok := s.state.Players[b.Player]
-		if !ok {
-			p = types.Player{Name: b.Player}
+		if found {
+			// Ensure player entry exists
+			_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+				if _, ok := st.Players[b.Player]; !ok {
+					st.Players[b.Player] = types.Player{Name: b.Player}
+				}
+			})
 		}
-		s.state.Players[b.Player] = p
-		s.state.UpdatedAt = time.Now()
-		s.mu.Unlock()
 		if !found {
 			http.Error(w, "instance not found", http.StatusBadRequest)
 			return
@@ -78,10 +76,7 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Persist state and broadcast update
-	if err := s.saveState(); err != nil {
-		fmt.Printf("saveState error: %v\n", err)
-	}
+	_ = s.SnapshotState()
 }
 
 // apiRemovePlayer: POST {player: ...}
@@ -101,20 +96,20 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing player", http.StatusBadRequest)
 		return
 	}
-	s.mu.Lock()
-	delete(s.state.Players, b.Player)
-	if cl, ok := s.players[b.Player]; ok {
-		for c, client := range s.conns {
-			if client == cl {
-				delete(s.conns, c)
-				_ = c.Close()
-				break
+	s.withLock(func() {
+		delete(s.state.Players, b.Player)
+		if cl, ok := s.players[b.Player]; ok {
+			for c, client := range s.conns {
+				if client == cl {
+					delete(s.conns, c)
+					_ = c.Close()
+					break
+				}
 			}
+			delete(s.players, b.Player)
 		}
-		delete(s.players, b.Player)
-	}
-	s.state.UpdatedAt = time.Now()
-	s.mu.Unlock()
+		s.state.UpdatedAt = time.Now()
+	})
 	if err := s.saveState(); err != nil {
 		fmt.Printf("saveState error: %v\n", err)
 	}
@@ -138,14 +133,14 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.mu.Lock()
-	players := []string{}
-	for name, player := range s.state.Players {
-		players = append(players, name)
-		player.Game = b.Game
-		s.state.Players[name] = player
-	}
-	s.mu.Unlock()
+	var players []string
+	s.withLock(func() {
+		for name, player := range s.state.Players {
+			players = append(players, name)
+			player.Game = b.Game
+			s.state.Players[name] = player
+		}
+	})
 	_ = s.saveState()
 	results := map[string]string{}
 	var mu sync.Mutex

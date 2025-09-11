@@ -61,18 +61,18 @@ func (s *Server) loadState() {
 		player.Connected = false
 		tmp.Players[name] = player
 	}
-	s.mu.Lock()
-	s.state = tmp
-	s.mu.Unlock()
+	s.withLock(func() {
+		s.state = tmp
+	})
 	s.saveState()
 	log.Printf("loaded state from %s", "state.json")
 }
 
 // saveState writes current state atomically to disk.
 func (s *Server) saveState() error {
-	s.mu.Lock()
+	s.mu.RLock()
 	st := s.state
-	s.mu.Unlock()
+	s.mu.RUnlock()
 	dir := filepath.Dir("state.json")
 	if dir == "" || dir == "." {
 		dir = "."
@@ -106,9 +106,7 @@ func (s *Server) saveState() error {
 
 // handleStateJSON returns the server state as JSON.
 func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
-	s.mu.Lock()
-	st := s.state
-	s.mu.Unlock()
+	st := s.SnapshotState()
 	w.Header().Set("Content-Type", "application/json")
 	// Return an envelope with the persisted state runtime map.
 	out := map[string]any{
@@ -120,14 +118,57 @@ func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetGameForPlayer(player string) types.Player {
-	s.mu.Lock()
-	defer s.mu.Unlock()
+	s.withRLock(func() {}) // ensure lock exists for method shape; body uses state access below via SnapshotState
 	// Use direct map lookup by player key. This is deterministic and
 	// avoids relying on the Player.Name field matching the map key.
-	if pp, ok := s.state.Players[player]; ok {
+	st := s.SnapshotState()
+	if pp, ok := st.Players[player]; ok {
 		return pp
 	}
-	return types.Player{
-		Name: player,
-	}
+	return types.Player{Name: player}
+}
+
+// SnapshotState returns a copy of the server state for safe inspection
+// outside the lock. It performs a shallow copy of the ServerState value.
+func (s *Server) SnapshotState() types.ServerState {
+	var st types.ServerState
+	s.withRLock(func() {
+		st = s.state
+	})
+	return st
+}
+
+// SnapshotPlayers returns a shallow copy of the players map for safe
+// iteration without holding the server lock.
+func (s *Server) SnapshotPlayers() map[string]types.Player {
+	out := make(map[string]types.Player, len(s.state.Players))
+	s.withRLock(func() {
+		for k, v := range s.state.Players {
+			out[k] = v
+		}
+	})
+	return out
+}
+
+// SnapshotGames returns shallow copies of games, mainGames and instances
+// to allow callers to perform IO/network work without holding locks.
+func (s *Server) SnapshotGames() (games []string, mainGames []types.GameEntry, instances []types.GameSwapInstance) {
+	s.withRLock(func() {
+		games = append([]string(nil), s.state.Games...)
+		mainGames = append([]types.GameEntry(nil), s.state.MainGames...)
+		instances = append([]types.GameSwapInstance(nil), s.state.GameSwapInstances...)
+	})
+	return
+}
+
+// UpdateStateAndPersist runs a mutator under the write lock, updates the
+// UpdatedAt timestamp, then persists the state to disk outside the lock.
+// The mutator must not perform blocking IO or call back into server methods
+// that attempt to acquire the server lock.
+func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) error {
+	s.withLock(func() {
+		mut(&s.state)
+		s.state.UpdatedAt = time.Now()
+	})
+	return s.saveState()
 }

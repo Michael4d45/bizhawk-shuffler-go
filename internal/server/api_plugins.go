@@ -20,12 +20,12 @@ func (s *Server) handlePluginsList(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	s.mu.Lock()
 	plugins := make(map[string]types.Plugin)
-	for name, plugin := range s.state.Plugins {
-		plugins[name] = plugin
-	}
-	s.mu.Unlock()
+	s.withRLock(func() {
+		for name, plugin := range s.state.Plugins {
+			plugins[name] = plugin
+		}
+	})
 
 	// Scan plugins directory for any new plugins not in state
 	pluginsDir := "./plugins/available"
@@ -196,32 +196,26 @@ func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state.Plugins == nil {
-		s.state.Plugins = make(map[string]types.Plugin)
-	}
-
-	// Load plugin metadata if not already loaded
-	plugin, exists := s.state.Plugins[pluginName]
-	if !exists {
-		if p := s.loadPluginMetadata(pluginName); p != nil {
-			plugin = *p
-		} else {
-			http.Error(w, "plugin not found", http.StatusNotFound)
-			return
+	s.withLock(func() {
+		if s.state.Plugins == nil {
+			s.state.Plugins = make(map[string]types.Plugin)
 		}
-	}
 
-	plugin.Enabled = true
-	plugin.Status = types.PluginStatusEnabled
-	s.state.Plugins[pluginName] = plugin
+		// Load plugin metadata if not already loaded
+		plugin, exists := s.state.Plugins[pluginName]
+		if !exists {
+			if p := s.loadPluginMetadata(pluginName); p != nil {
+				plugin = *p
+			}
+		}
 
+		plugin.Enabled = true
+		plugin.Status = types.PluginStatusEnabled
+		s.state.Plugins[pluginName] = plugin
+	})
 	if err := s.saveState(); err != nil {
 		log.Printf("saveState error: %v", err)
 	}
-
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("ok")); err != nil {
 		log.Printf("write response error: %v", err)
@@ -235,27 +229,33 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	if s.state.Plugins == nil {
-		s.state.Plugins = make(map[string]types.Plugin)
-	}
-
-	plugin, exists := s.state.Plugins[pluginName]
+	var exists bool
+	s.withLock(func() {
+		if s.state.Plugins == nil {
+			s.state.Plugins = make(map[string]types.Plugin)
+		}
+		plugin, exists := s.state.Plugins[pluginName]
+		if !exists {
+			if p := s.loadPluginMetadata(pluginName); p != nil {
+				plugin = *p
+				exists = true
+			}
+		}
+		if !exists {
+			return
+		}
+		// Update status to disabled
+		plugin.Enabled = false
+		plugin.Status = types.PluginStatusDisabled
+		s.state.Plugins[pluginName] = plugin
+	})
 	if !exists {
 		http.Error(w, "plugin not found", http.StatusNotFound)
 		return
 	}
-
-	plugin.Enabled = false
-	plugin.Status = types.PluginStatusDisabled
-	s.state.Plugins[pluginName] = plugin
-
 	if err := s.saveState(); err != nil {
 		log.Printf("saveState error: %v", err)
 	}
-
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("ok")); err != nil {
 		log.Printf("write response error: %v", err)

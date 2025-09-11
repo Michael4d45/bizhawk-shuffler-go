@@ -19,18 +19,18 @@ func (s *Server) performSwap() error {
 // schedulerLoop schedules automatic swaps when enabled.
 func (s *Server) schedulerLoop() {
 	for {
-		s.mu.Lock()
+		s.mu.RLock()
 		running := s.state.Running
 		enabled := s.state.SwapEnabled
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		if !running || !enabled {
 			<-s.schedulerCh
 			continue
 		}
-		s.mu.Lock()
+		s.mu.RLock()
 		minv := s.state.MinIntervalSecs
 		maxv := s.state.MaxIntervalSecs
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		var interval int
 		if minv > 0 && maxv > 0 && maxv >= minv {
 			interval = minv + rand.Intn(maxv-minv+1)
@@ -42,10 +42,10 @@ func (s *Server) schedulerLoop() {
 			interval = 300
 		}
 		nextAt := time.Now().Add(time.Duration(interval) * time.Second).Unix()
-		s.mu.Lock()
-		s.state.NextSwapAt = nextAt
-		s.state.UpdatedAt = time.Now()
-		s.mu.Unlock()
+		s.withLock(func() {
+			s.state.NextSwapAt = nextAt
+			s.state.UpdatedAt = time.Now()
+		})
 		if err := s.saveState(); err != nil {
 			fmt.Printf("saveState error: %v\n", err)
 		}
@@ -58,12 +58,12 @@ func (s *Server) schedulerLoop() {
 			}
 			continue
 		}
-		s.mu.Lock()
+		s.mu.RLock()
 		if !s.state.Running || !s.state.SwapEnabled {
-			s.mu.Unlock()
+			s.mu.RUnlock()
 			continue
 		}
-		s.mu.Unlock()
+		s.mu.RUnlock()
 		go func() {
 			err := s.performSwap()
 			if err != nil {

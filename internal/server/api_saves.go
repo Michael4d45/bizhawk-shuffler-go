@@ -127,16 +127,15 @@ func (s *Server) handleSaveDownload(w http.ResponseWriter, r *http.Request) {
 
 // setInstanceFileState updates the file state for a given instance ID
 func (s *Server) setInstanceFileState(instanceID string, state types.FileState) {
-	s.mu.Lock()
-
-	for i, instance := range s.state.GameSwapInstances {
-		if instance.ID == instanceID {
-			s.state.GameSwapInstances[i].FileState = state
-			s.state.UpdatedAt = time.Now()
-			break
+	s.withLock(func() {
+		for i, instance := range s.state.GameSwapInstances {
+			if instance.ID == instanceID {
+				s.state.GameSwapInstances[i].FileState = state
+				s.state.UpdatedAt = time.Now()
+				break
+			}
 		}
-	}
-	s.mu.Unlock()
+	})
 	_ = s.saveState()
 }
 
@@ -151,17 +150,20 @@ func (s *Server) waitForFileReady(instanceID string) error {
 		case <-timeout:
 			return fmt.Errorf("timeout waiting for file %s to be ready", instanceID)
 		case <-ticker.C:
-			s.mu.Lock()
-			for _, instance := range s.state.GameSwapInstances {
-				if instance.ID == instanceID {
-					if instance.FileState == types.FileStateReady || instance.FileState == types.FileStateNone {
-						s.mu.Unlock()
-						return nil
+			ready := false
+			s.withRLock(func() {
+				for _, instance := range s.state.GameSwapInstances {
+					if instance.ID == instanceID {
+						if instance.FileState == types.FileStateReady || instance.FileState == types.FileStateNone {
+							ready = true
+						}
+						break
 					}
-					break
 				}
+			})
+			if ready {
+				return nil
 			}
-			s.mu.Unlock()
 		}
 	}
 }

@@ -140,12 +140,12 @@ func (s *Server) apiMessageAll(w http.ResponseWriter, r *http.Request) {
 		ID: fmt.Sprintf("message-all-%d", time.Now().UnixNano()),
 	}
 
-	s.mu.Lock()
-	players := make([]string, 0, len(s.players))
-	for name := range s.players {
-		players = append(players, name)
-	}
-	s.mu.Unlock()
+	players := []string{}
+	s.withRLock(func() {
+		for name := range s.players {
+			players = append(players, name)
+		}
+	})
 
 	results := make(map[string]string)
 	for _, player := range players {

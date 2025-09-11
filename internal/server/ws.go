@@ -38,9 +38,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	client := &wsClient{conn: c, sendCh: make(chan types.Command, 8)}
-	s.mu.Lock()
-	s.conns[c] = client
-	s.mu.Unlock()
+	s.withLock(func() {
+		s.conns[c] = client
+	})
 
 	c.SetReadLimit(1024 * 16)
 	if err := c.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
@@ -59,15 +59,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			sent := time.Unix(0, ts)
 			rtt := time.Since(sent)
 			// Attempt to find player name for this client and store ping in server state
-			s.mu.Lock()
-			pname := s.findPlayerNameForClient(client)
+			pname := ""
+			// findPlayerNameForClient requires s.mu for safe access
+			s.withRLock(func() {
+				pname = s.findPlayerNameForClient(client)
+			})
 			if pname != "" {
-				pl := s.state.Players[pname]
-				pl.PingMs = int(rtt.Milliseconds())
-				s.state.Players[pname] = pl
-				s.state.UpdatedAt = time.Now()
+				s.withLock(func() {
+					pl := s.state.Players[pname]
+					pl.PingMs = int(rtt.Milliseconds())
+					s.state.Players[pname] = pl
+					s.state.UpdatedAt = time.Now()
+				})
 			}
-			s.mu.Unlock()
 		}
 		return nil
 	})
@@ -123,18 +127,19 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		close(client.sendCh)
 		writeWG.Wait()
-		s.mu.Lock()
-		if cl, ok := s.conns[c]; ok {
-			name := s.findPlayerNameForClient(cl)
-			if name != "" {
-				pl := s.state.Players[name]
-				pl.Connected = false
-				s.state.Players[name] = pl
-				delete(s.players, name)
+		// remove connection and mark player disconnected under lock
+		s.withLock(func() {
+			if cl, ok := s.conns[c]; ok {
+				name := s.findPlayerNameForClient(cl)
+				if name != "" {
+					pl := s.state.Players[name]
+					pl.Connected = false
+					s.state.Players[name] = pl
+					delete(s.players, name)
+				}
+				delete(s.conns, c)
 			}
-			delete(s.conns, c)
-		}
-		s.mu.Unlock()
+		})
 		if err := s.saveState(); err != nil {
 			fmt.Printf("saveState error: %v\n", err)
 		}
@@ -152,8 +157,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("received cmd from client: %s id=%s", cmd.Cmd, cmd.ID)
 
 		if cmd.Cmd == types.CmdAck || cmd.Cmd == types.CmdNack {
-			s.mu.Lock()
-			ch, ok := s.pending[cmd.ID]
+			var ch chan string
+			var ok bool
+			s.withRLock(func() {
+				ch, ok = s.pending[cmd.ID]
+			})
 			if ok {
 				if cmd.Cmd == types.CmdAck {
 					select {
@@ -174,30 +182,40 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					}
 				}
 				close(ch)
-				delete(s.pending, cmd.ID)
+				// remove pending entry under write lock
+				s.withLock(func() {
+					delete(s.pending, cmd.ID)
+				})
 			}
-			s.mu.Unlock()
 			continue
 		}
 		if cmd.Cmd == types.CmdGamesUpdateAck {
-			s.mu.Lock()
-			pname := s.findPlayerNameForClient(client)
+			// determine player name and update under locks
+			pname := ""
+			s.withRLock(func() {
+				pname = s.findPlayerNameForClient(client)
+			})
 			if pname != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
 					if hf, ok := pl["has_files"].(bool); ok {
-						p := s.state.Players[pname]
-						p.HasFiles = hf
-						s.state.Players[pname] = p
-						s.state.UpdatedAt = time.Now()
+						s.withLock(func() {
+							p := s.state.Players[pname]
+							p.HasFiles = hf
+							s.state.Players[pname] = p
+							s.state.UpdatedAt = time.Now()
+						})
+						var updatedAt time.Time
+						s.withRLock(func() {
+							updatedAt = s.state.UpdatedAt
+						})
+						if err := s.saveState(); err != nil {
+							fmt.Printf("saveState error: %v\n", err)
+						}
+						s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": updatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+						continue
 					}
 				}
 			}
-			updatedAt := s.state.UpdatedAt
-			s.mu.Unlock()
-			if err := s.saveState(); err != nil {
-				fmt.Printf("saveState error: %v\n", err)
-			}
-			s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": updatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 			continue
 		}
 		if cmd.Cmd == types.CmdHello {
@@ -213,14 +231,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				player := s.currentPlayer(name)
 				player.Connected = true
 
-				s.mu.Lock()
-				s.state.Players[name] = player
-				s.conns[c] = client
-				s.players[name] = client
-
-				instances := append([]types.GameSwapInstance{}, s.state.GameSwapInstances...)
-				mainGames := append([]types.GameEntry{}, s.state.MainGames...)
-				s.mu.Unlock()
+				var instances []types.GameSwapInstance
+				var mainGames []types.GameEntry
+				s.withLock(func() {
+					s.state.Players[name] = player
+					s.conns[c] = client
+					s.players[name] = client
+					instances = append([]types.GameSwapInstance{}, s.state.GameSwapInstances...)
+					mainGames = append([]types.GameEntry{}, s.state.MainGames...)
+				})
 
 				if err := s.saveState(); err != nil {
 					fmt.Printf("[ERROR] saveState error: %v\n", err)
@@ -281,9 +300,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 // sendToPlayer enqueues a command to a player's websocket send queue.
 func (s *Server) sendToPlayer(player string, cmd types.Command) error {
-	s.mu.Lock()
-	client, ok := s.players[player]
-	s.mu.Unlock()
+	var client *wsClient
+	var ok bool
+	s.withRLock(func() {
+		client, ok = s.players[player]
+	})
 	if !ok || client == nil {
 		return fmt.Errorf("no connection for player %s", player)
 	}
@@ -298,10 +319,12 @@ func (s *Server) sendToPlayer(player string, cmd types.Command) error {
 // sendAndWait convenience wrapper that registers pending and waits for ack/nack.
 func (s *Server) sendAndWait(player string, cmd types.Command, timeout time.Duration) (string, error) {
 	ch := make(chan string, 1)
-	s.mu.Lock()
-	s.pending[cmd.ID] = ch
-	s.mu.Unlock()
-	defer func() { s.mu.Lock(); delete(s.pending, cmd.ID); s.mu.Unlock() }()
+	s.withLock(func() {
+		s.pending[cmd.ID] = ch
+	})
+	defer s.withLock(func() {
+		delete(s.pending, cmd.ID)
+	})
 	if err := s.sendToPlayer(player, cmd); err != nil {
 		return "", err
 	}
