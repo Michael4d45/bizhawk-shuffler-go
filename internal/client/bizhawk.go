@@ -571,11 +571,13 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 						log.Printf("ipc handler: failed to parse CMD line: %v", err)
 					} else {
 						log.Printf("ipc handler: parsed CMD: kind=%q fields=%v", cmd.Kind, cmd.Fields)
-						c.ws.Send(
+						if err := c.ws.Send(
 							types.Command{
 								Cmd:     types.CmdTypeLua,
 								Payload: cmd,
-							})
+							}); err != nil {
+							log.Printf("ipc handler: failed to send CMD: %v", err)
+						}
 					}
 				}
 			}
