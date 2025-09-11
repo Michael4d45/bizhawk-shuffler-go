@@ -6,17 +6,14 @@ This document outlines the comprehensive plan for implementing a Lua plugin mana
 ## Core Architecture Requirements
 
 ### 1. Plugin Directory Structure
-- [ ] Create `plugins/` directory in repository root
-- [ ] Define plugin subdirectory structure:
+- [x] Create `plugins/` directory in repository root
+- [x] Define plugin subdirectory structure:
   ```
   plugins/
-  ├── available/           # All available plugins
-  │   ├── plugin-name/
-  │   │   ├── plugin.lua   # Main plugin code
-  │   │   ├── meta.json    # Plugin metadata
-  │   │   └── README.md    # Plugin documentation
-  ├── enabled/             # Enabled plugins (symlinks or copies)
-  └── disabled/            # Explicitly disabled plugins
+  ├── plugin-name/
+  │   ├── plugin.lua   # Main plugin code
+  │   ├── meta.json    # Plugin metadata
+  │   └── README.md    # Plugin documentation
   ```
 
 ### 2. Plugin Metadata Schema

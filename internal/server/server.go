@@ -75,6 +75,8 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("/files/list.json", s.handleFilesList)
 	mux.HandleFunc("/api/BizhawkFiles.zip", s.handleBizhawkFilesZip)
+	// Plugin file serving
+	mux.HandleFunc("/files/plugins/", s.handlePluginFiles)
 	mux.HandleFunc("/state.json", s.handleStateJSON)
 	mux.HandleFunc("/api/games", s.apiGames)
 	mux.HandleFunc("/api/interval", s.apiInterval)

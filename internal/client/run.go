@@ -36,6 +36,7 @@ type Client struct {
 	bipc         *BizhawkIPC
 	// TODO: Add discovery listener field
 	discoveryListener *DiscoveryListener
+	pluginSyncManager *PluginSyncManager
 }
 
 // New creates and initializes a Client from CLI args.
@@ -187,6 +188,9 @@ func New(args []string) (*Client, error) {
 	bhController.api = api
 	wsClient := NewWSClient(wsURL, api, bipc)
 
+	// Initialize plugin sync manager
+	pluginSyncManager := NewPluginSyncManager(api, httpClient, cfg)
+
 	c := &Client{
 		cfg:          cfg,
 		logFile:      logFile,
@@ -196,6 +200,7 @@ func New(args []string) (*Client, error) {
 		bipc:         bipc,
 		// TODO: Initialize discovery listener
 		discoveryListener: nil,
+		pluginSyncManager: pluginSyncManager,
 	}
 
 	return c, nil
@@ -240,6 +245,21 @@ func (c *Client) Run() {
 	log.Printf("[Client] starting websocket client")
 	c.wsClient.Start(ctx, c.cfg)
 	defer c.wsClient.Stop()
+
+	// Perform initial plugin sync
+	log.Printf("[Client] performing initial plugin sync")
+	if result, err := c.pluginSyncManager.SyncPlugins(); err != nil {
+		log.Printf("[Client] plugin sync failed: %v", err)
+	} else {
+		log.Printf("[Client] plugin sync completed: %d total, %d downloaded, %d updated, %d removed in %v",
+			result.TotalPlugins, result.Downloaded, result.Updated, result.Removed, result.Duration)
+		if len(result.Errors) > 0 {
+			log.Printf("[Client] plugin sync had %d errors:", len(result.Errors))
+			for _, err := range result.Errors {
+				log.Printf("[Client]   - %s", err)
+			}
+		}
+	}
 
 	<-ctx.Done()
 	log.Printf("[Client] shutdown complete")

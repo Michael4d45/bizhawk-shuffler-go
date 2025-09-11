@@ -4,9 +4,7 @@ This directory contains Lua plugins for BizHawk Shuffler.
 
 ## Structure
 
-- `available/` - All available plugins with their metadata
-- `enabled/` - Currently enabled plugins (symlinks to available/)
-- `disabled/` - Explicitly disabled plugins
+All plugins are stored directly in this directory with their metadata.
 
 ## Plugin Development
 
@@ -14,10 +12,10 @@ See `PLUGIN_TODO.md` in the repository root for comprehensive plugin development
 
 ## Basic Plugin Structure
 
-Each plugin should be in its own subdirectory under `available/`:
+Each plugin should be in its own subdirectory:
 
 ```
-plugins/available/my-plugin/
+plugins/my-plugin/
 ├── plugin.lua     # Main plugin code
 ├── meta.json      # Plugin metadata
 └── README.md      # Plugin documentation

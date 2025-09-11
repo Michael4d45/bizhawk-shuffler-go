@@ -7,7 +7,7 @@ local PORT = 55355
 
 local ROM_DIR = "./roms"
 local SAVE_DIR = "./saves"
-local PLUGIN_DIR = "./plugins/available"
+local PLUGIN_DIR = "./plugins"
 
 console.log("Shuffler server starting (listening)...")
 
@@ -24,77 +24,6 @@ local function file_exists(name)
     end
 end
 
-local function load_plugins()
-    console.log("Scanning plugins directory...")
-    
-    -- Get list of plugin directories
-    local plugin_dirs = {}
-    local plugin_dir_handle = io.popen('dir /b "' .. PLUGIN_DIR .. '" 2>nul')
-    if plugin_dir_handle then
-        for line in plugin_dir_handle:lines() do
-            if line ~= "" then
-                table.insert(plugin_dirs, line)
-            end
-        end
-        plugin_dir_handle:close()
-    end
-    
-    -- Load each plugin
-    for _, plugin_name in ipairs(plugin_dirs) do
-        local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
-        local meta_path = plugin_path .. "/meta.json"
-        local plugin_lua_path = plugin_path .. "/plugin.lua"
-        
-        -- Check if meta.json exists
-        if file_exists(meta_path) and file_exists(plugin_lua_path) then
-            -- Read and parse meta.json
-            local meta_file = io.open(meta_path, "r")
-            if meta_file then
-                local meta_content = meta_file:read("*all")
-                meta_file:close()
-                
-                local ok, meta = pcall(function()
-                    return load("return " .. meta_content)()
-                end)
-                
-                if ok and meta and meta.enabled then
-                    console.log("Loading plugin: " .. plugin_name)
-                    
-                    -- Load the plugin Lua file
-                    local plugin_ok, plugin_module = pcall(dofile, plugin_lua_path)
-                    
-                    if plugin_ok and plugin_module then
-                        loaded_plugins[plugin_name] = {
-                            meta = meta,
-                            module = plugin_module
-                        }
-                        
-                        -- Call on_init hook if available
-                        if plugin_module.on_init then
-                            local init_ok, init_err = pcall(plugin_module.on_init)
-                            if not init_ok then
-                                console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
-                            end
-                        end
-                        
-                        console.log("Plugin " .. plugin_name .. " loaded successfully")
-                    else
-                        console.log("Failed to load plugin " .. plugin_name .. ": " .. tostring(plugin_module))
-                    end
-                else
-                    console.log("Plugin " .. plugin_name .. " is disabled or invalid meta.json")
-                end
-            else
-                console.log("Could not read meta.json for plugin " .. plugin_name)
-            end
-        else
-            console.log("Plugin " .. plugin_name .. " missing required files")
-        end
-    end
-    
-    console.log("Plugin loading complete. Loaded " .. tostring(#loaded_plugins) .. " plugins")
-end
-
 -- Plugin hook functions
 local function call_plugin_hook(hook_name, ...)
     for plugin_name, plugin_data in pairs(loaded_plugins) do
@@ -107,9 +36,6 @@ local function call_plugin_hook(hook_name, ...)
         end
     end
 end
-
--- Initialize plugin system
-load_plugins()
 
 local function now()
     return socket.gettime()
@@ -274,25 +200,16 @@ local function do_start(game)
     local rom_path = ROM_DIR .. "/" .. game
     load_rom(rom_path)
     load_state_if_exists()
-    
+
     -- Call plugin game start hook
     call_plugin_hook("on_game_start", game)
 end
 
-local function do_load(path)
-    if not path then
-        error("no path")
-    end
-    if file_exists(path) then
-        savestate.load(path)
-    else
-        error("file not found: " .. tostring(path))
-    end
-end
 local function do_pause()
     client.pause();
     console.log("[INFO] Paused")
 end
+
 local function do_resume()
     client.unpause();
     console.log("[INFO] Resumed")
@@ -348,6 +265,36 @@ local function send_line(line)
     end
 end
 
+local function escape(s)
+    return (s:gsub("\\", "\\\\"):gsub("|", "\\|"):gsub(";", "\\;"):gsub("=", "\\="))
+end
+
+local function serialize_payload_escaped(payload)
+    if payload == nil then
+        return ""
+    end
+    local parts = {}
+    for k, v in pairs(payload) do
+        local t = type(v)
+        if t == "boolean" then
+            v = v and "true" or "false"
+        elseif t ~= "number" and t ~= "string" then
+            v = tostring(v)
+        end
+        table.insert(parts, escape(tostring(k)) .. "=" .. escape(tostring(v)))
+    end
+    return table.concat(parts, ";")
+end
+
+function SendCommand(cmd, payload)
+    -- Choose one of the serializers:
+    -- local payload_str = serialize_payload(payload)
+    local payload_str = serialize_payload_escaped(payload)
+
+    local cmd_str = "CMD|" .. tostring(cmd) .. "|" .. payload_str
+    send_line(cmd_str)
+end
+
 -- send HELLO to controller side when ready
 local function send_hello()
     send_line("HELLO")
@@ -380,18 +327,6 @@ local function split_pipe(s)
     return parts
 end
 
-local function join_from(parts, start_index)
-    if not parts[start_index] then
-        return ""
-    end
-    local s = parts[start_index]
-    for i = start_index + 1, #parts do
-        s = s .. "|" .. parts[i]
-    end
-    return s
-end
-
-local last_ping = 0
 local function handle_line(line)
     local parts = split_pipe(line)
     if #parts == 0 then
@@ -459,6 +394,86 @@ local function handle_line(line)
     end
 end
 
+local function load_plugins()
+    console.log("Scanning plugins directory...")
+
+    -- Get list of plugin directories
+    local plugin_dirs = {}
+    local plugin_dir_handle = io.popen('dir /b "' .. PLUGIN_DIR .. '" 2>nul')
+    if plugin_dir_handle then
+        for line in plugin_dir_handle:lines() do
+            if line ~= "" then
+                table.insert(plugin_dirs, line)
+            end
+        end
+        plugin_dir_handle:close()
+    end
+
+    -- Load each plugin
+    for _, plugin_name in ipairs(plugin_dirs) do
+        local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
+        local meta_path = plugin_path .. "/meta.json"
+        local plugin_lua_path = plugin_path .. "/plugin.lua"
+
+        -- Check if meta.json exists
+        if file_exists(meta_path) and file_exists(plugin_lua_path) then
+            -- Read and parse meta.json (simple approach)
+            local meta_file = io.open(meta_path, "r")
+            if meta_file then
+                local meta_content = meta_file:read("*all")
+                meta_file:close()
+
+                console.log("Found plugin: " .. plugin_name)
+
+                -- Simple check for enabled status in JSON
+                local enabled = string.find(meta_content, '"enabled"%s*:%s*true') ~= nil
+                local meta = {
+                    name = plugin_name,
+                    enabled = enabled,
+                    entry_point = "plugin.lua"
+                }
+
+                if meta.enabled then
+                    console.log("Loading plugin: " .. plugin_name)
+
+                    -- Load the plugin Lua file
+                    local plugin_ok, plugin_module = pcall(dofile, plugin_lua_path)
+
+                    if plugin_ok and plugin_module then
+                        loaded_plugins[plugin_name] = {
+                            meta = meta,
+                            module = plugin_module
+                        }
+
+                        -- Call on_init hook if available
+                        if plugin_module.on_init then
+                            local init_ok, init_err = pcall(plugin_module.on_init)
+                            if not init_ok then
+                                console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
+                            end
+                        end
+
+                        console.log("Plugin " .. plugin_name .. " loaded successfully")
+                    else
+                        console.log("Failed to load plugin " .. plugin_name .. ": " .. tostring(plugin_module))
+                    end
+                else
+                    console.log("Plugin " .. plugin_name .. " is disabled")
+                end
+            else
+                console.log("Could not read meta.json for plugin " .. plugin_name)
+            end
+        else
+            console.log("Plugin " .. plugin_name .. " missing required files")
+        end
+    end
+
+    console.log("Plugin loading complete. Loaded " .. tostring(#loaded_plugins) .. " plugins")
+end
+
+-- Initialize plugin system
+load_plugins()
+
 -- Main loop: accept connection, then read lines non-blocking and process scheduled tasks
 local next_auto_save = now() + 10.0
 while true do
@@ -499,10 +514,10 @@ while true do
     end
 
     draw_messages()
-    
+
     -- Call plugin frame hook
     call_plugin_hook("on_frame")
-    
+
     if client.ispaused() then
         emu.yield()
     else

@@ -28,7 +28,7 @@ func (s *Server) handlePluginsList(w http.ResponseWriter, r *http.Request) {
 	})
 
 	// Scan plugins directory for any new plugins not in state
-	pluginsDir := "./plugins/available"
+	pluginsDir := "./plugins"
 	if entries, err := os.ReadDir(pluginsDir); err == nil {
 		for _, entry := range entries {
 			if entry.IsDir() {
@@ -69,7 +69,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	// For now, just save as a simple .lua file in the plugins/available directory
+	// For now, just save as a simple .lua file in the plugins directory
 	// TODO: Support proper plugin packages with metadata
 	if !strings.HasSuffix(header.Filename, ".lua") {
 		http.Error(w, "only .lua files supported currently", http.StatusBadRequest)
@@ -77,7 +77,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pluginName := strings.TrimSuffix(header.Filename, ".lua")
-	pluginDir := filepath.Join("./plugins/available", pluginName)
+	pluginDir := filepath.Join("./plugins", pluginName)
 
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		http.Error(w, "failed to create plugin dir: "+err.Error(), http.StatusInternalServerError)
@@ -130,7 +130,7 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 
 // loadPluginMetadata loads plugin metadata from disk
 func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
-	pluginDir := filepath.Join("./plugins/available", pluginName)
+	pluginDir := filepath.Join("./plugins", pluginName)
 	metaPath := filepath.Join(pluginDir, "meta.json")
 
 	metaFile, err := os.Open(metaPath)
@@ -209,7 +209,7 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 			return
 		case http.MethodDelete:
 			// Delete plugin files and remove from state
-			pluginDir := filepath.Join("./plugins/available", pluginName)
+			pluginDir := filepath.Join("./plugins", pluginName)
 			// Remove directory on disk
 			if err := os.RemoveAll(pluginDir); err != nil {
 				log.Printf("failed to remove plugin dir %s: %v", pluginDir, err)

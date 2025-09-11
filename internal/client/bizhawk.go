@@ -528,7 +528,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 					continue
 				}
 				log.Printf("lua incoming: %s", line)
-				if strings.HasPrefix(line, "HELLO") {
+				if strings.HasPrefix(line, msgHELLO) {
 					log.Printf("ipc handler: received HELLO from lua, sending SYNC")
 					c.bipc.SetReady(true)
 
@@ -561,7 +561,130 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 					cancel2()
 
 				}
+				// example: lua incoming: CMD|message|message=Read Door: Legend of Zelda, The - A Link to the Past (USA).zip room value changed: nil -> 514 (room id)
+				if strings.HasPrefix(line, msgCMD) {
+					// Parse and log Lua command messages for now.
+					if cmd, err := parseLuaCommand(line); err != nil {
+						log.Printf("ipc handler: failed to parse CMD line: %v", err)
+					} else {
+						log.Printf("ipc handler: parsed CMD: kind=%q fields=%v", cmd.Kind, cmd.Fields)
+						// TODO: route specific kinds to handlers if needed
+					}
+				}
 			}
 		}
 	}()
+}
+
+// LuaCommand represents a parsed Lua-originated command line of the form:
+//
+//	CMD|kind|key=value|...
+//
+// Notes:
+//   - Outgoing commands from Go to Lua are formatted as CMD|id|..., but incoming
+//     from Lua may omit id (e.g., CMD|message|message=...)
+//   - Remaining tokens after kind are treated as key=value pairs when they
+//     contain '='
+type LuaCommand struct {
+	Raw     string            // full raw line
+	Kind    string            // lowercased command kind (e.g., "message")
+	Fields  map[string]string // parsed key=value fields
+}
+
+// parseLuaCommand parses a Lua command line. It is tolerant of optional ID and
+// supports both the new escaped semicolon payload and legacy pipe-delimited tokens.
+func parseLuaCommand(line string) (*LuaCommand, error) {
+	s := strings.TrimSpace(line)
+	if s == "" {
+		return nil, fmt.Errorf("empty line")
+	}
+	// Split top-level by '|' but ignore escaped pipes (\|)
+	parts := splitUnescaped(s, '|')
+	if len(parts) < 2 || parts[0] != msgCMD {
+		return nil, fmt.Errorf("invalid CMD format: %q", line)
+	}
+
+	cmd := &LuaCommand{Raw: line, Fields: make(map[string]string)}
+	i := 1
+	if i >= len(parts) {
+		return nil, fmt.Errorf("missing kind in CMD: %q", line)
+	}
+	cmd.Kind = strings.ToLower(strings.TrimSpace(parts[i]))
+	i++
+
+	// New format from Lua: exactly one payload segment with escaped k=v pairs separated by ';'
+	if i == len(parts)-1 {
+		payload := parts[i]
+		if payload != "" {
+			for _, tok := range splitUnescaped(payload, ';') {
+				if tok == "" {
+					continue
+				}
+				// split on first unescaped '='
+				kv := splitUnescaped(tok, '=')
+				if len(kv) >= 2 {
+					k := strings.TrimSpace(unescapeEscaped(kv[0]))
+					v := strings.TrimSpace(unescapeEscaped(strings.Join(kv[1:], "=")))
+					if k != "" {
+						cmd.Fields[k] = v
+					}
+				}
+			}
+		}
+	} else if i < len(parts) {
+		// Legacy: additional pipe-delimited tokens
+		for ; i < len(parts); i++ {
+			tok := strings.TrimSpace(parts[i])
+			if tok == "" {
+				continue
+			}
+			if kv := strings.SplitN(tok, "=", 2); len(kv) == 2 {
+				k := strings.TrimSpace(kv[0])
+				v := strings.TrimSpace(kv[1])
+				cmd.Fields[k] = v
+			}
+		}
+	}
+
+	return cmd, nil
+}
+
+// splitUnescaped splits s by sep where sep is not escaped by a preceding backslash.
+// It preserves empty segments.
+func splitUnescaped(s string, sep byte) []string {
+	var parts []string
+	last := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == sep {
+			if i == 0 || s[i-1] != '\\' {
+				parts = append(parts, s[last:i])
+				last = i + 1
+			}
+		}
+	}
+	parts = append(parts, s[last:])
+	return parts
+}
+
+// unescapeEscaped converts Lua-side escapes (\\, \|, \;, \=) back to their literal forms.
+func unescapeEscaped(s string) string {
+	if s == "" {
+		return s
+	}
+	var b strings.Builder
+	b.Grow(len(s))
+	for i := 0; i < len(s); i++ {
+		if s[i] == '\\' {
+			if i+1 < len(s) {
+				b.WriteByte(s[i+1])
+				i++
+				continue
+			}
+			// trailing backslash - keep it
+			b.WriteByte(s[i])
+			continue
+		}
+		b.WriteByte(s[i])
+	}
+	return b.String()
 }

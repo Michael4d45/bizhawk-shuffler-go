@@ -19,6 +19,7 @@ const (
 	msgACK   = "ACK"
 	msgNACK  = "NACK"
 	msgHELLO = "HELLO"
+	msgCMD   = "CMD"
 	msgPING  = "PING"
 	// sentinel used to notify consumers that the IPC connection was lost
 	// exported so callers can react when the Lua side disconnects.

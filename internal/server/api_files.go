@@ -21,6 +21,11 @@ func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
 	http.StripPrefix("/files/", http.FileServer(http.Dir("./files"))).ServeHTTP(w, r)
 }
 
+// handlePluginFiles serves plugin files under ./plugins
+func (s *Server) handlePluginFiles(w http.ResponseWriter, r *http.Request) {
+	http.StripPrefix("/files/plugins/", http.FileServer(http.Dir("./plugins"))).ServeHTTP(w, r)
+}
+
 // handleUpload receives multipart file upload and writes to ./files directory
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
