@@ -16,8 +16,8 @@ Always reference these instructions first and fallback to search or bash command
   mkdir -p bin/server bin/client
   cd cmd/server && go build -o ../../bin/server/bizshuffle-server
   cd cmd/client && go build -o ../../bin/client/bizshuffle-client
+  # Note: Manual build doesn't copy web UI, plugins, or Lua script
   ```
-- **Clean build artifacts**: `make clean`
 
 ### Dependencies and Modules
 - **Download dependencies**: Dependencies download automatically during first build
@@ -32,7 +32,7 @@ Always reference these instructions first and fallback to search or bash command
   - File serving from `./files/` directory at `/files/*`
 - **Run client**: `./bin/client/bizshuffle-client`
   - **First run**: Will prompt for server websocket URL (e.g., `ws://127.0.0.1:8080/ws`) and username
-  - **Subsequent runs**: Reads configuration from `client_config.json`
+  - **Subsequent runs**: Reads configuration from `config.json`
   - **BizHawk dependency**: Client attempts to download BizHawk emulator on first run (Windows .exe)
 
 ### Validation and Testing
@@ -43,8 +43,9 @@ Always reference these instructions first and fallback to search or bash command
   - if you want to test the code, cd ./bin/<server|client> ; ./bizshuffle-<server|client>(.exe)
 - **Manual functional testing**:
   - Start server and access web UI at http://127.0.0.1:8080/
-  - Test API endpoint: `curl http://127.0.0.1:8080/api/games` should return `{"games":[],"main_games":[]}`
+  - Test API endpoint: `curl http://127.0.0.1:8080/api/games` should return valid JSON with games list
   - Test state endpoint: `curl http://127.0.0.1:8080/state.json` should return server state
+  - Test plugin API: `curl http://127.0.0.1:8080/api/plugins` should return plugin list
   - Create test file: `mkdir -p files && echo "test" > files/test.txt`
   - Test file serving: `curl http://127.0.0.1:8080/files/test.txt` should return file content
 
@@ -55,20 +56,27 @@ After making changes, ALWAYS run through these complete scenarios:
 ### Server Validation
 1. **Build and run server**: `make server && ./bin/server/bizshuffle-server --port 8080`
 2. **Test web UI**: Navigate to http://127.0.0.1:8080/ and verify admin interface loads
-3. **Test API**: `curl http://127.0.0.1:8080/api/games` returns valid JSON
+3. **Test API endpoints**: 
+   - `curl http://127.0.0.1:8080/api/games` returns valid JSON
+   - `curl http://127.0.0.1:8080/api/plugins` returns plugin list
+   - `curl http://127.0.0.1:8080/api/players` returns player list
 4. **Test state persistence**: Verify `state.json` file is created/updated
 5. **Test file serving**: Create test file and verify HTTP access
+6. **Test plugin management**: Verify plugins are loaded and accessible
 
 ### Client Validation  
 1. **Build client**: `make client`
-2. **Test configuration flow**: Run `./bin/client/bizshuffle-client` and verify prompts appear
-3. **Expected behavior**: Client will attempt BizHawk download (may fail on non-Windows)
+2. **Test configuration flow**: Run `./bin/client/bizshuffle-client` and verify discovery/prompts work
+3. **Test plugin sync**: Verify client downloads and loads plugins from server
+4. **Expected behavior**: Client will attempt BizHawk download (may fail on non-Windows)
 
 ### Full Integration Validation
 1. **Start server** with file serving enabled
 2. **Create test ROM files** in `./files/` directory
 3. **Access admin UI** and verify file list updates
 4. **Test websocket connectivity** via browser dev tools
+5. **Test plugin functionality** through admin interface
+6. **Test game mode switching** and swap orchestration
 
 ## Common Tasks
 
@@ -77,18 +85,34 @@ After making changes, ALWAYS run through these complete scenarios:
 .
 ├── README.md
 ├── Makefile
-├── build.ps1              # Windows build script
 ├── go.mod, go.sum
+├── server.lua             # BizHawk Lua script for client
 ├── cmd/
-│   ├── server/main.go     # Server executable  
+│   ├── server/main.go     # Server executable
 │   └── client/main.go     # Client executable
 ├── internal/
-│   ├── server/            # Server HTTP/WS handlers
+│   ├── server/            # Server HTTP/WS handlers and logic
 │   ├── client/            # Client logic and BizHawk integration
 │   └── types/             # Shared types and message structures
 ├── web/
-│   └── index.html         # Admin UI (HTMX + Alpine.js + Tailwind)
-├── server.lua             # BizHawk Lua script for client
+│   └── index.html         # HTMX admin UI
+├── plugins/               # Lua plugins directory
+│   ├── README.md
+│   ├── example-plugin/
+│   └── read-door/
+├── bin/                   # Build artifacts (created by make)
+│   ├── server/
+│   │   ├── bizshuffle-server
+│   │   ├── state.json      # Server state persistence
+│   │   ├── files/          # Game files directory
+│   │   ├── saves/          # Save states directory
+│   │   ├── plugins/        # Copied plugins
+│   │   └── web/            # Copied web UI
+│   └── client/
+│       ├── bizshuffle-client
+│       ├── config.json     # Client configuration
+│       ├── server.lua      # Copied Lua script
+│       └── BizHawk-*/      # Auto-downloaded BizHawk
 ├── files/                 # ROM/asset storage (created as needed)
 ├── saves/                 # Save states directory
 └── state.json             # Server state persistence (auto-created)

@@ -24,25 +24,27 @@ jobs:
         run: |
           set -e
           mkdir -p dist
-          # Build client package (cmd/client)
-          GOOS=windows GOARCH=amd64 go build -o dist/bizhawk-client-windows-amd64.exe ./cmd/client
-          GOOS=linux   GOARCH=amd64 go build -o dist/bizhawk-client-linux-amd64 ./cmd/client
-          # Copy bundled runtime files (if present) into dist so they are included in the release zips
+          
+          # Build client binaries for different platforms
+          GOOS=windows GOARCH=amd64 go build -o dist/bizshuffle-client.exe ./cmd/client
+          GOOS=linux   GOARCH=amd64 go build -o dist/bizshuffle-client ./cmd/client
+          
+          # Copy server.lua script
           if [ -f server.lua ]; then
             cp server.lua dist/
           fi
-
+          
+          # Create release archives
           cd dist
-          # Include the server.lua in the zips alongside the binaries
-          zip -j bizhawk-client-windows-amd64.zip bizhawk-client-windows-amd64.exe server.lua || zip -j bizhawk-client-windows-amd64.zip bizhawk-client-windows-amd64.exe
-          zip -j bizhawk-client-linux-amd64.zip bizhawk-client-linux-amd64 server.lua || zip -j bizhawk-client-linux-amd64.zip bizhawk-client-linux-amd64
+          zip -j bizshuffle-client-windows-amd64.zip bizshuffle-client.exe server.lua
+          zip -j bizshuffle-client-linux-amd64.zip bizshuffle-client server.lua
           cd ..
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/bizhawk-client-windows-amd64.zip
-            dist/bizhawk-client-linux-amd64.zip
+            dist/bizshuffle-client-windows-amd64.zip
+            dist/bizshuffle-client-linux-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

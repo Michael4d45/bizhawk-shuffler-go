@@ -24,34 +24,34 @@ jobs:
         run: |
           set -e
           mkdir -p dist
-          # Build server package (cmd/server)
-          GOOS=windows GOARCH=amd64 go build -o dist/bizhawk-server-windows-amd64.exe ./cmd/server
-          GOOS=linux   GOARCH=amd64 go build -o dist/bizhawk-server-linux-amd64 ./cmd/server
-          # Copy bundled server runtime files (web/) into dist so they are included in the release zips
+          
+          # Build server binaries for different platforms
+          GOOS=windows GOARCH=amd64 go build -o dist/bizshuffle-server.exe ./cmd/server
+          GOOS=linux   GOARCH=amd64 go build -o dist/bizshuffle-server ./cmd/server
+          
+          # Copy web UI files
+          mkdir -p dist/web
           if [ -d web ]; then
-            # Create a server-web directory inside dist to preserve the web directory structure
-            rm -rf dist/server-web || true
-            mkdir -p dist/server-web
-            cp -r web/* dist/server-web/
+            cp -r web/* dist/web/
           fi
-
+          
+          # Copy plugins
+          mkdir -p dist/plugins
+          if [ -d plugins ]; then
+            cp -r plugins/* dist/plugins/
+          fi
+          
+          # Create release archives
           cd dist
-          # Create zip files that include the binary and the server web assets if present
-          if [ -d server-web ]; then
-            zip -r bizhawk-server-windows-amd64.zip bizhawk-server-windows-amd64.exe server-web
-            zip -r bizhawk-server-linux-amd64.zip bizhawk-server-linux-amd64 server-web
-          else
-            zip -j bizhawk-server-windows-amd64.zip bizhawk-server-windows-amd64.exe
-            zip -j bizhawk-server-linux-amd64.zip bizhawk-server-linux-amd64
-          fi
+          zip -r bizshuffle-server-windows-amd64.zip bizshuffle-server.exe web plugins
+          zip -r bizshuffle-server-linux-amd64.zip bizshuffle-server web plugins
           cd ..
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/bizhawk-server-windows-amd64.zip
-            dist/bizhawk-server-linux-amd64.zip
-            dist/bizhawk-server-macos-amd64.zip
+            dist/bizshuffle-server-windows-amd64.zip
+            dist/bizshuffle-server-linux-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

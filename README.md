@@ -13,20 +13,65 @@ High-level goals (from user request)
 
 Repository layout
 
-- cmd/server - server executable (main.go)
-- cmd/client - client executable (main.go)
-- internal/types - shared types and message envelopes
-- web - HTMX admin UI (index.html, static assets)
-- files - directory for files to serve to clients (ROMs, CUE/BINs, save bundles)
-- state.json - server persisted session state (auto-created)
+```
+.
+├── README.md
+├── Makefile
+├── go.mod, go.sum
+├── server.lua             # BizHawk Lua script for client
+├── cmd/
+│   ├── server/main.go     # Server executable
+│   └── client/main.go     # Client executable
+├── internal/
+│   ├── server/            # Server HTTP/WS handlers and logic
+│   ├── client/            # Client logic and BizHawk integration
+│   └── types/             # Shared types and message structures
+├── web/
+│   └── index.html         # HTMX admin UI
+├── plugins/               # Lua plugins directory
+│   ├── README.md
+│   ├── example-plugin/
+│   └── read-door/
+├── bin/                   # Build artifacts (created by make)
+│   ├── server/
+│   │   ├── bizshuffle-server
+│   │   ├── state.json      # Server state persistence
+│   │   ├── files/          # Game files directory
+│   │   ├── saves/          # Save states directory
+│   │   ├── plugins/        # Copied plugins
+│   │   └── web/            # Copied web UI
+│   └── client/
+│       ├── bizshuffle-client
+│       ├── config.json     # Client configuration
+│       ├── server.lua      # Copied Lua script
+│       └── BizHawk-*/      # Auto-downloaded BizHawk
+├── files/                 # ROM/asset storage (created as needed)
+├── saves/                 # Save states directory
+└── state.json             # Server state persistence (auto-created)
+```
 
 Build & run
 
 1) Build server and client
 
 ```
-cd cmd/server; go build -o ../../bin/bizshuffle-server
-cd cmd/client; go build -o ../../bin/bizshuffle-client
+make all
+```
+
+Or build individually:
+
+```
+make server  # Builds server with web UI and plugins
+make client  # Builds client with Lua script
+```
+
+Alternative manual build method:
+
+```
+mkdir -p bin/server bin/client
+cd cmd/server && go build -o ../../bin/server/bizshuffle-server
+cd cmd/client && go build -o ../../bin/client/bizshuffle-client
+# Note: Manual build doesn't copy web UI, plugins, or Lua script
 ```
 
 2) Run server (flags override config file)
@@ -37,31 +82,62 @@ cd cmd/client; go build -o ../../bin/bizshuffle-client
 
 3) Install client
 
-Run the client binary once. On first run it will prompt for server websocket URL (e.g. ws://host:8080/ws) and a username, then save to `client_config.json` in the working folder. Subsequent runs read that file and will not prompt again.
+Run the client binary once. On first run it will:
+
+1. **Attempt LAN discovery**: Automatically search for BizShuffle servers on the local network
+2. **Fallback to manual entry**: If no servers are found, prompt for server websocket URL (e.g. `ws://host:8080/ws`) and username
+3. **Save configuration**: Store settings in `client_config.json` in the working directory
+
+Subsequent runs read the saved configuration and will not prompt again unless the config file is missing.
+
+**Discovery Configuration**
+
+The client supports automatic server discovery with configurable timeouts:
+
+```json
+{
+  "discovery_enabled": "true",
+  "discovery_timeout_seconds": "10",
+  "multicast_address": "239.255.255.250:1900"
+}
+```
+
+**Manual Server Entry**
+
+If discovery fails or is disabled, enter the server URL in one of these formats:
+- `ws://host:port/ws` (WebSocket URL)
+- `wss://host:port/ws` (Secure WebSocket URL)  
+- `http://host:port` (HTTP URL, will be converted to WebSocket)
+- `https://host:port` (HTTPS URL, will be converted to Secure WebSocket)
 
 Communication protocol (detailed)
 
 Websocket envelope (JSON):
 
+```json
 {
-	"cmd": "<command>",
-	"payload": { ... },
-	"id": "<uuid or timestamp>"
+  "cmd": "<command>",
+  "payload": { ... },
+  "id": "<uuid>"
 }
+```
 
-Server -> Client commands (examples):
-- start: start emulation loop
-- pause: pause emulation
-- reset: reset server session state
-- clear_saves: instruct clients to delete local save states
-- toggle_swaps: enable/disable automatic swaps (payload: {"enabled": bool})
-- update_games: payload contains the new ordered list of games; clients should download missing files
-- download_file: instruct client to fetch a file via HTTP from server and store locally
+Server -> Client commands:
+- `ping`: Health check
+- `start`: Start emulation session
+- `pause`: Pause emulation
+- `swap`: Trigger game swap
+- `message`: Display message to user
+- `games_update`: Update available games list
+- `clear_saves`: Clear local save states
+- `reset`: Reset server session
 
 Client -> Server messages:
-- ack: acknowledge command (must include id of original message)
-- state_update: client sends current status (current game, is emulator running, etc.)
-- file_upload_complete: notify server that upload finished (if implemented)
+- `hello`: Initial connection handshake
+- `ack`: Acknowledge command receipt
+- `nack`: Negative acknowledgment
+- `games_update_ack`: Confirm games update
+- `lua_command`: Execute Lua script command
 
 Ack contract
 
@@ -71,21 +147,16 @@ File transfer
 
 - Server serves files from `./files` at `/files/`.
 - Clients download via HTTP GET to `/files/<path>`.
-- Clients may upload save state via POST `/upload/state` (TBD).
+- Clients may upload save state via POST `/save/upload`.
 
 Save filename convention
 
-- Saves are stored under `./saves/<file>` on the server..
+- Saves are stored under `./saves/<file>` on the server.
 - Upload handlers honor an explicit `filename` form field; otherwise the server will fall back to the uploaded filename or `<game>.state` when `game` is provided.
 
 Persistence
 
 - `state.json` stores `ServerState` (see `internal/types`). It's saved on updates via `saveState()` and loaded at server start. It's intentionally simple so manual edits are possible.
-
-Orchestration persistence
-
-- Swap orchestration runs (triggered by `/api/do_swap`) are now persisted inside `ServerState.Orchestrations` keyed by an orchestration ID. This lets an admin inspect partial or failed swap runs in `state.json` and resume or debug them manually.
-- Orchestration state includes mapping (player->game), per-player statuses and results, timestamps, and an overall completed flag.
 
 Game Modes
 
@@ -130,18 +201,96 @@ Game modes can be changed through:
 
 **Note**: Changing modes while players are actively playing may cause disruption. It's recommended to pause the session before changing modes.
 
+## Plugin System
+
+BizShuffle supports Lua plugins that extend BizHawk functionality. Plugins can hook into various events and provide custom game logic.
+
+### Plugin Structure
+
+Each plugin resides in its own directory under `plugins/`:
+
+```
+plugins/my-plugin/
+├── plugin.lua     # Main plugin code
+├── meta.json      # Plugin metadata
+└── README.md      # Plugin documentation
+```
+
+### Plugin Metadata (meta.json)
+
+```json
+{
+  "name": "my-plugin",
+  "version": "1.0.0",
+  "description": "Example plugin",
+  "author": "Plugin Author",
+  "bizhawk_version": ">=2.8.0",
+  "enabled": true,
+  "entry_point": "plugin.lua"
+}
+```
+
+### Plugin Management
+
+Plugins can be managed through:
+- The web admin UI plugin section
+- API endpoints: `GET /api/plugins`, `POST /api/plugins/upload`, `POST /api/plugins/{name}/enable`, `POST /api/plugins/{name}/disable`
+- Plugins are automatically synchronized to clients on connection
+
+## Network Discovery
+
+BizShuffle includes automatic LAN discovery for easy server setup:
+
+### Server Discovery Broadcasting
+
+- Servers broadcast their presence via UDP multicast
+- Configurable broadcast interval (default: 5 seconds)
+- Includes server name, host, port, and version information
+
+### Client Discovery
+
+- Clients can automatically discover servers on the network
+- Discovery timeout configurable (default: 10 seconds)
+- Falls back to manual server entry if discovery fails
+
+### Discovery Configuration
+
+```json
+{
+  "enabled": true,
+  "multicast_address": "239.255.255.250:1900",
+  "broadcast_interval_sec": 5,
+  "listen_timeout_sec": 10
+}
+```
+
+## File and Save Management
+
+### Game File Distribution
+
+- Server serves game files from `./files/` directory at `/files/*`
+- Clients download games via HTTP GET requests
+- Support for primary game files and extra files (assets, patches)
+- Thread-safe concurrent downloads with progress tracking
+
+### Save State Orchestration
+
+- Save states stored in `./saves/` directory on server
+- Automatic upload/download during game swaps in save mode
+- File state tracking: `none`, `pending`, `ready`
+- Per-player save state management
+
 Client UX & installation notes
 
-- The client is a simple Go binary. Wanting a one-click installer: packaging for Windows (NSIS or similar) can wrap the binary and drop a shortcut. The client will write `client_config.json` in the working directory; you can change this to %APPDATA% or user profile dir later.
+- The client is a simple Go binary. Wanting a one-click installer: packaging for Windows (NSIS or similar) can wrap the binary and drop a shortcut. The client will write `config.json` in the working directory; you can change this to %APPDATA% or user profile dir later.
 
 Download Progress Display
 
-The client now features a pacman-style download progress display that shows real-time information for file downloads:
+The client features a pacman-style download progress display that shows real-time information for file downloads:
 
 ```
- gcc-15.2.1+r22+gc4e96a094636-1-x86_64              54.1 MiB  3.00 MiB/s 00:18 [##############################################] 100%
- linux-6.16.4.arch1-1-x86_64                        142.4 MiB  6.17 MiB/s 00:23 [##############################################] 100%
- linux-firmware-intel-20250808-1-any                103.6 MiB  2.76 MiB/s 00:38 [##############################################] 100%
+Super Mario Bros. 3 (USA).zip              512.0 KiB  2.50 MiB/s 00:00 [########################################] 100%
+Spyro - Year of the Dragon (USA).cue       650.2 MiB  3.20 MiB/s 03:25 [#####################                   ]  45%
 ```
 
 Features:
@@ -157,11 +306,88 @@ Command-line flags
 
 - Server: `--host` and `--port` to override listening address (these override config file if present).
 
+## Communication Protocol
+
+### Websocket Protocol
+
+BizShuffle uses websockets for real-time communication between server and clients. The protocol uses JSON envelopes:
+
+```json
+{
+  "cmd": "<command>",
+  "payload": { ... },
+  "id": "<uuid>"
+}
+```
+
+### Server to Client Commands
+
+- `ping`: Health check
+- `start`: Start emulation session
+- `pause`: Pause emulation
+- `swap`: Trigger game swap
+- `message`: Display message to user
+- `games_update`: Update available games list
+- `clear_saves`: Clear local save states
+- `reset`: Reset server session
+
+### Client to Server Messages
+
+- `hello`: Initial connection handshake
+- `ack`: Acknowledge command receipt
+- `nack`: Negative acknowledgment
+- `games_update_ack`: Confirm games update
+- `lua_command`: Execute Lua script command
+
+### API Endpoints
+
+Core server management:
+- `GET /api/games` - List available games
+- `POST /api/start` - Start session
+- `POST /api/pause` - Pause session
+- `POST /api/reset` - Reset session
+- `POST /api/do_swap` - Trigger manual swap
+- `POST /api/mode` - Change game mode
+- `POST /api/toggle_swaps` - Enable/disable swaps
+
+Player management:
+- `GET /api/players` - List connected players
+- `POST /api/message_player` - Send message to specific player
+- `POST /api/message_all` - Broadcast message
+- `POST /api/remove_player` - Disconnect player
+
+Plugin management:
+- `GET /api/plugins` - List available plugins
+- `POST /api/plugins/upload` - Upload new plugin
+- `POST /api/plugins/{name}/enable` - Enable plugin
+- `POST /api/plugins/{name}/disable` - Disable plugin
+
+File operations:
+- `GET /files/*` - Download game files
+- `POST /upload` - Upload files
+- `GET /save/*` - Download save states
+- `POST /save/upload` - Upload save states
+
+## Web Admin Interface
+
+The server provides a modern HTMX-powered web interface at the root URL:
+
+Features:
+- Real-time session status and controls
+- Player management and monitoring
+- Game library management
+- Plugin configuration
+- Swap scheduling and progress tracking
+- File upload interface
+- Live websocket connection status
+
+The interface uses:
+- **HTMX** for dynamic interactions without JavaScript
+- **Alpine.js** for lightweight reactive components
+- **Tailwind CSS** for styling
+- **Server-sent events** for real-time updates
+
 Notes
 
 - No authentication is implemented by design.
-
-Contact
-
-Keep iterating. This README will be updated as features are implemented.
 
