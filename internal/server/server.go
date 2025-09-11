@@ -18,6 +18,7 @@ type Server struct {
 	state       types.ServerState
 	conns       map[*websocket.Conn]*wsClient
 	players     map[string]*wsClient
+	admins      map[string]*wsClient
 	upgrader    websocket.Upgrader
 	pending     map[string]chan string
 	schedulerCh chan struct{}
@@ -46,6 +47,7 @@ func New() *Server {
 		},
 		conns:       make(map[*websocket.Conn]*wsClient),
 		players:     make(map[string]*wsClient),
+		admins:      make(map[string]*wsClient),
 		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 		pending:     make(map[string]chan string),
 		schedulerCh: make(chan struct{}, 1),
@@ -89,23 +91,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Save state management endpoints
 	mux.HandleFunc("/save/upload", s.handleSaveUpload)
 	mux.HandleFunc("/save/", s.handleSaveDownload)
-}
-
-// broadcast sends a command to all currently connected players.
-func (s *Server) broadcast(cmd types.Command) {
-	s.mu.RLock()
-	clients := make([]*wsClient, 0, len(s.players))
-	for _, cl := range s.players {
-		clients = append(clients, cl)
-	}
-	s.mu.RUnlock()
-	for _, cl := range clients {
-		select {
-		case cl.sendCh <- cmd:
-		default:
-			// drop if queue full
-		}
-	}
 }
 
 func (s *Server) SetHost(host string) {

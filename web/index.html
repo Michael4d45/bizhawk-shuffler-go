@@ -32,6 +32,21 @@
       -ms-user-select: none;
       user-select: none;
     }
+
+    /* Prevent number width jitter by using tabular numbers */
+    .numeric {
+      font-variant-numeric: tabular-nums;
+      font-feature-settings: "tnum";
+    }
+
+    /* Stable button sizing to avoid layout shift when swapping text/spinners */
+    .btn-stable {
+      width: 10rem;
+      height: 2.25rem;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
   </style>
   <script defer src="https://unpkg.com/alpinejs@3.12.0/dist/cdn.min.js"></script>
 </head>
@@ -56,13 +71,14 @@
         <div class="flex justify-between items-center">
           <div>
             <p class="text-sm text-gray-400">Session</p>
-            <p class="text-lg font-bold" :class="state.running ? 'text-green-400' : 'text-red-400'"
-              x-text="state.running ? 'Running' : 'Stopped'"></p>
+            <p class="text-lg font-bold inline-block min-w-[6.5rem]"
+              :class="state.running ? 'text-green-400' : 'text-red-400'" x-text="state.running ? 'Running' : 'Stopped'">
+            </p>
             <p class="text-xs text-gray-500" x-text="'Updated: ' + lastUpdated"></p>
           </div>
           <div class="text-right">
             <p class="text-sm text-gray-400">Next swap</p>
-            <p class="text-lg font-bold" x-text="nextSwapDisplay"></p>
+            <p class="text-lg font-bold numeric inline-block min-w-[8ch] text-right" x-text="nextSwapDisplay"></p>
           </div>
         </div>
 
@@ -78,10 +94,10 @@
         <div class="mt-4 flex flex-wrap gap-2">
           <template x-for="btn in sessionButtons" :key="btn.label">
             <button @click="trigger(btn.path)" :disabled="loadingAction === btn.path"
-              class="px-3 py-1 rounded font-semibold transition transform"
-              :class="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'bg-emerald-400 text-black shadow-lg scale-105' : 'bg-slate-700') : btn.class"
+              class="px-3 py-1 rounded font-semibold transition btn-stable"
+              :class="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'bg-emerald-400 text-black shadow-lg' : 'bg-slate-700') : btn.class"
               :title="btn.path === '/api/toggle_swaps' ? (state.swap_enabled ? 'Swaps enabled' : 'Swaps disabled') : btn.label">
-              <span x-show="loadingAction !== btn.path" class="inline-flex items-center gap-2">
+              <span x-show="loadingAction !== btn.path" class="inline-flex items-center gap-2 justify-center w-full">
                 <span x-text="btn.label"></span>
                 <!-- small On/Off badge for the Toggle Swaps button -->
                 <template x-if="btn.path === '/api/toggle_swaps'">
@@ -90,7 +106,7 @@
                     x-text="state.swap_enabled ? 'On' : 'Off'"></span>
                 </template>
               </span>
-              <span x-show="loadingAction === btn.path" class="inline-flex items-center gap-1">
+              <span x-show="loadingAction === btn.path" class="inline-flex items-center gap-1 justify-center w-full">
                 <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
                   viewBox="0 0 24 24">
                   <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
@@ -105,13 +121,13 @@
         <!-- Interval -->
         <div class="mt-6">
           <label class="block text-sm text-gray-300 mb-1">Swap interval (secs)</label>
-          <p class="text-sm text-gray-400 mb-2" x-text="intervalDisplay"></p>
+          <p class="text-sm text-gray-400 mb-2 numeric" x-text="intervalDisplay"></p>
 
           <div class="flex flex-wrap items-center gap-3">
             <input x-model.number="interval.min" @input="interval._dirtyMin = true" type="number" placeholder="min"
-              class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white" />
+              class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white numeric" />
             <input x-model.number="interval.max" @input="interval._dirtyMax = true" type="number" placeholder="max"
-              class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white" />
+              class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white numeric" />
             <button @click="saveInterval()" :disabled="!intervalValid"
               class="px-4 py-1 rounded font-semibold transition"
               :class="intervalValid ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
@@ -737,8 +753,6 @@
           // load server mode
           this.fetchMode();
           await this.refreshState();
-          // keep server state refreshed periodically
-          setInterval(() => this.refreshState(), 5000);
           // start a high-resolution animation loop to update nowMs for smooth progress
           const rafTick = () => {
             this.nowMs = Date.now();
@@ -748,7 +762,6 @@
             if (this.state && this.state.next_swap_at && this.nowMs / 1000 >= this.state.next_swap_at) {
               if (!this._swapDueHandled) {
                 this._swapDueHandled = true;
-                this.pausedRefreshState(700);
               }
             } else {
               // reset the flag when we're not currently past the swap time so
@@ -763,10 +776,6 @@
           window.addEventListener('beforeunload', () => {
             if (this._rafId) cancelAnimationFrame(this._rafId);
           });
-        },
-        async pausedRefreshState(ms) {
-          await window.sleep(ms);
-          await this.refreshState();
         },
         log(msg) {
           this.logs.unshift({
@@ -988,12 +997,9 @@
                     // unknown action response; just log it
                     this.log(`${path} response: ${JSON.stringify(body)}`);
                   }
-                  // After handling an action response, refresh the canonical state from server
-                  await this.refreshState();
                 }
               } else {
                 this.log(`${path} OK`);
-                await this.refreshState();
               }
               this.toast = "Action successful";
             } else {
@@ -1111,7 +1117,6 @@
               body: JSON.stringify({ games: this.selectedGames }),
             });
             if (res.ok) this.log("games saved");
-            await this.refreshState();
           } catch (e) {
             this.log("save games err " + e.message);
           }
@@ -1158,7 +1163,6 @@
                 i._dirtyId = false;
                 i._dirtyGame = false;
               });
-              await this.refreshState(); // Refresh to get server-assigned player/state
             } else {
               this.log('save instances failed');
             }
@@ -1172,27 +1176,16 @@
             this.log("Invalid interval values");
             return;
           }
-          try {
-            const res = await fetch("/api/interval", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({
-                min_interval_secs: this.interval.min,
-                max_interval_secs: this.interval.max,
-              }),
-            });
-            if (res.ok) {
-              const state = await res.json();
-              this.state = state;
-              this.interval.min = this.interval.min || 0;
-              this.interval.max = this.interval.max || 0;
-              this.interval._dirtyMin = false;
-              this.interval._dirtyMax = false;
-              this.log("interval saved");
-            }
-          } catch (e) {
-            this.log("save interval err " + e.message);
-          }
+          fetch("/api/interval", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              min_interval_secs: this.interval.min,
+              max_interval_secs: this.interval.max,
+            }),
+          }).catch((e) => {
+            this.log("interval save err " + e.message);
+          });
         },
         async swapPlayer(player, instanceIDOrGame) {
           if (!instanceIDOrGame) return;
@@ -1234,7 +1227,6 @@
             if (this.state.players[player]) {
               this.state.players[player]._dirtySelected = false;
             }
-            await this.pausedRefreshState(100);
           }
         },
         async swapAll(game) {
@@ -1262,10 +1254,7 @@
                   } else {
                     this.log(`/api/swap_all_to_game response: ${JSON.stringify(body)}`);
                   }
-                  await this.refreshState();
                 }
-              } else {
-                await this.refreshState();
               }
             }
           } catch (e) {
@@ -1287,7 +1276,6 @@
             if (res.ok) {
               const body = await res.json().catch(() => null);
               this.log(`remove_player: ${player}`);
-              await this.refreshState();
             } else {
               this.log(`/api/remove_player failed for ${player}`);
             }
@@ -1315,28 +1303,46 @@
               location.host +
               "/ws"
             );
-            this.ws.onopen = () => this.log("ws open");
+            this.ws.onopen = () => {
+              const timestamp = new Date().toLocaleTimeString();
+              this.log(`WS Connection: Opened`);
+              try {
+                // Generate a unique admin name
+                const adminName = 'admin_' + Math.random().toString(36).substr(2, 9) + '_' + Date.now();
+                const hello = {
+                  cmd: "hello_admin",
+                  id: String(Date.now()),
+                  payload: {
+                    name: adminName
+                  }
+                };
+                this.ws.send(JSON.stringify(hello));
+                this.log(`Sent admin hello with name: ${adminName}`);
+              } catch (e) {
+                this.log(`WS hello send error: ${e.message}`);
+              }
+            };
             this.ws.onclose = () => {
-              this.log("ws closed");
+              const timestamp = new Date().toLocaleTimeString();
+              this.log(`WS Connection: Closed - Reconnecting in 3s`);
               setTimeout(() => this.startWS(), 3000);
             };
             this.ws.onmessage = (ev) => {
               try {
                 const d = JSON.parse(ev.data);
-                if (d.cmd === "games_update") {
-                  // server pushed updated games/main_games; refresh UI state and available files
-                  this.refreshFilesList();
-                  this.refreshMainGames();
+                const timestamp = new Date().toLocaleTimeString();
+                this.log(`WS Broadcast: ${d.cmd} ${JSON.stringify(d.payload || {})}`);
+                if (d.cmd === "state_update") {
                   this.refreshState();
-                } else {
-                  this.log("msg " + ev.data);
                 }
               } catch (e) {
-                this.log(ev.data);
+                const timestamp = new Date().toLocaleTimeString();
+                this.log(`WS Broadcast Error: ${ev.data} (${e.message})`);
               }
             };
           } catch (e) {
-            this.log("ws start error: " + e.message);
+            const timestamp = new Date().toLocaleTimeString();
+            this.log(`WS Connection Error: ${e.message}`);
           }
         },
         // Toggle a game in the sync-mode selection list and persist immediately
@@ -1356,8 +1362,6 @@
             });
             if (res.ok) {
               this.log('sync games updated');
-              // refresh canonical state after small delay
-              await this.pausedRefreshState(150);
             } else {
               this.log('failed to save sync games');
             }

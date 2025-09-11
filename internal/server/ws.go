@@ -30,6 +30,17 @@ func (s *Server) findPlayerNameForClient(client *wsClient) string {
 	return ""
 }
 
+// findAdminNameForClient returns the admin name associated with the given wsClient or
+// empty string if none. Caller must hold s.mu if concurrent access is possible.
+func (s *Server) findAdminNameForClient(client *wsClient) string {
+	for n, ac := range s.admins {
+		if ac == client {
+			return n
+		}
+	}
+	return ""
+}
+
 // handleWS upgrades to websocket and manages client lifecycle.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	c, err := s.upgrader.Upgrade(w, r, nil)
@@ -37,7 +48,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		log.Printf("upgrade: %v", err)
 		return
 	}
-	client := &wsClient{conn: c, sendCh: make(chan types.Command, 8)}
+	client := &wsClient{conn: c, sendCh: make(chan types.Command, 256)}
 	s.withLock(func() {
 		s.conns[c] = client
 	})
@@ -126,15 +137,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 	defer func() {
 		close(client.sendCh)
 		writeWG.Wait()
-		// remove connection and mark player disconnected under lock
+		// remove connection and mark player/admin disconnected under lock
 		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if cl, ok := s.conns[c]; ok {
-				name := s.findPlayerNameForClient(cl)
-				if name != "" {
+				if name := s.findPlayerNameForClient(cl); name != "" {
 					pl := st.Players[name]
 					pl.Connected = false
 					st.Players[name] = pl
 					delete(s.players, name)
+				} else if adminName := s.findAdminNameForClient(cl); adminName != "" {
+					// Handle admin disconnection - could add admin state management here if needed
+					delete(s.admins, adminName)
+					log.Printf("Admin %s disconnected", adminName)
 				}
 				delete(s.conns, c)
 			}
@@ -236,42 +250,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					"games":          games,
 				}
 				select {
-				case client.sendCh <- types.Command{
-					Cmd:     types.CmdGamesUpdate,
-					Payload: payload,
-					ID:      fmt.Sprintf("%d", time.Now().UnixNano()),
-				}:
-
-				default:
-					fmt.Printf("[WARN] Failed to send CmdGamesUpdate to %s (channel full?)\n", name)
+				case client.sendCh <- types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())}:
+				case <-time.After(5 * time.Second):
+					fmt.Printf("[ERROR] Failed to send CmdGamesUpdate to %s (queue full after 5s)\n", name)
 				}
 
 				if player.Game != "" {
-					startPayload := map[string]any{
-						"game":        player.Game,
-						"instance_id": player.InstanceID,
-					}
+					startPayload := map[string]any{"game": player.Game, "instance_id": player.InstanceID}
 					select {
-					case client.sendCh <- types.Command{
-						Cmd:     types.CmdStart,
-						Payload: startPayload,
-						ID:      fmt.Sprintf("init-%d", time.Now().UnixNano()),
-					}:
-
-					default:
-						fmt.Printf("[WARN] Failed to send CmdStart to %s (channel full?)\n", name)
+					case client.sendCh <- types.Command{Cmd: types.CmdStart, Payload: startPayload, ID: fmt.Sprintf("init-%d", time.Now().UnixNano())}:
+					case <-time.After(5 * time.Second):
+						fmt.Printf("[ERROR] Failed to send CmdStart to %s (queue full after 5s)\n", name)
 					}
 				}
 
 				select {
-				case client.sendCh <- types.Command{
-					Cmd:     types.CmdPing,
-					Payload: fmt.Sprintf("%d", time.Now().UnixNano()),
-					ID:      fmt.Sprintf("ping-%d", time.Now().UnixNano()),
-				}:
-
-				default:
-					fmt.Printf("[WARN] Failed to send CmdPing to %s (channel full?)\n", name)
+				case client.sendCh <- types.Command{Cmd: types.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
+				case <-time.After(5 * time.Second):
+					fmt.Printf("[ERROR] Failed to send CmdPing to %s (queue full after 5s)\n", name)
 				}
 			} else {
 				fmt.Printf("[ERROR] Invalid payload type for CmdHello: %T\n", cmd.Payload)
@@ -279,7 +275,77 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		}
 
+		if cmd.Cmd == types.CmdHelloAdmin {
+			if pl, ok := cmd.Payload.(map[string]any); ok {
+				name := ""
+				if v, ok := pl["name"].(string); ok {
+					name = v
+				}
+				if name == "" {
+					log.Printf("CmdHelloAdmin missing name in payload")
+					continue
+				}
+
+				// Register the admin connection
+				s.UpdateStateAndPersist(func(st *types.ServerState) {
+					s.conns[c] = client
+					s.admins[name] = client
+				})
+
+				log.Printf("Admin %s connected", name)
+
+				// Send initial ping to establish connection
+				select {
+				case client.sendCh <- types.Command{Cmd: types.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
+				case <-time.After(5 * time.Second):
+					fmt.Printf("[ERROR] Failed to send CmdPing to admin %s (queue full after 5s)\n", name)
+				}
+			} else {
+				fmt.Printf("[ERROR] Invalid payload type for CmdHelloAdmin: %T\n", cmd.Payload)
+			}
+			continue
+		}
+
 		log.Printf("client message: %+v", cmd)
+	}
+}
+
+// broadcastToPlayers sends a command to all currently connected players.
+func (s *Server) broadcastToPlayers(cmd types.Command) {
+	s.mu.RLock()
+	clients := make([]*wsClient, 0, len(s.players))
+	for _, cl := range s.players {
+		clients = append(clients, cl)
+	}
+	s.mu.RUnlock()
+	for _, cl := range clients {
+		go func(cl *wsClient) {
+			select {
+			case cl.sendCh <- cmd:
+			case <-time.After(5 * time.Second):
+				log.Printf("failed to broadcast to player: queue full")
+			}
+		}(cl)
+	}
+	s.broadcastToAdmins(cmd)
+}
+
+// broadcastToAdmins sends a command to all currently connected admins.
+func (s *Server) broadcastToAdmins(cmd types.Command) {
+	s.mu.RLock()
+	clients := make([]*wsClient, 0, len(s.admins))
+	for _, cl := range s.admins {
+		clients = append(clients, cl)
+	}
+	s.mu.RUnlock()
+	for _, cl := range clients {
+		go func(cl *wsClient) {
+			select {
+			case cl.sendCh <- cmd:
+			case <-time.After(5 * time.Second):
+				log.Printf("failed to broadcast to admin: queue full")
+			}
+		}(cl)
 	}
 }
 
@@ -293,11 +359,18 @@ func (s *Server) sendToPlayer(player string, cmd types.Command) error {
 	if !ok || client == nil {
 		return fmt.Errorf("no connection for player %s", player)
 	}
+
+	s.broadcastToAdmins(types.Command{
+		Cmd:     cmd.Cmd,
+		Payload: map[string]any{"player": player, "original_payload": cmd.Payload},
+		ID:      cmd.ID,
+	})
+
 	select {
 	case client.sendCh <- cmd:
 		return nil
-	default:
-		return fmt.Errorf("send queue full for player %s", player)
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("send queue full for player %s (timeout after 5s)", player)
 	}
 }
 

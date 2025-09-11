@@ -45,20 +45,27 @@ type DiscoveryConfig struct {
 type CommandName string
 
 const (
+	// From Client to Server
 	CmdHello          CommandName = "hello"
+	CmdAck            CommandName = "ack"
+	CmdNack           CommandName = "nack"
+	CmdGamesUpdateAck CommandName = "games_update_ack"
+
+	// From Server to Client
 	CmdPing           CommandName = "ping"
 	CmdStart          CommandName = "start"
 	CmdPause          CommandName = "pause"
 	CmdSwap           CommandName = "swap"
 	CmdMessage        CommandName = "message"
-	CmdAck            CommandName = "ack"
-	CmdNack           CommandName = "nack"
-	CmdStatus         CommandName = "status"
 	CmdGamesUpdate    CommandName = "games_update"
-	CmdGamesUpdateAck CommandName = "games_update_ack"
-	CmdStateUpdate    CommandName = "state_update"
 	CmdClearSaves     CommandName = "clear_saves"
 	CmdReset          CommandName = "reset"
+
+	// From Admin to Server
+	CmdHelloAdmin     CommandName = "hello_admin"
+
+	// From Server to Admin
+	CmdStateUpdate    CommandName = "state_update"
 )
 
 // GameMode enumerates the available game swapping modes. Use string constants

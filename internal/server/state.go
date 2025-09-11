@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -19,7 +20,6 @@ func (s *Server) loadState() {
 		log.Printf("state file not found, using defaults: %v", err)
 		return
 	}
-	defer func() { _ = f.Close() }()
 
 	var tmp types.ServerState
 	dec := json.NewDecoder(f)
@@ -28,6 +28,8 @@ func (s *Server) loadState() {
 		log.Printf("failed to decode state file %s: %v", "state.json", err)
 		return
 	}
+	// Close the file immediately after decoding to avoid locking issues on Windows
+	_ = f.Close()
 	if tmp.GameSwapInstances == nil {
 		tmp.GameSwapInstances = []types.GameSwapInstance{}
 	}
@@ -72,9 +74,8 @@ func (s *Server) loadState() {
 
 // saveState writes current state atomically to disk.
 func (s *Server) saveState() error {
-	s.mu.RLock()
+	s.mu.Lock()
 	st := s.state
-	s.mu.RUnlock()
 	dir := filepath.Dir("state.json")
 	if dir == "" || dir == "." {
 		dir = "."
@@ -103,6 +104,7 @@ func (s *Server) saveState() error {
 		log.Printf("rename tmp file error: %v", err)
 		return err
 	}
+	s.mu.Unlock()
 	return nil
 }
 
@@ -169,6 +171,20 @@ func (s *Server) SnapshotGames() (games []string, mainGames []types.GameEntry, i
 // that attempt to acquire the server lock.
 func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) {
 	updatedAt := time.Now()
+	_, file, line, ok := runtime.Caller(1)
+	var updatedBy string
+	if ok {
+		// Make path relative to two directories up
+		if wd, err := os.Getwd(); err == nil {
+			baseDir := filepath.Dir(filepath.Dir(wd))
+			if rel, err := filepath.Rel(baseDir, file); err == nil {
+				file = rel
+			}
+		}
+		updatedBy = fmt.Sprintf("%s:%d", file, line)
+	} else {
+		updatedBy = "unknown"
+	}
 	s.withLock(func() {
 		mut(&s.state)
 		s.state.UpdatedAt = updatedAt
@@ -176,5 +192,12 @@ func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) {
 	if err := s.saveState(); err != nil {
 		fmt.Printf("failed to persist state: %v\n", err)
 	}
-	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": updatedAt}, ID: fmt.Sprintf("%d", updatedAt.UnixNano())})
+	s.broadcastToAdmins(types.Command{
+		Cmd: types.CmdStateUpdate,
+		Payload: map[string]any{
+			"updated_at": updatedAt,
+			"updated_by": updatedBy,
+		},
+		ID: fmt.Sprintf("%d", updatedAt.UnixNano()),
+	})
 }

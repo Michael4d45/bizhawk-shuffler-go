@@ -15,7 +15,7 @@ func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Running = true
 	})
-	s.broadcast(types.Command{Cmd: types.CmdStart, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+	s.broadcastToPlayers(types.Command{Cmd: types.CmdStart, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
@@ -30,7 +30,7 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Running = false
 	})
-	s.broadcast(types.Command{Cmd: types.CmdPause, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+	s.broadcastToPlayers(types.Command{Cmd: types.CmdPause, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
@@ -45,7 +45,7 @@ func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
 		st.GameSwapInstances = []types.GameSwapInstance{}
 		st.Running = false
 	})
-	s.broadcast(types.Command{Cmd: types.CmdReset, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+	s.broadcastToPlayers(types.Command{Cmd: types.CmdReset, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)
 	}
@@ -58,7 +58,7 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 		_ = os.Rename(savesDir, trash)
 	}
 	_ = os.MkdirAll(savesDir, 0755)
-	s.broadcast(types.Command{Cmd: types.CmdClearSaves, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+	s.broadcastToPlayers(types.Command{Cmd: types.CmdClearSaves, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)
 	}

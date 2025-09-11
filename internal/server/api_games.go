@@ -57,7 +57,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 		})
-		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{
+		s.broadcastToPlayers(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{
 			"game_instances": s.state.GameSwapInstances,
 			"main_games":     s.state.MainGames,
 			"games":          s.state.Games,
