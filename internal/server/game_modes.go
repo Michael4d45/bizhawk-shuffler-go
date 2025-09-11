@@ -38,6 +38,7 @@ func (h *SyncModeHandler) HandleSwap() error {
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		for name, player := range st.Players {
 			player.Game = game
+			player.InstanceID = ""
 			st.Players[name] = player
 		}
 		for name, player := range st.Players {
@@ -68,7 +69,7 @@ func (h *SyncModeHandler) GetPlayer(player string) types.Player {
 		// If any player already has a game assigned, return that game for the requesting player.
 		for _, pp := range h.server.state.Players {
 			if pp.Game != "" {
-				result = types.Player{Name: player, Game: pp.Game, InstanceID: pp.InstanceID}
+				result = types.Player{Name: player, Game: pp.Game}
 				return
 			}
 		}
@@ -98,6 +99,7 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceI
 			p = types.Player{Name: player}
 		}
 		p.Game = game
+		p.InstanceID = ""
 		st.Players[player] = p
 	})
 
