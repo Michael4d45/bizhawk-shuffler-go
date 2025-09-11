@@ -139,28 +139,11 @@ func (s *Server) apiMessageAll(w http.ResponseWriter, r *http.Request) {
 		},
 		ID: fmt.Sprintf("message-all-%d", time.Now().UnixNano()),
 	}
-
-	players := []string{}
-	s.withRLock(func() {
-		for name := range s.players {
-			players = append(players, name)
-		}
-	})
-
-	results := make(map[string]string)
-	for _, player := range players {
-		err := s.sendToPlayer(player, cmd)
-		if err != nil {
-			results[player] = "error: " + err.Error()
-		} else {
-			results[player] = "ok"
-		}
-	}
+	s.broadcastToPlayers(cmd)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
 		"result":  "ok",
-		"results": results,
 	}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}
