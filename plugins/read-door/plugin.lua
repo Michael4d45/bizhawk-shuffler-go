@@ -1,6 +1,5 @@
 -- ReadDoor plugin for BizHawk Shuffler
--- Detects "room/scene" changes by reading a configured RAM address per-game,
--- or (if not configured) by a simple heuristic (region hash).
+-- Detects "room/scene" changes by reading a configured RAM address per-game
 --
 -- Usage:
 --  - Add games to the `games` table (key: substring of the game name BizHawk uses,
@@ -24,8 +23,8 @@ local games = {
     -- ["super metroid"] = { addr = 0x7E0F30, size = 2, domain = nil,
     --                       desc = "room id (example - replace with verified address)" },
     -- ["zelda a link to the past"] = { addr = 0x7E0ABC, size = 1, domain = nil, desc = "tilemap/room id" },
-    ["legend of zelda, the - a link to the past (usa).zip"] = {
-        addr = 0xA86,
+    ["legend of zelda, the - a link to the past (usa)"] = {
+        addr = 0xA2,
         size = 2,
         domain = nil,
         desc = "room id"
@@ -47,6 +46,8 @@ local currentGame = nil
 local frameCounter = 0
 local lastValueByGame = {}
 local bestDomainCached = nil
+local lastRomName = nil
+local lastInstanceID = nil
 
 local probe = {
     active = false,
@@ -137,22 +138,18 @@ end
 
 -- Called every poll interval to check for room change
 local function readDoor()
-    if not currentGame then
+    if not currentGame or not lastRomName then
         return
     end
 
-    -- find per-game config by exact key or substring match
     local cfg = nil
-    local curLower = currentGame:lower()
-    -- console.log("Read Door: checking game " .. tostring(curLower))
+    local curLower = lastRomName:lower()
     for key, v in pairs(games) do
         if curLower:find(key:lower(), 1, true) then
             cfg = v;
             break
         end
     end
-    -- console.log("Read Door: using config:")
-    -- console.log(cfg)
 
     if not cfg or not cfg.addr then
         return
@@ -160,17 +157,17 @@ local function readDoor()
 
     local val = safe_read(cfg.addr, cfg.size or 1, cfg.domain)
     if val == nil then
-        console.log(("Read Door: failed to read %s at 0x%X domain=%s"):format(tostring(currentGame),
-            tonumber(cfg.addr) or 0, tostring(cfg.domain)))
         return
     end
-    local last = lastValueByGame[currentGame]
-    if last ~= val then
+    local key = currentGame
+    local last = lastValueByGame[key]
+    lastValueByGame[key] = val
+    if last ~= val and last ~= nil then
         console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame), tostring(last),
             tostring(val), tostring(cfg.desc or "")))
-        lastValueByGame[currentGame] = val
+        lastValueByGame[key] = val
 
-        SendCommand("message", {
+        SendCommand("swap", {
             ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
                 tostring(last), tostring(val), tostring(cfg.desc or ""))
         })
@@ -184,6 +181,16 @@ end
 
 local function on_frame()
     frameCounter = frameCounter + 1
+
+    -- Check for game change
+    local rom = gameinfo.getromname()
+    if rom and (rom ~= lastRomName or InstanceID ~= lastInstanceID) then
+        console.log("Read Door: Game/Instance changed to " .. tostring(rom) .. " instance " .. tostring(InstanceID))
+        lastRomName = rom
+        lastInstanceID = InstanceID
+        currentGame = lastRomName .. "_" .. (InstanceID or "")
+        lastValueByGame[currentGame] = nil
+    end
 
     -- probe state machine
     if probe.active then
@@ -218,9 +225,11 @@ end
 
 local function on_game_start(game_name)
     console.log("Read Door: Game started - " .. tostring(game_name))
-    currentGame = tostring(game_name or "")
+    currentGame = game_name .. "_" .. (InstanceID or "")
     lastValueByGame[currentGame] = nil
     bestDomainCached = nil
+    lastRomName = game_name
+    lastInstanceID = InstanceID
     -- optional auto-probe
     if AUTO_PROBE_ON_START then
         start_probe(PROBE_PARAMS.domain, PROBE_PARAMS.start, PROBE_PARAMS.len, PROBE_PARAMS.framesDelay)

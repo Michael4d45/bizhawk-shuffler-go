@@ -80,6 +80,7 @@ local function save_state(path)
 end
 
 local function load_rom(path)
+    client.closerom()
     if file_exists(path) then
         client.openrom(path)
     else
@@ -101,7 +102,7 @@ local function strip_extension(filename)
 end
 
 -- Command implementations
-local instance_id = nil
+InstanceID = nil
 -- Compute a canonical id for a game based on display name or filename
 local function canonical_game_id_from_display(name)
     if not name then
@@ -133,8 +134,8 @@ local function get_save_path()
     if cur and cur ~= "" and cur:lower() ~= "null" then
         name = cur
     end
-    if instance_id and instance_id ~= "" then
-        name = instance_id
+    if InstanceID and InstanceID ~= "" then
+        name = InstanceID
     end
 
     if not name or name == "" or name:lower() == "null" then
@@ -168,24 +169,25 @@ local function do_swap(target_game, instance)
     -- save current
     local cur_id = get_current_canonical_game()
     local target_id = canonical_game_id_from_filename(target_game) or canonical_game_id_from_display(target_game)
+    local old_save_path = get_save_path()
 
     -- save current
     do_save()
-    instance_id = instance
+    InstanceID = instance
 
-    if target_id and cur_id and target_id == cur_id then
+    local new_save_path = get_save_path()
+    if target_id and cur_id and target_id == cur_id and old_save_path == new_save_path then
         -- same canonical game; skip reload
         console.log("Swap skipped: target is same as current (" .. tostring(target_id) .. ")")
         return
+    else
+        local rom_path = ROM_DIR .. "/" .. target_game
+        load_rom(rom_path)
     end
 
-    local rom_path = ROM_DIR .. "/" .. target_game
-    load_rom(rom_path)
-    local disp = sanitize_filename(gameinfo.getromname())
-    if not disp or disp == "" or disp:lower() == "null" then
-        disp = sanitize_filename(strip_extension(target_game))
+    if old_save_path ~= new_save_path then
+        load_state_if_exists()
     end
-    load_state_if_exists()
 end
 
 local function do_start(game)
@@ -346,7 +348,7 @@ local function handle_line(line)
             end)
         elseif cmd == "START" then
             local game, instance = parts[4], parts[5]
-            instance_id = instance
+            InstanceID = instance
             safe_exec_and_ack(id, function()
                 do_start(game)
             end)
@@ -366,7 +368,7 @@ local function handle_line(line)
             end)
         elseif cmd == "SYNC" then
             local game, instance, state = parts[4], parts[5], parts[6]
-            instance_id = instance
+            InstanceID = instance
             safe_exec_and_ack(id, function()
                 if state == "running" then
                     if game and game ~= "" then

@@ -166,7 +166,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		}
 		log.Printf("received cmd from client: %s id=%s", cmd.Cmd, cmd.ID)
 
-		if cmd.Cmd == types.CmdAck || cmd.Cmd == types.CmdNack {
+		switch cmd.Cmd {
+		case types.CmdAck, types.CmdNack:
 			var ch chan string
 			var ok bool
 			s.withRLock(func() {
@@ -198,8 +199,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				})
 			}
 			continue
-		}
-		if cmd.Cmd == types.CmdGamesUpdateAck {
+		case types.CmdGamesUpdateAck:
 			// determine player name and update under locks
 			pname := ""
 			s.withRLock(func() {
@@ -218,8 +218,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			}
 			continue
-		}
-		if cmd.Cmd == types.CmdHello {
+		case types.CmdHello:
 			if pl, ok := cmd.Payload.(map[string]any); ok {
 				name := ""
 				if v, ok := pl["name"].(string); ok {
@@ -273,9 +272,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("[ERROR] Invalid payload type for CmdHello: %T\n", cmd.Payload)
 			}
 			continue
-		}
-
-		if cmd.Cmd == types.CmdHelloAdmin {
+		case types.CmdHelloAdmin:
 			if pl, ok := cmd.Payload.(map[string]any); ok {
 				name := ""
 				if v, ok := pl["name"].(string); ok {
@@ -304,9 +301,41 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("[ERROR] Invalid payload type for CmdHelloAdmin: %T\n", cmd.Payload)
 			}
 			continue
-		}
+		case types.CmdTypeLua:
+			if pl, ok := cmd.Payload.(map[string]any); ok {
+				var luaCmd types.LuaCommand
+				b, err := json.Marshal(pl)
+				if err != nil {
+					log.Printf("failed to marshal lua command payload: %v", err)
+					continue
+				}
+				if err := json.Unmarshal(b, &luaCmd); err != nil {
+					log.Printf("failed to unmarshal lua command payload: %v", err)
+					continue
+				}
+				// Handle the Lua command as needed. For now, just log it.
+				log.Printf("Received Lua command: kind=%q fields=%v", luaCmd.Kind, luaCmd.Fields)
 
-		log.Printf("client message: %+v", cmd)
+				switch luaCmd.Kind {
+				case types.CmdMessage:
+					// Broadcast message to all players and admins
+					s.broadcastToPlayers(types.Command{
+						Cmd:     types.CmdTypeLua,
+						Payload: luaCmd,
+					})
+				case types.CmdSwap:
+					// Handle swap command
+					if err := s.performSwap(); err != nil {
+						fmt.Printf("performSwap error: %v\n", err)
+					}
+				}
+			} else {
+				fmt.Printf("[ERROR] Invalid payload type for CmdTypeLua: %T\n", cmd.Payload)
+			}
+			continue
+		default:
+			log.Printf("client message: %+v", cmd)
+		}
 	}
 }
 
