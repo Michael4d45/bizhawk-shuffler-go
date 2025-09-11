@@ -35,7 +35,7 @@ func (h *SyncModeHandler) HandleSwap() error {
 	// In sync mode, set all players to the same game
 	// Update state under write lock, but minimize critical section
 	connectedPlayers := []string{}
-	_ = h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		for name, player := range st.Players {
 			player.Game = game
 			st.Players[name] = player
@@ -92,7 +92,7 @@ func (h *SyncModeHandler) SetupState() error {
 
 func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
 	// In sync mode we don't use instances; just set the player's current game
-	_ = h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		p, ok := st.Players[player]
 		if !ok {
 			p = types.Player{Name: player}
@@ -118,7 +118,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 
 	// Collect player names and perform state updates under lock where necessary
 	var players []string
-	_ = h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		for name := range st.Players {
 			players = append(players, name)
 		}
@@ -188,7 +188,7 @@ func (h *SaveModeHandler) GetPlayer(player string) types.Player {
 	// In save mode, prefer returning the first unassigned game instance.
 	// We consider an instance unassigned when no player currently has its InstanceID.
 	var result types.Player
-	_ = h.server.UpdateStateAndPersist(func(state *types.ServerState) {
+	h.server.UpdateStateAndPersist(func(state *types.ServerState) {
 		if len(state.GameSwapInstances) > 0 {
 			// build a set of assigned instance IDs
 			assigned := map[string]struct{}{}
@@ -232,7 +232,7 @@ func (h *SaveModeHandler) SetupState() error {
 func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
 	var foundInst *types.GameSwapInstance
 	var foundPlayer string
-	_ = h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		// If instance ID provided, assign that instance to the player (players now store InstanceID)
 		if instanceID == "" {
 			return

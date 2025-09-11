@@ -28,7 +28,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Mutate state and persist via helper to centralize UpdatedAt + save
-		if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if gms, ok := raw["games"]; ok {
 				b, _ := json.Marshal(gms)
 				var games []string
@@ -56,10 +56,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 					st.GameSwapInstances = instances
 				}
 			}
-		}); err != nil {
-			fmt.Printf("saveState error: %v\n", err)
-		}
-		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		})
 		s.broadcast(types.Command{Cmd: types.CmdGamesUpdate, Payload: map[string]any{
 			"game_instances": s.state.GameSwapInstances,
 			"main_games":     s.state.MainGames,
@@ -95,7 +92,7 @@ func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if b.MinInterval != 0 {
 				st.MinIntervalSecs = b.MinInterval
 			}
@@ -103,7 +100,6 @@ func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
 				st.MaxIntervalSecs = b.MaxInterval
 			}
 		})
-		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)
 		}

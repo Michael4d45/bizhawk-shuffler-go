@@ -127,7 +127,7 @@ func (s *Server) handleSaveDownload(w http.ResponseWriter, r *http.Request) {
 
 // setInstanceFileState updates the file state for a given instance ID
 func (s *Server) setInstanceFileState(instanceID string, state types.FileState) {
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		for i, instance := range st.GameSwapInstances {
 			if instance.ID == instanceID {
 				st.GameSwapInstances[i].FileState = state

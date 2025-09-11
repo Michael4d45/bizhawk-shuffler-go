@@ -216,7 +216,7 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to remove plugin: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-			_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+			s.UpdateStateAndPersist(func(st *types.ServerState) {
 				if st.Plugins != nil {
 					delete(st.Plugins, pluginName)
 				}
@@ -257,7 +257,7 @@ func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		if st.Plugins == nil {
 			st.Plugins = make(map[string]types.Plugin)
 		}
@@ -288,7 +288,7 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 	}
 
 	var exists bool
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		if st.Plugins == nil {
 			st.Plugins = make(map[string]types.Plugin)
 		}

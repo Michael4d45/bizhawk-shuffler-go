@@ -32,7 +32,7 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 	if b.Game != "" {
 		gameFile = b.Game
 		// ensure player exists
-		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if _, ok := st.Players[b.Player]; !ok {
 				st.Players[b.Player] = types.Player{Name: b.Player}
 			}
@@ -51,7 +51,7 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		}
 		if found {
 			// Ensure player entry exists
-			_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+			s.UpdateStateAndPersist(func(st *types.ServerState) {
 				if _, ok := st.Players[b.Player]; !ok {
 					st.Players[b.Player] = types.Player{Name: b.Player}
 				}
@@ -96,7 +96,7 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing player", http.StatusBadRequest)
 		return
 	}
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		delete(st.Players, b.Player)
 		if cl, ok := s.players[b.Player]; ok {
 			for c, client := range s.conns {
@@ -129,7 +129,7 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var players []string
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		for name, player := range st.Players {
 			players = append(players, name)
 			player.Game = b.Game

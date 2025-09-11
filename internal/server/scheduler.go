@@ -44,7 +44,7 @@ func (s *Server) schedulerLoop() {
 			interval = 300
 		}
 		nextAt := time.Now().Add(time.Duration(interval) * time.Second).Unix()
-		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			st.NextSwapAt = nextAt
 		})
 		timer := time.NewTimer(time.Duration(interval) * time.Second)

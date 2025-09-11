@@ -12,11 +12,9 @@ import (
 
 // apiStart toggles running=true and notifies clients
 func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
-	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Running = true
-	}); err != nil {
-		fmt.Printf("saveState error: %v\n", err)
-	}
+	})
 	s.broadcast(types.Command{Cmd: types.CmdStart, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
@@ -29,11 +27,9 @@ func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
 
 // apiPause toggles running=false and notifies clients
 func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
-	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Running = false
-	}); err != nil {
-		fmt.Printf("saveState error: %v\n", err)
-	}
+	})
 	s.broadcast(types.Command{Cmd: types.CmdPause, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
@@ -45,12 +41,10 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
-	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.GameSwapInstances = []types.GameSwapInstance{}
 		st.Running = false
-	}); err != nil {
-		fmt.Printf("saveState error: %v\n", err)
-	}
+	})
 	s.broadcast(types.Command{Cmd: types.CmdReset, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)
@@ -71,14 +65,12 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
-	if err := s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.SwapEnabled = !st.SwapEnabled
 		if !st.SwapEnabled {
 			st.NextSwapAt = 0
 		}
-	}); err != nil {
-		fmt.Printf("saveState error: %v\n", err)
-	}
+	})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
@@ -106,7 +98,7 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			st.Mode = b.Mode
 		})
 		if _, err := w.Write([]byte("ok")); err != nil {

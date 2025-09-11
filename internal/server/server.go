@@ -109,7 +109,7 @@ func (s *Server) broadcast(cmd types.Command) {
 }
 
 func (s *Server) SetHost(host string) {
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Host = host
 	})
 }
@@ -117,7 +117,7 @@ func (s *Server) SetHost(host string) {
 func (s *Server) PersistedHost() string { return s.SnapshotState().Host }
 
 func (s *Server) SetPort(port int) {
-	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Port = port
 	})
 }

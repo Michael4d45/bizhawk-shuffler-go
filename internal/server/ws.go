@@ -65,7 +65,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				pname = s.findPlayerNameForClient(client)
 			})
 			if pname != "" {
-				_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+				s.UpdateStateAndPersist(func(st *types.ServerState) {
 					pl := st.Players[pname]
 					pl.PingMs = int(rtt.Milliseconds())
 					st.Players[pname] = pl
@@ -127,7 +127,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		close(client.sendCh)
 		writeWG.Wait()
 		// remove connection and mark player disconnected under lock
-		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if cl, ok := s.conns[c]; ok {
 				name := s.findPlayerNameForClient(cl)
 				if name != "" {
@@ -194,7 +194,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if pname != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
 					if hf, ok := pl["has_files"].(bool); ok {
-						_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+						s.UpdateStateAndPersist(func(st *types.ServerState) {
 							p := st.Players[pname]
 							p.HasFiles = hf
 							st.Players[pname] = p
@@ -221,7 +221,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				var instances []types.GameSwapInstance
 				var mainGames []types.GameEntry
 				var games []string
-				_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+				s.UpdateStateAndPersist(func(st *types.ServerState) {
 					st.Players[name] = player
 					s.conns[c] = client
 					s.players[name] = client

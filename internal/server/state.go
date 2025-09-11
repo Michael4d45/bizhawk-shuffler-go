@@ -167,10 +167,14 @@ func (s *Server) SnapshotGames() (games []string, mainGames []types.GameEntry, i
 // UpdatedAt timestamp, then persists the state to disk outside the lock.
 // The mutator must not perform blocking IO or call back into server methods
 // that attempt to acquire the server lock.
-func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) error {
+func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) {
+	updatedAt := time.Now()
 	s.withLock(func() {
 		mut(&s.state)
-		s.state.UpdatedAt = time.Now()
+		s.state.UpdatedAt = updatedAt
 	})
-	return s.saveState()
+	if err := s.saveState(); err != nil {
+		fmt.Printf("failed to persist state: %v\n", err)
+	}
+	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": updatedAt}, ID: fmt.Sprintf("%d", updatedAt.UnixNano())})
 }
