@@ -33,7 +33,15 @@ func (s *Server) loadState() {
 	}
 	// Initialize FileState for existing instances that don't have it set
 	for i, instance := range tmp.GameSwapInstances {
-		if instance.FileState == "" {
+		fmt.Println("checking instance", instance.ID, "file state:", instance.FileState)
+		savePath := filepath.Join("./saves", instance.ID+".state")
+		if _, err := os.Stat(savePath); err == nil {
+			// File exists, mark as ready
+			fmt.Println("found save state for instance", instance.ID)
+			tmp.GameSwapInstances[i].FileState = types.FileStateReady
+		} else {
+			// File doesn't exist, mark as none
+			fmt.Println("no save state found for instance", instance.ID)
 			tmp.GameSwapInstances[i].FileState = types.FileStateNone
 		}
 	}
@@ -56,6 +64,7 @@ func (s *Server) loadState() {
 	s.mu.Lock()
 	s.state = tmp
 	s.mu.Unlock()
+	s.saveState()
 	log.Printf("loaded state from %s", "state.json")
 }
 

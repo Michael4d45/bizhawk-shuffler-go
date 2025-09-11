@@ -3,6 +3,8 @@ package server
 import (
 	"errors"
 	"math/rand"
+	"os"
+	"path/filepath"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -205,8 +207,23 @@ func (h *SaveModeHandler) GetPlayer(player string) types.Player {
 			}
 		}
 		// find first instance that is not assigned
-		for _, inst := range h.server.state.GameSwapInstances {
+		for i, inst := range h.server.state.GameSwapInstances {
 			if _, ok := assigned[inst.ID]; !ok {
+				// Check if save state file exists and update FileState accordingly
+				savePath := filepath.Join("./saves", inst.ID+".state")
+				if _, err := os.Stat(savePath); err == nil {
+					// File exists, mark as ready
+					h.server.state.GameSwapInstances[i].FileState = types.FileStateReady
+				} else {
+					// File doesn't exist, mark as none
+					h.server.state.GameSwapInstances[i].FileState = types.FileStateNone
+				}
+				h.server.state.UpdatedAt = time.Now()
+				// Persist the state change
+				h.server.mu.Unlock()
+				_ = h.server.saveState()
+				h.server.mu.Lock()
+
 				return types.Player{
 					Name:       player,
 					Game:       inst.Game,

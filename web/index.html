@@ -18,6 +18,20 @@
       },
     };
   </script>
+  <style>
+    [draggable="true"] {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+    }
+    [draggable="true"] * {
+      -webkit-user-select: none;
+      -moz-user-select: none;
+      -ms-user-select: none;
+      user-select: none;
+    }
+  </style>
   <script defer src="https://unpkg.com/alpinejs@3.12.0/dist/cdn.min.js"></script>
 </head>
 
@@ -129,11 +143,18 @@
         </div>
         <ul class="space-y-2">
           <template x-for="(p, name) in state.players" :key="name">
-            <li class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-800/40 p-3 rounded">
+            <li class="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 bg-slate-800/40 p-3 rounded hover:bg-slate-700/40 transition-all"
+                draggable="true"
+                @dragstart="onDragStart($event, name, 'player')"
+                @dragend="onDragEnd($event)">
               <!-- Left side: player info -->
               <div class="flex-1 min-w-0">
                 <div class="flex items-baseline gap-3">
-                  <strong class="truncate max-w-[10rem] sm:max-w-[14rem]" x-text="name"></strong>
+                  <strong class="truncate max-w-[10rem] sm:max-w-[14rem] select-none flex items-center gap-1" x-text="name">
+                    <svg class="w-3 h-3 text-gray-400 opacity-50" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M3 4h14a1 1 0 010 2H3a1 1 0 010-2zM3 8h14a1 1 0 010 2H3a1 1 0 010-2zM3 12h14a1 1 0 010 2H3a1 1 0 010-2z"/>
+                    </svg>
+                  </strong>
                   <div class="text-xs text-gray-400 truncate" x-text="p.game || '-'"></div>
                   <div class="text-xs text-gray-400 truncate" x-text="p.instance_id || '-'"></div>
                 </div>
@@ -244,12 +265,26 @@
             :class="showGamesExpanded ? 'mt-2 flex-1 overflow-auto space-y-2' : 'mt-2 space-y-2 max-h-60 overflow-auto'">
 
             <template x-for="(inst, idx) in gameInstances" :key="inst.id">
-              <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
+              <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded transition-all hover:bg-slate-700/40 border-2 border-transparent"
+                   @dragover.prevent="onDragOver($event)"
+                   @dragleave="onDragLeave($event)"
+                   @drop="onDrop($event, inst.id, 'instance')">
                 <div class="flex flex-col">
                   <span class="text-sm font-mono text-gray-200" x-text="inst.id"></span>
                   <span class="text-sm text-gray-400" x-text="inst.game || '(no game)'"></span>
                   <span class="text-xs text-gray-500"
-                    x-text="inst.player ? ('assigned: ' + inst.player) : 'unassigned'"></span>
+                    x-text="inst.player ? 'assigned:' : 'unassigned'"></span>
+                  <template x-if="inst.player">
+                    <span class="px-2 py-1 bg-blue-600/20 text-blue-300 rounded text-xs cursor-move select-none flex items-center gap-1 hover:bg-blue-600/30 transition-colors"
+                          draggable="true"
+                          @dragstart="onDragStart($event, inst.player, 'player')"
+                          @dragend="onDragEnd($event)">
+                      <svg class="w-3 h-3 text-blue-400" fill="currentColor" viewBox="0 0 20 20">
+                        <path d="M3 4h14a1 1 0 010 2H3a1 1 0 010-2zM3 8h14a1 1 0 010 2H3a1 1 0 010-2zM3 12h14a1 1 0 010 2H3a1 1 0 010-2z"/>
+                      </svg>
+                      <span x-text="inst.player"></span>
+                    </span>
+                  </template>
                 </div>
                 <div>
                   <button @click="() => { gameInstances.splice(idx,1); saveInstances(); }"
@@ -257,6 +292,31 @@
                 </div>
               </div>
             </template>
+          </div>
+
+          <!-- Unassigned Players Drop Zone -->
+          <div class="mt-4 p-4 border-2 border-dashed border-slate-600 rounded-lg bg-slate-800/20 transition-all hover:bg-slate-700/30 hover:border-slate-500"
+               @dragover.prevent="onDragOver($event)"
+               @dragleave="onDragLeave($event)"
+               @drop="onDrop($event, null, 'unassigned')">
+            <div class="text-center">
+              <div class="text-sm text-gray-400 mb-2">Unassigned Players</div>
+              <div class="text-xs text-gray-500">Drop players here to unassign them</div>
+              <div class="mt-2 flex flex-wrap gap-2 justify-center" x-show="unassignedPlayers.length > 0">
+                <template x-for="player in unassignedPlayers" :key="player">
+                  <span class="px-2 py-1 bg-slate-700 rounded text-xs cursor-move select-none hover:bg-slate-600 transition-colors flex items-center gap-1"
+                        draggable="true"
+                        @dragstart="onDragStart($event, player, 'player')"
+                        @dragend="onDragEnd($event)">
+                    <svg class="w-3 h-3 text-gray-400" fill="currentColor" viewBox="0 0 20 20">
+                      <path d="M3 4h14a1 1 0 010 2H3a1 1 0 010-2zM3 8h14a1 1 0 010 2H3a1 1 0 010-2zM3 12h14a1 1 0 010 2H3a1 1 0 010-2z"/>
+                    </svg>
+                    <span x-text="player"></span>
+                  </span>
+                </template>
+              </div>
+              <div class="text-xs text-gray-500 mt-2" x-show="unassignedPlayers.length === 0">No unassigned players</div>
+            </div>
           </div>
 
           <div class="mt-4 p-3 bg-slate-800/40 rounded">
@@ -529,6 +589,9 @@
           bg: "#000000"
         },
         messageTarget: null, // 'player' or 'all', and player name if player
+        // Drag and drop state
+        draggedPlayer: null,
+        draggedType: null,
         sessionButtons: [
           { label: "Start", path: "/api/start", class: "bg-green-500 text-black" },
           { label: "Pause", path: "/api/pause", class: "bg-slate-700" },
@@ -603,6 +666,14 @@
           if (this.interval.min > this.interval.max)
             return "Min cannot be greater than Max";
           return "";
+        },
+        // Computed property for unassigned players
+        get unassignedPlayers() {
+          const assignedPlayers = new Set();
+          for (const inst of this.gameInstances) {
+            if (inst.player) assignedPlayers.add(inst.player);
+          }
+          return Object.keys(this.state.players || {}).filter(player => !assignedPlayers.has(player));
         },
         // generate a simple v4 uuid for new instances
         uuidv4() {
@@ -1408,6 +1479,138 @@
             this.log('Message send error: ' + e.message);
           } finally {
             this.loadingAction = null;
+          }
+        },
+
+        // Drag and Drop Functions
+        onDragStart(event, playerName, type) {
+          this.draggedPlayer = playerName;
+          this.draggedType = type;
+          event.dataTransfer.effectAllowed = 'move';
+          event.dataTransfer.setData('text/plain', playerName);
+          event.target.classList.add('opacity-50');
+        },
+
+        onDragEnd(event) {
+          this.draggedPlayer = null;
+          this.draggedType = null;
+          event.target.classList.remove('opacity-50');
+          // Remove all drag-over highlights
+          document.querySelectorAll('.drag-over').forEach(el => {
+            el.classList.remove('drag-over', 'bg-blue-900/50', 'border-blue-500', 'bg-blue-900/30', 'border-blue-400', 'scale-105');
+          });
+        },
+
+        onDragOver(event) {
+          event.preventDefault();
+          event.dataTransfer.dropEffect = 'move';
+          event.currentTarget.classList.add('drag-over');
+          // Add specific visual feedback based on element type
+          if (event.currentTarget.classList.contains('border-dashed')) {
+            event.currentTarget.classList.add('bg-blue-900/30', 'border-blue-400');
+          } else {
+            event.currentTarget.classList.add('bg-blue-900/50', 'border-blue-500', 'scale-105');
+          }
+        },
+
+        onDragLeave(event) {
+          event.currentTarget.classList.remove('drag-over', 'bg-blue-900/50', 'border-blue-500', 'bg-blue-900/30', 'border-blue-400', 'scale-105');
+        },
+
+        async onDrop(event, targetId, targetType) {
+          event.preventDefault();
+          event.currentTarget.classList.remove('drag-over', 'bg-blue-900/50', 'border-blue-500', 'bg-blue-900/30', 'border-blue-400', 'scale-105');
+          
+          if (!this.draggedPlayer) return;
+          
+          const playerName = this.draggedPlayer;
+          
+          try {
+            if (targetType === 'instance') {
+              await this.handlePlayerToInstanceDrop(playerName, targetId);
+            } else if (targetType === 'unassigned') {
+              await this.handlePlayerToUnassignedDrop(playerName);
+            }
+          } catch (e) {
+            this.log('Drop error: ' + e.message);
+          }
+          
+          this.draggedPlayer = null;
+          this.draggedType = null;
+        },
+
+        async handlePlayerToInstanceDrop(playerName, instanceId) {
+          // Find the target instance
+          const targetInstance = this.gameInstances.find(inst => inst.id === instanceId);
+          
+          if (!targetInstance) {
+            // Instance doesn't exist - check if we need to create one
+            const unassignedPlayers = this.unassignedPlayers;
+            if (unassignedPlayers.length > 0) {
+              // Create a new instance for the first unassigned player
+              const firstUnassigned = unassignedPlayers[0];
+              this.log(`Creating new instance for unassigned player ${firstUnassigned}`);
+              
+              // Generate a new instance ID based on the game file
+              const gameFile = this.gamesList[0] || 'unknown';
+              const base = gameFile.replace(/\.[^/.]+$/, ""); // remove extension
+              const newInstanceId = base.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase() + '_' + Date.now();
+              
+              // Add the new instance
+              const newInstance = {
+                id: newInstanceId,
+                game: gameFile,
+                player: firstUnassigned
+              };
+              
+              this.gameInstances.push(newInstance);
+              await this.saveInstances();
+              
+              // Now swap the dragged player to this new instance
+              if (firstUnassigned !== playerName) {
+                await this.swapPlayer(playerName, newInstanceId);
+              }
+            }
+            return;
+          }
+
+          // Find the current instance of the dragged player
+          const currentInstance = this.gameInstances.find(inst => inst.player === playerName);
+          
+          if (targetInstance.player) {
+            // Target instance has a player - swap them
+            const targetPlayer = targetInstance.player;
+            
+            if (currentInstance) {
+              // Both players have instances - swap them
+              this.log(`Swapping ${playerName} with ${targetPlayer}`);
+              await this.swapPlayer(playerName, instanceId);
+              // The swap should handle both directions
+            } else {
+              // Dragged player is unassigned, target has player - move to empty spot
+              this.log(`Moving unassigned ${playerName} to instance ${instanceId}`);
+              await this.swapPlayer(playerName, instanceId);
+            }
+          } else {
+            // Target instance is empty - just assign the player
+            this.log(`Assigning ${playerName} to empty instance ${instanceId}`);
+            await this.swapPlayer(playerName, instanceId);
+          }
+        },
+
+        async handlePlayerToUnassignedDrop(playerName) {
+          // Find if player is currently assigned to an instance
+          const currentInstance = this.gameInstances.find(inst => inst.player === playerName);
+          
+          if (currentInstance) {
+            // Player is assigned - unassign them by swapping to empty instance
+            this.log(`Unassigning ${playerName} from instance ${currentInstance.id}`);
+            // For unassignment, we need to call swap with an empty instance_id
+            // This should be handled by the server when instance_id is empty or null
+            await this.swapPlayer(playerName, '');
+          } else {
+            // Player is already unassigned - do nothing
+            this.log(`${playerName} is already unassigned`);
           }
         },
       };
