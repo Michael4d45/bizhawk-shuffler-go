@@ -26,6 +26,7 @@ type Controller struct {
 	saveStateFetcher types.SaveStateFetcher
 }
 
+// NewController creates a new Controller with the given dependencies.
 func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error) *Controller {
 	c := &Controller{
 		cfg:       cfg,
@@ -40,11 +41,8 @@ func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.
 	return c
 }
 
-// Note: saveStateFetcher abstraction in place (currently HTTP only). Future composite
-// implementation will wrap this to attempt peer retrieval before HTTP fallback.
-
 // Handle processes a single incoming command. It launches goroutines for
-// commands that should run asynchronously (keeps original behavior).
+// commands that should run asynchronously to maintain responsiveness.
 func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	sendAck := func(id string) { _ = c.writeJSON(types.Command{Cmd: types.CmdAck, ID: id}) }
 	sendNack := func(id, reason string) {
@@ -146,7 +144,6 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	case types.CmdClearSaves:
 		go func(id string) {
 
-			// delete files in ./saves directory
 			files, err := os.ReadDir("./saves")
 			if err != nil {
 				log.Printf("Failed to read saves directory: %v", err)
@@ -223,7 +220,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 						}
 					}
 				}
-				// extras from main_games when primary is in instanceGames
+				// Add extra files from main_games if the primary game is active
 				for _, entry := range mainGames {
 					if _, isActive := games[entry.File]; isActive {
 						for _, extra := range entry.ExtraFiles {
@@ -353,16 +350,23 @@ type HTTPSaveStateFetcher struct {
 	api *API
 }
 
+// EnsureSaveState downloads the save state for the given instance ID if it exists.
 func (h *HTTPSaveStateFetcher) EnsureSaveState(instanceID string) error {
 	return h.api.EnsureSaveState(instanceID)
 }
+
+// UploadSaveState uploads the current save state for the given instance ID.
 func (h *HTTPSaveStateFetcher) UploadSaveState(instanceID string) error {
 	return h.api.UploadSaveState(instanceID)
 }
+
+// ValidateSaveStateVersion checks if the local save state version matches the server's.
 func (h *HTTPSaveStateFetcher) ValidateSaveStateVersion(instanceID string) (bool, error) {
 	// Basic implementation: always return true (no local cache verification yet)
 	return true, nil
 }
+
+// GetSaveStateVersion retrieves the save state version for the given instance ID.
 func (h *HTTPSaveStateFetcher) GetSaveStateVersion(instanceID string) (types.SaveStateVersion, error) {
 	// Not yet implemented: would require manifest lookup; return zero + not found
 	return types.SaveStateVersion{}, fmt.Errorf("not implemented")
