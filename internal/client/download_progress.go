@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"sync"
 	"time"
 )
 
@@ -15,6 +16,7 @@ type ProgressTracker struct {
 	startTime  time.Time
 	lastUpdate time.Time
 	width      int // width of progress bar
+	mu         sync.Mutex
 }
 
 // NewProgressTracker creates a new progress tracker for a file download
@@ -54,6 +56,7 @@ func (pr *ProgressReader) Read(p []byte) (int, error) {
 
 // Update increments the downloaded bytes and displays progress
 func (pt *ProgressTracker) Update(bytes int64) {
+	pt.mu.Lock()
 	pt.downloaded += bytes
 	now := time.Now()
 
@@ -62,10 +65,12 @@ func (pt *ProgressTracker) Update(bytes int64) {
 		pt.display()
 		pt.lastUpdate = now
 	}
+	pt.mu.Unlock()
 }
 
 // display shows the current progress in pacman style
 func (pt *ProgressTracker) display() {
+	// caller must hold pt.mu when calling display for consistent output
 	// Calculate stats
 	var percentage float64
 	var speed float64
@@ -116,21 +121,28 @@ func (pt *ProgressTracker) display() {
 
 // Finish completes the progress display
 func (pt *ProgressTracker) Finish() {
+	pt.mu.Lock()
 	if pt.downloaded < pt.totalSize {
 		pt.downloaded = pt.totalSize
 		pt.display()
 	}
+	pt.mu.Unlock()
 	fmt.Println()
 }
 
 // GetDownloaded returns the current downloaded bytes
 func (pt *ProgressTracker) GetDownloaded() int64 {
-	return pt.downloaded
+	pt.mu.Lock()
+	v := pt.downloaded
+	pt.mu.Unlock()
+	return v
 }
 
 // Error displays an error and moves to next line
 func (pt *ProgressTracker) Error(err error) {
+	pt.mu.Lock()
 	fmt.Printf("\r %-50s ERROR: %v\n", pt.filename, err)
+	pt.mu.Unlock()
 }
 
 // formatBytes formats byte counts in human readable form
@@ -157,6 +169,7 @@ func formatDuration(d time.Duration) string {
 // DownloadProgressManager manages multiple concurrent downloads
 type DownloadProgressManager struct {
 	activeDownloads map[string]*ProgressTracker
+	mu              sync.Mutex
 }
 
 // NewDownloadProgressManager creates a new download progress manager
@@ -169,23 +182,35 @@ func NewDownloadProgressManager() *DownloadProgressManager {
 // StartDownload begins tracking a new download
 func (dpm *DownloadProgressManager) StartDownload(filename string, totalSize int64) *ProgressTracker {
 	tracker := NewProgressTracker(filename, totalSize)
+	dpm.mu.Lock()
 	dpm.activeDownloads[filename] = tracker
+	dpm.mu.Unlock()
 	return tracker
 }
 
 // FinishDownload completes tracking for a download
 func (dpm *DownloadProgressManager) FinishDownload(filename string) {
-	if tracker, exists := dpm.activeDownloads[filename]; exists {
-		tracker.Finish()
+	dpm.mu.Lock()
+	tracker, exists := dpm.activeDownloads[filename]
+	if exists {
 		delete(dpm.activeDownloads, filename)
+	}
+	dpm.mu.Unlock()
+	if exists && tracker != nil {
+		tracker.Finish()
 	}
 }
 
 // ErrorDownload marks a download as errored
 func (dpm *DownloadProgressManager) ErrorDownload(filename string, err error) {
-	if tracker, exists := dpm.activeDownloads[filename]; exists {
-		tracker.Error(err)
+	dpm.mu.Lock()
+	tracker, exists := dpm.activeDownloads[filename]
+	if exists {
 		delete(dpm.activeDownloads, filename)
+	}
+	dpm.mu.Unlock()
+	if exists && tracker != nil {
+		tracker.Error(err)
 	}
 }
 
