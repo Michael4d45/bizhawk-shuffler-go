@@ -95,18 +95,14 @@ func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.withLock(func() {
+		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if b.MinInterval != 0 {
-				s.state.MinIntervalSecs = b.MinInterval
+				st.MinIntervalSecs = b.MinInterval
 			}
 			if b.MaxInterval != 0 {
-				s.state.MaxIntervalSecs = b.MaxInterval
+				st.MaxIntervalSecs = b.MaxInterval
 			}
-			s.state.UpdatedAt = time.Now()
 		})
-		if err := s.saveState(); err != nil {
-			fmt.Printf("saveState error: %v\n", err)
-		}
 		s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)

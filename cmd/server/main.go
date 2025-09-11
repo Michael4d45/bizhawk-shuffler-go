@@ -29,7 +29,7 @@ func main() {
 			chosenHost = persisted
 		}
 	}
-	s.UpdateHostIfChanged(chosenHost)
+	s.SetHost(chosenHost)
 
 	chosenPort := *port
 	if chosenPort == 8080 {
@@ -37,7 +37,7 @@ func main() {
 			chosenPort = persisted
 		}
 	}
-	s.UpdatePortIfChanged(chosenPort)
+	s.SetPort(chosenPort)
 
 	addr := fmt.Sprintf("%s:%d", chosenHost, chosenPort)
 	mux := http.NewServeMux()

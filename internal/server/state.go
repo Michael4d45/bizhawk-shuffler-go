@@ -64,7 +64,9 @@ func (s *Server) loadState() {
 	s.withLock(func() {
 		s.state = tmp
 	})
-	s.saveState()
+	if err := s.saveState(); err != nil {
+		log.Printf("failed to persist state after load: %v", err)
+	}
 	log.Printf("loaded state from %s", "state.json")
 }
 

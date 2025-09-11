@@ -4,6 +4,8 @@ import (
 	"fmt"
 	"math/rand"
 	"time"
+
+	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
 // performSwap dispatches to the appropriate mode implementation.
@@ -42,13 +44,9 @@ func (s *Server) schedulerLoop() {
 			interval = 300
 		}
 		nextAt := time.Now().Add(time.Duration(interval) * time.Second).Unix()
-		s.withLock(func() {
-			s.state.NextSwapAt = nextAt
-			s.state.UpdatedAt = time.Now()
+		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+			st.NextSwapAt = nextAt
 		})
-		if err := s.saveState(); err != nil {
-			fmt.Printf("saveState error: %v\n", err)
-		}
 		timer := time.NewTimer(time.Duration(interval) * time.Second)
 		select {
 		case <-timer.C:

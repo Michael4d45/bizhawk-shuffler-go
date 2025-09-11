@@ -65,11 +65,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				pname = s.findPlayerNameForClient(client)
 			})
 			if pname != "" {
-				s.withLock(func() {
-					pl := s.state.Players[pname]
+				_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+					pl := st.Players[pname]
 					pl.PingMs = int(rtt.Milliseconds())
-					s.state.Players[pname] = pl
-					s.state.UpdatedAt = time.Now()
+					st.Players[pname] = pl
 				})
 			}
 		}
@@ -128,21 +127,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		close(client.sendCh)
 		writeWG.Wait()
 		// remove connection and mark player disconnected under lock
-		s.withLock(func() {
+		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if cl, ok := s.conns[c]; ok {
 				name := s.findPlayerNameForClient(cl)
 				if name != "" {
-					pl := s.state.Players[name]
+					pl := st.Players[name]
 					pl.Connected = false
-					s.state.Players[name] = pl
+					st.Players[name] = pl
 					delete(s.players, name)
 				}
 				delete(s.conns, c)
 			}
 		})
-		if err := s.saveState(); err != nil {
-			fmt.Printf("saveState error: %v\n", err)
-		}
 		if err := c.Close(); err != nil {
 			log.Printf("websocket close error: %v", err)
 		}
@@ -198,20 +194,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			if pname != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
 					if hf, ok := pl["has_files"].(bool); ok {
-						s.withLock(func() {
-							p := s.state.Players[pname]
+						_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+							p := st.Players[pname]
 							p.HasFiles = hf
-							s.state.Players[pname] = p
-							s.state.UpdatedAt = time.Now()
+							st.Players[pname] = p
 						})
-						var updatedAt time.Time
-						s.withRLock(func() {
-							updatedAt = s.state.UpdatedAt
-						})
-						if err := s.saveState(); err != nil {
-							fmt.Printf("saveState error: %v\n", err)
-						}
-						s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": updatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 						continue
 					}
 				}
@@ -233,22 +220,20 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 				var instances []types.GameSwapInstance
 				var mainGames []types.GameEntry
-				s.withLock(func() {
-					s.state.Players[name] = player
+				var games []string
+				_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+					st.Players[name] = player
 					s.conns[c] = client
 					s.players[name] = client
-					instances = append([]types.GameSwapInstance{}, s.state.GameSwapInstances...)
-					mainGames = append([]types.GameEntry{}, s.state.MainGames...)
+					instances = append([]types.GameSwapInstance{}, st.GameSwapInstances...)
+					mainGames = append([]types.GameEntry{}, st.MainGames...)
+					games = append([]string{}, st.Games...)
 				})
-
-				if err := s.saveState(); err != nil {
-					fmt.Printf("[ERROR] saveState error: %v\n", err)
-				}
 
 				payload := map[string]any{
 					"game_instances": instances,
 					"main_games":     mainGames,
-					"games":          s.state.Games,
+					"games":          games,
 				}
 				select {
 				case client.sendCh <- types.Command{

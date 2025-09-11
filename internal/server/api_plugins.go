@@ -216,14 +216,11 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 				http.Error(w, "failed to remove plugin: "+err.Error(), http.StatusInternalServerError)
 				return
 			}
-			s.withLock(func() {
-				if s.state.Plugins != nil {
-					delete(s.state.Plugins, pluginName)
+			_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+				if st.Plugins != nil {
+					delete(st.Plugins, pluginName)
 				}
 			})
-			if err := s.saveState(); err != nil {
-				log.Printf("saveState error after plugin delete: %v", err)
-			}
 			w.WriteHeader(http.StatusOK)
 			if _, err := w.Write([]byte("ok")); err != nil {
 				log.Printf("write response error: %v", err)
@@ -260,13 +257,13 @@ func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	s.withLock(func() {
-		if s.state.Plugins == nil {
-			s.state.Plugins = make(map[string]types.Plugin)
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		if st.Plugins == nil {
+			st.Plugins = make(map[string]types.Plugin)
 		}
 
 		// Load plugin metadata if not already loaded
-		plugin, exists := s.state.Plugins[pluginName]
+		plugin, exists := st.Plugins[pluginName]
 		if !exists {
 			if p := s.loadPluginMetadata(pluginName); p != nil {
 				plugin = *p
@@ -275,11 +272,8 @@ func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request
 
 		plugin.Enabled = true
 		plugin.Status = types.PluginStatusEnabled
-		s.state.Plugins[pluginName] = plugin
+		st.Plugins[pluginName] = plugin
 	})
-	if err := s.saveState(); err != nil {
-		log.Printf("saveState error: %v", err)
-	}
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("ok")); err != nil {
 		log.Printf("write response error: %v", err)
@@ -294,13 +288,13 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 	}
 
 	var exists bool
-	s.withLock(func() {
-		if s.state.Plugins == nil {
-			s.state.Plugins = make(map[string]types.Plugin)
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		if st.Plugins == nil {
+			st.Plugins = make(map[string]types.Plugin)
 		}
 		// Avoid shadowing the outer 'exists' variable. Use a local ok and set
 		// the outer flag so it is visible after the closure.
-		plugin, ok := s.state.Plugins[pluginName]
+		plugin, ok := st.Plugins[pluginName]
 		if ok {
 			exists = true
 		} else {
@@ -315,14 +309,11 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 		// Update status to disabled
 		plugin.Enabled = false
 		plugin.Status = types.PluginStatusDisabled
-		s.state.Plugins[pluginName] = plugin
+		st.Plugins[pluginName] = plugin
 	})
 	if !exists {
 		http.Error(w, "plugin not found", http.StatusNotFound)
 		return
-	}
-	if err := s.saveState(); err != nil {
-		log.Printf("saveState error: %v", err)
 	}
 	w.WriteHeader(http.StatusOK)
 	if _, err := w.Write([]byte("ok")); err != nil {

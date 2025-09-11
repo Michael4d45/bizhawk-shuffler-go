@@ -127,16 +127,14 @@ func (s *Server) handleSaveDownload(w http.ResponseWriter, r *http.Request) {
 
 // setInstanceFileState updates the file state for a given instance ID
 func (s *Server) setInstanceFileState(instanceID string, state types.FileState) {
-	s.withLock(func() {
-		for i, instance := range s.state.GameSwapInstances {
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		for i, instance := range st.GameSwapInstances {
 			if instance.ID == instanceID {
-				s.state.GameSwapInstances[i].FileState = state
-				s.state.UpdatedAt = time.Now()
+				st.GameSwapInstances[i].FileState = state
 				break
 			}
 		}
 	})
-	_ = s.saveState()
 }
 
 // waitForFileReady waits for the file state to become ready or none, with timeout

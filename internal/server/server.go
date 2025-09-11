@@ -3,7 +3,6 @@ package server
 import (
 	"context"
 	"fmt"
-	"log"
 	"net/http"
 	"os"
 	"sync"
@@ -109,64 +108,22 @@ func (s *Server) broadcast(cmd types.Command) {
 	}
 }
 
-// UpdateHostIfChanged sets host in state if different and persists.
-func (s *Server) UpdateHostIfChanged(host string) {
-	// Update under lock, but copy state out before releasing so we can persist
-	var changed bool
-	var st types.ServerState
-	s.withLock(func() {
-		if s.state.Host == host {
-			changed = false
-			return
-		}
-		s.state.Host = host
-		s.state.UpdatedAt = time.Now()
-		st = s.state
-		changed = true
+func (s *Server) SetHost(host string) {
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.Host = host
 	})
-	if !changed {
-		return
-	}
-	if err := s.saveState(); err != nil {
-		log.Printf("failed to persist host: %v", err)
-	} else {
-		log.Printf("host updated to %s", st.Host)
-	}
 }
 
-// PersistedHost returns the persisted host if present.
 func (s *Server) PersistedHost() string { return s.SnapshotState().Host }
 
-// UpdatePortIfChanged sets port in state if different and persists.
-func (s *Server) UpdatePortIfChanged(port int) {
-	// Update under lock, but copy state out before releasing so we can persist
-	var changed bool
-	var st types.ServerState
-	s.withLock(func() {
-		if s.state.Port == port {
-			changed = false
-			return
-		}
-		s.state.Port = port
-		s.state.UpdatedAt = time.Now()
-		st = s.state
-		changed = true
+func (s *Server) SetPort(port int) {
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.Port = port
 	})
-	if !changed {
-		return
-	}
-	if err := s.saveState(); err != nil {
-		log.Printf("failed to persist port: %v", err)
-	} else {
-		log.Printf("port updated to %d", st.Port)
-	}
 }
 
-// PersistedPort returns the persisted port if present.
 func (s *Server) PersistedPort() int { return s.SnapshotState().Port }
 
-// TODO: Add methods for managing discovery broadcaster
-// StartBroadcaster initializes and starts the discovery broadcaster
 func (s *Server) StartBroadcaster(ctx context.Context) error {
 	var startedErr error
 	s.withLock(func() {

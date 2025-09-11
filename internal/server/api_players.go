@@ -96,8 +96,8 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing player", http.StatusBadRequest)
 		return
 	}
-	s.withLock(func() {
-		delete(s.state.Players, b.Player)
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		delete(st.Players, b.Player)
 		if cl, ok := s.players[b.Player]; ok {
 			for c, client := range s.conns {
 				if client == cl {
@@ -108,12 +108,7 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 			}
 			delete(s.players, b.Player)
 		}
-		s.state.UpdatedAt = time.Now()
 	})
-	if err := s.saveState(); err != nil {
-		fmt.Printf("saveState error: %v\n", err)
-	}
-	s.broadcast(types.Command{Cmd: types.CmdStateUpdate, Payload: map[string]any{"updated_at": s.state.UpdatedAt}, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
@@ -134,14 +129,13 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	var players []string
-	s.withLock(func() {
-		for name, player := range s.state.Players {
+	_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+		for name, player := range st.Players {
 			players = append(players, name)
 			player.Game = b.Game
-			s.state.Players[name] = player
+			st.Players[name] = player
 		}
 	})
-	_ = s.saveState()
 	results := map[string]string{}
 	var mu sync.Mutex
 	var wg sync.WaitGroup

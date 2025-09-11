@@ -106,13 +106,9 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
 			return
 		}
-		s.withLock(func() {
-			s.state.Mode = b.Mode
-			s.state.UpdatedAt = time.Now()
+		_ = s.UpdateStateAndPersist(func(st *types.ServerState) {
+			st.Mode = b.Mode
 		})
-		if err := s.saveState(); err != nil {
-			fmt.Printf("saveState error: %v\n", err)
-		}
 		if _, err := w.Write([]byte("ok")); err != nil {
 			fmt.Printf("write response error: %v\n", err)
 		}
