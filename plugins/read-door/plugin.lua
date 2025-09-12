@@ -28,6 +28,21 @@ local games = {
         size = 2,
         domain = nil,
         desc = "room id"
+    },
+    ["super mario bros. 3"] = {
+        domain = nil,
+        addr = 0x0545,
+        size = 1,
+        -- https://datacrystal.tcrf.net/wiki/Super_Mario_Bros._3/RAM_map
+        -- Level start entrance effect.
+        --  0-normal, 1-slide
+        --  2-pipe upward
+        --  3-pipe downward
+        --  4-pipe from right
+        --  5-pipe from left
+        --  6-jump on anchor of ship
+        --  7-scroll right and down
+        desc = "world/level"
     }
 }
 
@@ -152,6 +167,7 @@ local function readDoor()
     end
 
     if not cfg or not cfg.addr then
+        console.log("Read Door: No config found for current game: \"" .. tostring(curLower) .. "\"")
         return
     end
 

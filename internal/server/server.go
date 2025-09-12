@@ -33,17 +33,18 @@ var ErrTimeout = fmt.Errorf("timeout waiting for result")
 func New() *Server {
 	s := &Server{
 		state: types.ServerState{
-			Running:           false,
-			SwapEnabled:       true,
-			Mode:              types.GameModeSync,
-			MainGames:         []types.GameEntry{},
-			Plugins:           make(map[string]types.Plugin),
-			GameSwapInstances: []types.GameSwapInstance{},
-			Games:             []string{},
-			Players:           map[string]types.Player{},
-			UpdatedAt:         time.Now(),
-			MinIntervalSecs:   5,
-			MaxIntervalSecs:   300,
+			Running:             false,
+			SwapEnabled:         true,
+			Mode:                types.GameModeSync,
+			MainGames:           []types.GameEntry{},
+			Plugins:             make(map[string]types.Plugin),
+			GameSwapInstances:   []types.GameSwapInstance{},
+			Games:               []string{},
+			Players:             map[string]types.Player{},
+			UpdatedAt:           time.Now(),
+			MinIntervalSecs:     5,
+			MaxIntervalSecs:     300,
+			PreventSameGameSwap: false, // Default to false
 		},
 		conns:       make(map[*websocket.Conn]*wsClient),
 		players:     make(map[string]*wsClient),
@@ -71,6 +72,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/do_swap", s.apiDoSwap)
 	mux.HandleFunc("/api/mode/setup", s.apiModeSetup)
 	mux.HandleFunc("/api/mode", s.apiMode)
+	mux.HandleFunc("/api/toggle_prevent_same_game", s.apiTogglePreventSameGame)
 	mux.HandleFunc("/files/", s.handleFiles)
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("/files/list.json", s.handleFilesList)

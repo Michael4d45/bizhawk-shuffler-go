@@ -198,6 +198,8 @@ type ServerState struct {
 
 	Games             []string           `json:"games,omitempty"`
 	GameSwapInstances []GameSwapInstance `json:"game_instances,omitempty"`
+	// PreventSameGameSwap prevents players from being swapped to the same game they're currently playing
+	PreventSameGameSwap bool `json:"prevent_same_game_swap"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
