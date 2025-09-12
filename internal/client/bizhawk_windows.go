@@ -3,11 +3,13 @@
 package client
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
+	"time"
 )
 
 func (c *BizHawkController) checkAndInstallVCRedist() {
@@ -15,26 +17,7 @@ func (c *BizHawkController) checkAndInstallVCRedist() {
 
 	// Check for VC++ redist by looking for the installed files
 	// This is a simpler approach that doesn't require registry access
-	possiblePaths := []string{
-		`C:\Windows\System32\vcruntime140.dll`,
-		`C:\Windows\SysWOW64\vcruntime140.dll`,
-	}
-
-	log.Printf("[DEBUG] checkAndInstallVCRedist: Checking %d possible VC++ redistributable paths", len(possiblePaths))
-
-	vcInstalled := false
-	for i, path := range possiblePaths {
-		log.Printf("[DEBUG] checkAndInstallVCRedist: Checking path %d/%d: %s", i+1, len(possiblePaths), path)
-		if _, err := os.Stat(path); err == nil {
-			log.Printf("[DEBUG] checkAndInstallVCRedist: Found VC++ redistributable at: %s", path)
-			vcInstalled = true
-			break
-		} else {
-			log.Printf("[DEBUG] checkAndInstallVCRedist: Path not found or not accessible: %s (error: %v)", path, err)
-		}
-	}
-
-	if vcInstalled {
+	if checkVCRedistInstalled() {
 		log.Printf("[INFO] checkAndInstallVCRedist: VC++ redistributables appear to be installed (found runtime DLLs)")
 		return
 	}
@@ -82,18 +65,53 @@ func (c *BizHawkController) installVCRedist() {
 	log.Printf("[INFO] installVCRedist: Installing VC++ redistributable...")
 	log.Printf("[DEBUG] installVCRedist: Running command: %s /quiet /norestart", vcPath)
 
-	cmd := exec.Command(vcPath, "/quiet", "/norestart")
+	// Add timeout to prevent hanging
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+
+	cmd := exec.CommandContext(ctx, vcPath, "/quiet", "/norestart")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	log.Printf("[DEBUG] installVCRedist: Starting installation process...")
+	log.Printf("[DEBUG] installVCRedist: Starting installation process with 20-second timeout...")
 	fmt.Println("installVCRedist: This may take a few moments...")
 	if err := cmd.Run(); err != nil {
-		log.Printf("[ERROR] installVCRedist: Failed to install VC++ redistributable: %v", err)
-		log.Printf("[DEBUG] installVCRedist: Command exit code: %d", cmd.ProcessState.ExitCode())
+		if ctx.Err() == context.DeadlineExceeded {
+			log.Printf("[ERROR] installVCRedist: Installation timed out after 20 seconds")
+			// Check again if VC++ is installed
+			log.Printf("[INFO] installVCRedist: Verifying if VC++ redistributable is now installed after timeout...")
+			if checkVCRedistInstalled() {
+				return
+			}
+			log.Printf("[ERROR] installVCRedist: VC++ redistributable installation failed due to timeout")
+		} else {
+			log.Printf("[ERROR] installVCRedist: Failed to install VC++ redistributable: %v", err)
+			log.Printf("[DEBUG] installVCRedist: Command exit code: %d", cmd.ProcessState.ExitCode())
+		}
 	} else {
 		log.Printf("[INFO] installVCRedist: VC++ redistributable installed successfully")
 		log.Printf("[DEBUG] installVCRedist: Installation completed without errors")
 	}
 	fmt.Println("installVCRedist: Installation process complete.")
+}
+
+func checkVCRedistInstalled() bool {
+	possiblePaths := []string{
+		`C:\Windows\System32\vcruntime140.dll`,
+		`C:\Windows\SysWOW64\vcruntime140.dll`,
+	}
+	vcInstalled := false
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			log.Printf("[DEBUG] installVCRedist: Found VC++ redistributable at: %s", path)
+			vcInstalled = true
+			break
+		}
+	}
+	if vcInstalled {
+		log.Printf("[INFO] installVCRedist: VC++ redistributable appears to be installed despite timeout")
+	} else {
+		log.Printf("[ERROR] installVCRedist: VC++ redistributable still not found after installation attempt")
+	}
+	return vcInstalled
 }
