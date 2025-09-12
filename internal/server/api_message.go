@@ -143,7 +143,7 @@ func (s *Server) apiMessageAll(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]interface{}{
-		"result":  "ok",
+		"result": "ok",
 	}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}

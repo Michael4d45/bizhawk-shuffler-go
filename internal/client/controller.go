@@ -109,22 +109,19 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					instanceID = iid
 				}
 			}
-			if game == "" {
-				sendNack(id, "missing game")
-				return
-			}
-			ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-			log.Printf("ensuring ROM present for game=%s", game)
-			if err := c.progressTracking.EnsureFileWithProgress(ctx2, game); err != nil {
+			if game != "" {
+				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
+				log.Printf("ensuring ROM present for game=%s", game)
+				if err := c.progressTracking.EnsureFileWithProgress(ctx2, game); err != nil {
+					cancel2()
+					sendNack(id, "download failed: "+err.Error())
+					return
+				}
 				cancel2()
-				sendNack(id, "download failed: "+err.Error())
-				return
 			}
-			cancel2()
 			log.Printf("sending swap to lua for game=%s", game)
 
 			_ = c.bipc.SendSave(ctx)
-
 			if err := c.EnsureSaveState(instanceID); err != nil {
 				sendNack(id, "save state orchestration failed: "+err.Error())
 				return

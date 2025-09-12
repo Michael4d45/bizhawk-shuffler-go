@@ -11,13 +11,6 @@ Always reference these instructions first and fallback to search or bash command
 - **Build all components**: `make all` -- takes 1-20 seconds depending on dependency cache. NEVER CANCEL. Set timeout to 60+ seconds for first build.
 - **Build server only**: `make server` -- takes <1 second incremental. NEVER CANCEL. Set timeout to 30+ seconds.
 - **Build client only**: `make client` -- takes <1 second incremental. NEVER CANCEL. Set timeout to 30+ seconds.
-- **Alternative build method (README style)**: 
-  ```bash
-  mkdir -p bin/server bin/client
-  cd cmd/server && go build -o ../../bin/server/bizshuffle-server
-  cd cmd/client && go build -o ../../bin/client/bizshuffle-client
-  # Note: Manual build doesn't copy web UI, plugins, or Lua script
-  ```
 
 ### Dependencies and Modules
 - **Download dependencies**: Dependencies download automatically during first build

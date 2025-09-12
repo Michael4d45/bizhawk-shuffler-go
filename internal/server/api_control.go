@@ -80,6 +80,15 @@ func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
+func (s *Server) apiTogglePreventSameGame(w http.ResponseWriter, r *http.Request) {
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
+		st.PreventSameGameSwap = !st.PreventSameGameSwap
+	})
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}
+
 // apiMode sets or reads the swap mode
 func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 	if r.Method == http.MethodGet {

@@ -20,15 +20,17 @@ import (
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
+	"golang.org/x/sys/windows/registry"
 )
 
 // BizHawkController manages BizHawk installation, download and launching.
 type BizHawkController struct {
-	httpClient *http.Client
-	cfg        Config
-	api        *API
-	bipc       *BizhawkIPC
-	ws         *WSClient
+	httpClient  *http.Client
+	cfg         Config
+	api         *API
+	bipc        *BizhawkIPC
+	wsClient    *WSClient
+	initialized bool
 }
 
 // NewBizHawkController creates a new controller with provided API, http client and config.
@@ -36,7 +38,7 @@ func NewBizHawkController(api *API, httpClient *http.Client, cfg Config, bipc *B
 	if httpClient == nil {
 		httpClient = http.DefaultClient
 	}
-	return &BizHawkController{httpClient: httpClient, cfg: cfg, api: api, bipc: bipc, ws: ws}
+	return &BizHawkController{httpClient: httpClient, cfg: cfg, api: api, bipc: bipc, wsClient: ws}
 }
 
 // DownloadFile downloads a URL to the given destination path.
@@ -202,42 +204,95 @@ func (c *BizHawkController) EnsureBizHawkInstalled() error {
 	}
 
 	// choose expected exe path inside installDir, prefer OS-specific name
+	c.installDependencies()
 	expected := c.cfg["bizhawk_path"]
 	if _, err := os.Stat(expected); os.IsNotExist(err) {
-		log.Printf("BizHawk not found at %s, downloading...", expected)
-		// pick extractor based on URL
-		if strings.HasSuffix(strings.ToLower(downloadURL), ".zip") {
-			if err := c.DownloadAndExtractZip(downloadURL, zipFile, installDir); err != nil {
-				return fmt.Errorf("failed to download/extract BizHawk: %w", err)
-			}
-		} else if strings.HasSuffix(strings.ToLower(downloadURL), ".tar.gz") || strings.HasSuffix(strings.ToLower(downloadURL), ".tgz") {
-			if err := c.DownloadAndExtractTarGz(downloadURL, zipFile, installDir); err != nil {
-				return fmt.Errorf("failed to download/extract BizHawk: %w", err)
-			}
-		} else {
-			// unknown archive type: attempt zip first
-			if err := c.DownloadAndExtractZip(downloadURL, zipFile, installDir); err != nil {
-				return fmt.Errorf("failed to download/extract BizHawk (unknown archive): %w", err)
-			}
+		if err := c.installEmulator(expected, downloadURL, zipFile, installDir); err != nil {
+			return fmt.Errorf("failed to install emulator: %w", err)
 		}
-		bizFilesURL := c.api.BizhawkFilesURL()
-		if err := c.DownloadAndExtractZip(bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
-			log.Printf("warning: failed to download BizhawkFiles.zip: %v", err)
-		}
-		// After extraction, list installDir contents for debugging
-		log.Printf("BizHawk installed into %s", installDir)
-		if entries, err := os.ReadDir(installDir); err == nil {
-			for _, e := range entries {
-				info, _ := e.Info()
-				log.Printf(" - %s (dir=%v mode=%v)", e.Name(), e.IsDir(), info.Mode())
-			}
-		} else {
-			log.Printf("EnsureBizHawkInstalled: failed to read installDir %s: %v", installDir, err)
-		}
-		// persist the computed path in cfg (caller should save cfg)
-		c.cfg["bizhawk_path"] = expected
+		return nil
 	}
 	return nil
+}
+
+func (c *BizHawkController) installEmulator(expected string, downloadURL string, zipFile string, installDir string) error {
+	log.Printf("BizHawk not found at %s, downloading...", expected)
+	// pick extractor based on URL
+	if strings.HasSuffix(strings.ToLower(downloadURL), ".zip") {
+		if err := c.DownloadAndExtractZip(downloadURL, zipFile, installDir); err != nil {
+			return fmt.Errorf("failed to download/extract BizHawk: %w", err)
+		}
+	} else if strings.HasSuffix(strings.ToLower(downloadURL), ".tar.gz") || strings.HasSuffix(strings.ToLower(downloadURL), ".tgz") {
+		if err := c.DownloadAndExtractTarGz(downloadURL, zipFile, installDir); err != nil {
+			return fmt.Errorf("failed to download/extract BizHawk: %w", err)
+		}
+	} else {
+		// unknown archive type: attempt zip first
+		if err := c.DownloadAndExtractZip(downloadURL, zipFile, installDir); err != nil {
+			return fmt.Errorf("failed to download/extract BizHawk (unknown archive): %w", err)
+		}
+	}
+	c.DownloadAndExtractExtraFiles(installDir)
+	// persist the computed path in cfg (caller should save cfg)
+	c.cfg["bizhawk_path"] = expected
+	return nil
+}
+
+func (c *BizHawkController) installDependencies() {
+	// Ensure Dependencies exist.
+	// MSVC++ redistributables
+	if runtime.GOOS == "windows" {
+		log.Printf("Checking if VC++ redistributables are already installed...")
+		// Check if VC++ redist is already installed by checking registry
+		k, err := registry.OpenKey(registry.LOCAL_MACHINE, `SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64`, registry.QUERY_VALUE)
+		if err == nil {
+			_ = k.Close()
+			log.Printf("VC++ redistributables already installed, skipping download and installation")
+		} else {
+			log.Printf("VC++ redistributables not found (registry check failed: %v), downloading and installing", err)
+			// Download and install
+			url := "https://aka.ms/vs/17/release/vc_redist.x64.exe"
+			vcPath := "vc_redist.x64.exe"
+			log.Printf("Downloading VC++ redistributable from %s to %s", url, vcPath)
+			if err := c.DownloadFile(url, vcPath); err != nil {
+				log.Printf("Failed to download VC++ redistributable: %v", err)
+			}
+			defer func() { _ = os.Remove(vcPath) }()
+			log.Printf("Installing VC++ redistributable...")
+			cmd := exec.Command(vcPath, "/quiet", "/norestart")
+			cmd.Stdout = os.Stdout
+			cmd.Stderr = os.Stderr
+			if err := cmd.Run(); err != nil {
+				log.Printf("Failed to install VC++ redistributable: %v", err)
+			}
+			log.Printf("VC++ redistributable installed successfully")
+		}
+	}
+}
+
+func (c *BizHawkController) DownloadAndExtractExtraFiles(installDir string) {
+	ticker := time.NewTicker(500 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		if c.api != nil {
+			break
+		}
+	}
+	bizFilesURL := c.api.BizhawkFilesURL()
+	if err := c.DownloadAndExtractZip(bizFilesURL, "BizhawkFiles.zip", installDir); err != nil {
+		log.Printf("warning: failed to download BizhawkFiles.zip: %v", err)
+	}
+	// After extraction, list installDir contents for debugging
+	log.Printf("BizHawk installed into %s", installDir)
+	if entries, err := os.ReadDir(installDir); err == nil {
+		for _, e := range entries {
+			info, _ := e.Info()
+			log.Printf(" - %s (dir=%v mode=%v)", e.Name(), e.IsDir(), info.Mode())
+		}
+	} else {
+		log.Printf("EnsureBizHawkInstalled: failed to read installDir %s: %v", installDir, err)
+	}
 }
 
 // LaunchBizHawk starts the BizHawk executable with environment variables and returns the *exec.Cmd.
@@ -391,6 +446,14 @@ func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error
 // The function blocks until the context is cancelled or a shutdown signal is
 // received and the process has been terminated. It returns any launch error.
 func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func()) error {
+	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
+	for {
+		<-ticker.C
+		if !c.initialized {
+			break
+		}
+	}
 	sigs := make(chan os.Signal, 1)
 	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
 	var bhCmd *exec.Cmd
@@ -571,7 +634,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 						log.Printf("ipc handler: failed to parse CMD line: %v", err)
 					} else {
 						log.Printf("ipc handler: parsed CMD: kind=%q fields=%v", cmd.Kind, cmd.Fields)
-						if err := c.ws.Send(
+						if err := c.wsClient.Send(
 							types.Command{
 								Cmd:     types.CmdTypeLua,
 								Payload: cmd,

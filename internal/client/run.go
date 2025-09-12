@@ -69,6 +69,18 @@ func New(args []string) (*Client, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	httpClient := &http.Client{Timeout: 0}
+
+	bhController := NewBizHawkController(nil, httpClient, cfg, nil, nil)
+	go func() {
+		if err := bhController.EnsureBizHawkInstalled(); err != nil {
+			_ = logFile.Close()
+			log.Printf("EnsureBizHawkInstalled: %v", err)
+			os.Exit(1)
+		}
+		bhController.initialized = true
+	}()
+
 	reader := bufio.NewReader(os.Stdin)
 	serverURL := serverFlag
 	for serverURL == "" {
@@ -164,8 +176,6 @@ func New(args []string) (*Client, error) {
 	}
 	_ = cfg.Save()
 
-	httpClient := &http.Client{Timeout: 0}
-
 	wsURL, serverHTTP, err := BuildWSAndHTTP(serverURL, cfg)
 	if err != nil {
 		_ = logFile.Close()
@@ -177,11 +187,11 @@ func New(args []string) (*Client, error) {
 	bipc := NewBizhawkIPC("127.0.0.1", 55355)
 
 	wsClient := NewWSClient(wsURL, api, bipc)
-	bhController := NewBizHawkController(api, httpClient, cfg, bipc, wsClient)
-	if err := bhController.EnsureBizHawkInstalled(); err != nil {
-		_ = logFile.Close()
-		return nil, fmt.Errorf("EnsureBizHawkInstalled: %w", err)
-	}
+
+	bhController.wsClient = wsClient
+	bhController.api = api
+	bhController.bipc = bipc
+
 	_ = cfg.Save()
 
 	// Initialize plugin sync manager
