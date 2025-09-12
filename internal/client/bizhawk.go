@@ -421,12 +421,17 @@ func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error
 // The function blocks until the context is cancelled or a shutdown signal is
 // received and the process has been terminated. It returns any launch error.
 func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func()) error {
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for {
-		<-ticker.C
-		if c.initialized {
-			break
+	log.Printf("LaunchAndManage: starting BizHawk process and managing lifecycle")
+	if !c.initialized {
+		log.Printf("BizHawkController not initialized; waiting to launch BizHawk\n")
+
+		ticker := time.NewTicker(100 * time.Millisecond)
+		defer ticker.Stop()
+		for {
+			<-ticker.C
+			if c.initialized {
+				break
+			}
 		}
 	}
 	sigs := make(chan os.Signal, 1)
