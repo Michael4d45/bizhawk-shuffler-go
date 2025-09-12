@@ -97,7 +97,7 @@ The client supports automatic server discovery with configurable timeouts:
 ```json
 {
   "discovery_enabled": "true",
-  "discovery_timeout_seconds": "10",
+  "discovery_timeout_seconds": "5",
   "multicast_address": "239.255.255.250:1900"
 }
 ```

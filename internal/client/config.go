@@ -119,7 +119,7 @@ func (c Config) EnsureDefaults() error {
 		c["discovery_enabled"] = "true"
 	}
 	if c["discovery_timeout_seconds"] == "" {
-		c["discovery_timeout_seconds"] = "10"
+		c["discovery_timeout_seconds"] = "5"
 	}
 	if c["multicast_address"] == "" {
 		c["multicast_address"] = "239.255.255.250:1900"

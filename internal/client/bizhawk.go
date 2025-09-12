@@ -219,7 +219,7 @@ func (c *BizHawkController) EnsureBizHawkInstalled() error {
 }
 
 func (c *BizHawkController) installEmulator(expected string, downloadURL string) error {
-	fmt.Println("Installing BizHawk emulator...")
+	log.Println("Installing BizHawk emulator...")
 	zipFile := filepath.Base(downloadURL)
 	// compute installDir based on extension: .zip -> name without .zip, .tar.gz/.tgz -> name without .tar.gz
 	installDir := strings.TrimSuffix(zipFile, filepath.Ext(zipFile))
@@ -254,7 +254,7 @@ func (c *BizHawkController) installEmulator(expected string, downloadURL string)
 	c.DownloadAndExtractExtraFiles(installDir)
 	// persist the computed path in cfg (caller should save cfg)
 	c.cfg["bizhawk_path"] = expected
-	fmt.Println("BizHawk installation complete.")
+	log.Println("BizHawk installation complete.")
 	return nil
 }
 

@@ -3,13 +3,12 @@
 package client
 
 import (
-	"context"
-	"fmt"
 	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"time"
+
+	"golang.org/x/sys/windows/registry"
 )
 
 func (c *BizHawkController) checkAndInstallVCRedist() {
@@ -63,36 +62,35 @@ func (c *BizHawkController) installVCRedist() {
 	}()
 
 	log.Printf("[INFO] installVCRedist: Installing VC++ redistributable...")
-	log.Printf("[DEBUG] installVCRedist: Running command: %s /quiet /norestart", vcPath)
+	logPath := filepath.Join(os.TempDir(), "vc_redist_install.log")
+	log.Printf("[DEBUG] installVCRedist: Running command: %s /quiet /norestart /log %s", vcPath, logPath)
 
-	// Add timeout to prevent hanging
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
-	defer cancel()
-
-	cmd := exec.CommandContext(ctx, vcPath, "/quiet", "/norestart")
+	cmd := exec.Command(vcPath, "/quiet", "/norestart", "/log", logPath)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	log.Printf("[DEBUG] installVCRedist: Starting installation process with 20-second timeout...")
-	fmt.Println("installVCRedist: This may take a few moments...")
+	log.Printf("[DEBUG] installVCRedist: Starting installation process...")
+	log.Println("installVCRedist: This may take a few moments...")
 	if err := cmd.Run(); err != nil {
-		if ctx.Err() == context.DeadlineExceeded {
-			log.Printf("[ERROR] installVCRedist: Installation timed out after 20 seconds")
-			// Check again if VC++ is installed
-			log.Printf("[INFO] installVCRedist: Verifying if VC++ redistributable is now installed after timeout...")
-			if checkVCRedistInstalled() {
-				return
-			}
-			log.Printf("[ERROR] installVCRedist: VC++ redistributable installation failed due to timeout")
-		} else {
-			log.Printf("[ERROR] installVCRedist: Failed to install VC++ redistributable: %v", err)
-			log.Printf("[DEBUG] installVCRedist: Command exit code: %d", cmd.ProcessState.ExitCode())
+		code := -1
+		if ps := cmd.ProcessState; ps != nil {
+			code = ps.ExitCode()
+		}
+		switch code {
+		case 3010:
+			log.Printf("[INFO] installVCRedist: VC++ redistributable installed successfully; reboot required (exit code 3010)")
+		default:
+			log.Printf("[ERROR] installVCRedist: Installer failed, exit code: %d, err: %v", code, err)
 		}
 	} else {
 		log.Printf("[INFO] installVCRedist: VC++ redistributable installed successfully")
-		log.Printf("[DEBUG] installVCRedist: Installation completed without errors")
 	}
-	fmt.Println("installVCRedist: Installation process complete.")
+	if isVCRedistPresentRegistry() || checkVCRedistInstalled() {
+		log.Printf("[INFO] installVCRedist: Verified VC++ presence after install")
+	} else {
+		log.Printf("[ERROR] installVCRedist: VC++ still not detected; see log: %s", logPath)
+	}
+	log.Println("installVCRedist: Installation process complete.")
 }
 
 func checkVCRedistInstalled() bool {
@@ -114,4 +112,30 @@ func checkVCRedistInstalled() bool {
 		log.Printf("[ERROR] installVCRedist: VC++ redistributable still not found after installation attempt")
 	}
 	return vcInstalled
+}
+
+func isVCRedistPresentRegistry() bool {
+	// Check registry for VC++ 2015-2022 redistributable
+	// This is more reliable than file presence check
+	keyPaths := []string{
+		`SOFTWARE\Microsoft\VisualStudio\14.0\VC\Runtimes\x64`,
+		`SOFTWARE\WOW6432Node\Microsoft\VisualStudio\14.0\VC\Runtimes\x64`,
+	}
+
+	for _, keyPath := range keyPaths {
+		key, err := registry.OpenKey(registry.LOCAL_MACHINE, keyPath, registry.QUERY_VALUE)
+		if err != nil {
+			continue
+		}
+		defer func() { _ = key.Close() }()
+
+		// Check if Installed value is 1
+		installed, _, err := key.GetIntegerValue("Installed")
+		if err == nil && installed == 1 {
+			log.Printf("[DEBUG] isVCRedistPresentRegistry: Found VC++ redistributable in registry at %s", keyPath)
+			return true
+		}
+	}
+	log.Printf("[DEBUG] isVCRedistPresentRegistry: VC++ redistributable not found in registry")
+	return false
 }
