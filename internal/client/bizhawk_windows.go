@@ -3,6 +3,7 @@
 package client
 
 import (
+	"fmt"
 	"log"
 	"os"
 	"os/exec"
@@ -86,6 +87,7 @@ func (c *BizHawkController) installVCRedist() {
 	cmd.Stderr = os.Stderr
 
 	log.Printf("[DEBUG] installVCRedist: Starting installation process...")
+	fmt.Println("installVCRedist: This may take a few moments...")
 	if err := cmd.Run(); err != nil {
 		log.Printf("[ERROR] installVCRedist: Failed to install VC++ redistributable: %v", err)
 		log.Printf("[DEBUG] installVCRedist: Command exit code: %d", cmd.ProcessState.ExitCode())
@@ -93,4 +95,5 @@ func (c *BizHawkController) installVCRedist() {
 		log.Printf("[INFO] installVCRedist: VC++ redistributable installed successfully")
 		log.Printf("[DEBUG] installVCRedist: Installation completed without errors")
 	}
+	fmt.Println("installVCRedist: Installation process complete.")
 }

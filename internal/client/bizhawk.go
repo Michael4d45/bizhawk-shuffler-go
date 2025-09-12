@@ -187,6 +187,39 @@ func (c *BizHawkController) EnsureBizHawkInstalled() error {
 		// No download URL and no path -> error: BizHawk required
 		return fmt.Errorf("bizhawk not configured: provide bizhawk_download_url or bizhawk_path in config")
 	}
+
+	// choose expected exe path inside installDir, prefer OS-specific name
+	var wg sync.WaitGroup
+	errChan := make(chan error, 1)
+
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		c.installDependencies()
+	}()
+
+	expected := c.cfg["bizhawk_path"]
+	if _, err := os.Stat(expected); os.IsNotExist(err) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := c.installEmulator(expected, downloadURL); err != nil {
+				errChan <- err
+			}
+		}()
+	}
+
+	wg.Wait()
+	select {
+	case err := <-errChan:
+		return fmt.Errorf("failed to install emulator: %w", err)
+	default:
+		return nil
+	}
+}
+
+func (c *BizHawkController) installEmulator(expected string, downloadURL string) error {
+	fmt.Println("Installing BizHawk emulator...")
 	zipFile := filepath.Base(downloadURL)
 	// compute installDir based on extension: .zip -> name without .zip, .tar.gz/.tgz -> name without .tar.gz
 	installDir := strings.TrimSuffix(zipFile, filepath.Ext(zipFile))
@@ -202,19 +235,6 @@ func (c *BizHawkController) EnsureBizHawkInstalled() error {
 		log.Printf("EnsureBizHawkInstalled: Getwd failed: %v", err)
 	}
 
-	// choose expected exe path inside installDir, prefer OS-specific name
-	c.installDependencies()
-	expected := c.cfg["bizhawk_path"]
-	if _, err := os.Stat(expected); os.IsNotExist(err) {
-		if err := c.installEmulator(expected, downloadURL, zipFile, installDir); err != nil {
-			return fmt.Errorf("failed to install emulator: %w", err)
-		}
-		return nil
-	}
-	return nil
-}
-
-func (c *BizHawkController) installEmulator(expected string, downloadURL string, zipFile string, installDir string) error {
 	log.Printf("BizHawk not found at %s, downloading...", expected)
 	// pick extractor based on URL
 	if strings.HasSuffix(strings.ToLower(downloadURL), ".zip") {
@@ -234,6 +254,7 @@ func (c *BizHawkController) installEmulator(expected string, downloadURL string,
 	c.DownloadAndExtractExtraFiles(installDir)
 	// persist the computed path in cfg (caller should save cfg)
 	c.cfg["bizhawk_path"] = expected
+	fmt.Println("BizHawk installation complete.")
 	return nil
 }
 
