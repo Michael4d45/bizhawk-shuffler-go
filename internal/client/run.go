@@ -69,6 +69,11 @@ func New(args []string) (*Client, error) {
 		return nil, fmt.Errorf("failed to load config: %w", err)
 	}
 
+	if err := cfg.EnsureDefaults(); err != nil {
+		_ = logFile.Close()
+		return nil, fmt.Errorf("EnsureDefaults: %w", err)
+	}
+
 	httpClient := &http.Client{Timeout: 0}
 
 	bhController := NewBizHawkController(nil, httpClient, cfg, nil, nil)
@@ -168,12 +173,6 @@ func New(args []string) (*Client, error) {
 		break
 	}
 
-	_ = cfg.Save()
-
-	if err := cfg.EnsureDefaults(); err != nil {
-		_ = logFile.Close()
-		return nil, fmt.Errorf("EnsureDefaults: %w", err)
-	}
 	_ = cfg.Save()
 
 	wsURL, serverHTTP, err := BuildWSAndHTTP(serverURL, cfg)
