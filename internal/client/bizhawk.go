@@ -425,7 +425,7 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 	defer ticker.Stop()
 	for {
 		<-ticker.C
-		if !c.initialized {
+		if c.initialized {
 			break
 		}
 	}
