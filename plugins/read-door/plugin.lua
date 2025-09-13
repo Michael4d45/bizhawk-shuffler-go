@@ -23,6 +23,8 @@ local games = {
     -- ["super metroid"] = { addr = 0x7E0F30, size = 2, domain = nil,
     --                       desc = "room id (example - replace with verified address)" },
     -- ["zelda a link to the past"] = { addr = 0x7E0ABC, size = 1, domain = nil, desc = "tilemap/room id" },
+    -- options for domain: nil (auto), "WRAM", "CART", "RAM", "System Bus", etc
+    -- size: 1 (byte), 2 (u16), 4 (u32) - use the smallest that fits the value
     ["legend of zelda, the - a link to the past (usa)"] = {
         addr = 0xA2,
         size = 2,
@@ -30,18 +32,9 @@ local games = {
         desc = "room id"
     },
     ["super mario bros. 3"] = {
-        domain = nil,
+        domain = 'WRAM',
         addr = 0x0545,
         size = 1,
-        -- https://datacrystal.tcrf.net/wiki/Super_Mario_Bros._3/RAM_map
-        -- Level start entrance effect.
-        --  0-normal, 1-slide
-        --  2-pipe upward
-        --  3-pipe downward
-        --  4-pipe from right
-        --  5-pipe from left
-        --  6-jump on anchor of ship
-        --  7-scroll right and down
         desc = "world/level"
     }
 }

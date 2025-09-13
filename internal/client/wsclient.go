@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log"
+	"net"
 	"runtime"
 	"sync"
 	"time"
@@ -125,7 +126,10 @@ func (w *WSClient) SendWithTimeout(cmd types.Command, timeout time.Duration) err
 // It reconnects automatically if the connection drops.
 func (w *WSClient) run() {
 	defer w.wg.Done()
-	dialer := websocket.Dialer{}
+	dialer := websocket.Dialer{
+		NetDial:          (&net.Dialer{Timeout: 5 * time.Second}).Dial,
+		HandshakeTimeout: 5 * time.Second,
+	}
 
 	for {
 		// stop if context is canceled

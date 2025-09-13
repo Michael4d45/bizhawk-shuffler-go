@@ -14,4 +14,5 @@ func main() {
 	}
 	c.Run()
 	log.Println("[main] client.Run() returned, exiting process")
+	os.Exit(0)
 }
