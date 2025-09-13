@@ -27,7 +27,7 @@ local games = {
     },
     ["super mario bros. 3"] = {
         domain = 'WRAM',
-        addr = 0x0545,
+        addr = 0x545,
         size = 1,
         desc = "world/level"
     },
@@ -41,7 +41,70 @@ local games = {
         -- Only consider entrance changes when this guard word matches.
         -- In USA 1.0 retail, 001C8540 is 0x00000000 during normal gameplay,
         -- and nonzero on title/file-select/attract modes.
-        guardWord = { addr = 0x001C8540, size = 4, equals = 0 }
+        guardWord = {
+            addr = 0x1C8540,
+            size = 4,
+            equals = 0
+        }
+    },
+    ["1942"] = {
+        addr = 0x438,
+        size = 1,
+        domain = "RAM",
+        desc = "current level (NES RAM) — DataCrystal RAM map ($0438 = Level)"
+    },
+    -- 8037D188 Current Animal
+    -- 0x01 - Banjo-Kazooie
+    -- 0x02 - Spider
+    -- 0x03 - Pumpkin
+    -- 0x04 - Walrus
+    -- 0x05 - Crocodile
+    -- 0x06 - Bee
+    -- 0x07 - Washing Machine
+    -- ["banjo-kazooie (usa)"] = {
+    --     addr = 0x0037D188,
+    --     size = 1,
+    --     domain = "RDRAM",
+    --     desc = "current animal (u8). RDRAM offset of virtual 0x8037D188 — DataCrystal / Hack64"
+    -- },
+    -- 
+    ['banjo-kazooie (usa)'] = {
+        addr = 0x36A9CC,
+        size = 2,
+        domain = "RDRAM",
+        desc = "Location change"
+    },
+    -- https://www.chronocompendium.com/Forums/index.php?topic=1764.0
+    ["chrono trigger (usa)"] = {
+        addr = 0x100,
+        size = 1,
+        domain = "WRAM",
+        desc = "map/room index (7E:0100 used by Chrono Compendium location offsets). Save-slot world in SRAM: 0x000005F3"
+    },
+    ["donkey kong country 2 - diddy's kong quest (usa) (en,fr)"] = {
+        addr = 0xD3, -- ?
+        size = 2,
+        domain = "WRAM",
+        desc = "current level id (WRAM) — p4plus2 / DonkeyHacks DKC2 RAM map"
+    },
+    ['felix the cat'] = {
+        addr = 0x305,
+        size = 1,
+        domain = "WRAM",
+        desc = "Location change"
+    },
+    ['pokemon - emerald version (usa, europe)'] = {
+        addr = 0x5DC0,
+        size = 2,
+        domain = "IWRAM",
+        desc = "Location change"
+    },
+    -- 5044 - routes; 5040 - towns
+    ['pokemon - leafgreen version (usa)'] = {
+        addr = 0x500D, -- ?
+        size = 2,
+        domain = "IWRAM",
+        desc = "map number (u8) at 0300500D"
     },
 }
 
@@ -93,27 +156,39 @@ local function safe_read(addr, size, domain, big_endian)
     -- 1 byte
     if size == 1 then
         local v = try_call(memory.readbyte, addr, domain)
-        if v ~= nil then return v end
+        if v ~= nil then
+            return v
+        end
         v = try_call(memory.read_u8, addr, domain)
-        if v ~= nil then return v end
+        if v ~= nil then
+            return v
+        end
         return nil
     end
     -- 2 bytes
     if size == 2 then
         if big_endian then
             local v = try_call(memory.read_u16_be, addr, domain)
-            if v ~= nil then return v end
+            if v ~= nil then
+                return v
+            end
             -- fallback manual BE
             local b0 = try_call(memory.readbyte, addr, domain)
             local b1 = try_call(memory.readbyte, addr + 1, domain)
-            if b0 and b1 then return b0 * 256 + b1 end
+            if b0 and b1 then
+                return b0 * 256 + b1
+            end
         else
             local v = try_call(memory.read_u16_le, addr, domain)
-            if v ~= nil then return v end
+            if v ~= nil then
+                return v
+            end
             -- fallback manual LE
             local b0 = try_call(memory.readbyte, addr, domain)
             local b1 = try_call(memory.readbyte, addr + 1, domain)
-            if b0 and b1 then return b0 + b1 * 256 end
+            if b0 and b1 then
+                return b0 + b1 * 256
+            end
         end
         return nil
     end
@@ -121,7 +196,9 @@ local function safe_read(addr, size, domain, big_endian)
     if size == 4 then
         if big_endian then
             local v = try_call(memory.read_u32_be, addr, domain)
-            if v ~= nil then return v end
+            if v ~= nil then
+                return v
+            end
             -- fallback manual BE
             local b0 = try_call(memory.readbyte, addr, domain)
             local b1 = try_call(memory.readbyte, addr + 1, domain)
@@ -132,7 +209,9 @@ local function safe_read(addr, size, domain, big_endian)
             end
         else
             local v = try_call(memory.read_u32_le, addr, domain)
-            if v ~= nil then return v end
+            if v ~= nil then
+                return v
+            end
             -- fallback manual LE
             local b0 = try_call(memory.readbyte, addr, domain)
             local b1 = try_call(memory.readbyte, addr + 1, domain)
@@ -176,9 +255,13 @@ end
 -- Determine endianness hint based on domain (simple heuristic):
 -- N64 RDRAM uses big-endian for 16/32-bit values; most others are little-endian.
 local function is_big_endian_domain(domain)
-    if not domain then return false end
+    if not domain then
+        return false
+    end
     local d = domain:lower()
-    if d:find("rdram") then return true end
+    if d:find("rdram") then
+        return true
+    end
     return false
 end
 
@@ -250,15 +333,18 @@ local function readDoor()
         return
     end
 
+    console.log(("Read Door: %s read addr=0x%X size=%d domain=%s value=%s"):format(tostring(currentGame),
+        cfg.addr, cfg.size or 1, tostring(cfg.domain or "best-guess"), tostring(val)))
+
     local key = currentGame
     local last = lastValueByGame[key]
     if last ~= val then
         if last ~= nil then
-            console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(
-                tostring(currentGame), tostring(last), tostring(val), tostring(cfg.desc or "")))
+            console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
+                tostring(last), tostring(val), tostring(cfg.desc or "")))
             SendCommand("swap", {
-                ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(
-                    tostring(currentGame), tostring(last), tostring(val), tostring(cfg.desc or ""))
+                ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
+                    tostring(last), tostring(val), tostring(cfg.desc or ""))
             })
         end
         lastValueByGame[key] = val
@@ -294,11 +380,15 @@ local function on_frame()
                 local b = try_call(memory.readbyte, probe.start + i, probe.domain) or 0
                 local prev = probe.snapshot[i] or 0
                 if b ~= prev then
-                    changed[#changed + 1] = { addr = probe.start + i, old = prev, new = b }
+                    changed[#changed + 1] = {
+                        addr = probe.start + i,
+                        old = prev,
+                        new = b
+                    }
                 end
             end
-            console.log(("Read Door: probe finished for domain=%s start=0x%X len=%d changed=%d"):format(
-                tostring(probe.domain), probe.start, probe.len, #changed))
+            console.log(("Read Door: probe finished for domain=%s start=0x%X len=%d changed=%d"):format(tostring(
+                probe.domain), probe.start, probe.len, #changed))
             for _, c in ipairs(changed) do
                 console.log(string.format("  0x%X : %s -> %s", c.addr, tostring(c.old), tostring(c.new)))
             end
