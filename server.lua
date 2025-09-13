@@ -79,15 +79,6 @@ local function save_state(path)
     savestate.save(path)
 end
 
-local function load_rom(path)
-    client.closerom()
-    if file_exists(path) then
-        client.openrom(path)
-    else
-        console.log("ROM not found: " .. path .. ", cannot load.")
-    end
-end
-
 local function sanitize_filename(name)
     if not name then
         return nil
@@ -95,6 +86,43 @@ local function sanitize_filename(name)
     name = name:gsub("[/\\:%*?\"<>|]", "_")
     name = name:gsub("%s+$", "")
     return name
+end
+
+local function get_save_path()
+    local cur = gameinfo.getromname()
+    cur = sanitize_filename(cur)
+    local name = ""
+    if cur and cur ~= "" and cur:lower() ~= "null" then
+        name = cur
+    end
+    if InstanceID and InstanceID ~= "" then
+        name = InstanceID
+    end
+
+    if not name or name == "" or name:lower() == "null" then
+        return nil
+    end
+
+    return SAVE_DIR .. "/" .. name .. ".state"
+end
+
+local function load_state_if_exists()
+    local path = get_save_path()
+    if path and file_exists(path) then
+        console.log("Loading state from: " .. tostring(path))
+        savestate.load(path)
+    end
+end
+
+local function load_rom(game)
+    local path = ROM_DIR .. "/" .. game
+    client.closerom()
+    if file_exists(path) then
+        client.openrom(path)
+    else
+        console.log("ROM not found: " .. path .. ", cannot load.")
+    end
+    load_state_if_exists()
 end
 
 local function strip_extension(filename)
@@ -127,31 +155,6 @@ local function canonical_game_id_from_filename(filename)
     return base:lower()
 end
 
-local function get_save_path()
-    local cur = gameinfo.getromname()
-    cur = sanitize_filename(cur)
-    local name = ""
-    if cur and cur ~= "" and cur:lower() ~= "null" then
-        name = cur
-    end
-    if InstanceID and InstanceID ~= "" then
-        name = InstanceID
-    end
-
-    if not name or name == "" or name:lower() == "null" then
-        return nil
-    end
-
-    return SAVE_DIR .. "/" .. name .. ".state"
-end
-
-local function load_state_if_exists()
-    local path = get_save_path()
-    if path and file_exists(path) then
-        savestate.load(path)
-    end
-end
-
 local function get_current_canonical_game()
     local disp = gameinfo.getromname()
     local id = canonical_game_id_from_display(disp)
@@ -180,14 +183,8 @@ local function do_swap(target_game, instance)
         -- same canonical game; skip reload
         console.log("Swap skipped: target is same as current (" .. tostring(target_id) .. ")")
         return
-    else
-        local rom_path = ROM_DIR .. "/" .. target_game
-        load_rom(rom_path)
     end
-
-    if old_save_path ~= new_save_path then
-        load_state_if_exists()
-    end
+    load_rom(target_game)
 end
 
 local function do_start(game)
@@ -199,9 +196,7 @@ local function do_start(game)
         console.log("Start skipped: target is same as current (" .. tostring(target_id) .. ")")
         return
     end
-    local rom_path = ROM_DIR .. "/" .. game
-    load_rom(rom_path)
-    load_state_if_exists()
+    load_rom(game)
 
     -- Call plugin game start hook
     call_plugin_hook("on_game_start", game)

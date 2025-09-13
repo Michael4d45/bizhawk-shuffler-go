@@ -19,12 +19,6 @@ local pollInterval = 60 -- frames between checks (adjust as needed)
 -- Per-game config (keys are substrings matched against the game name string passed
 -- to on_game_start). Leave empty and use AUTO_PROBE if you need to discover addresses.
 local games = {
-    -- Example format (replace with real addresses for your games):
-    -- ["super metroid"] = { addr = 0x7E0F30, size = 2, domain = nil,
-    --                       desc = "room id (example - replace with verified address)" },
-    -- ["zelda a link to the past"] = { addr = 0x7E0ABC, size = 1, domain = nil, desc = "tilemap/room id" },
-    -- options for domain: nil (auto), "WRAM", "CART", "RAM", "System Bus", etc
-    -- size: 1 (byte), 2 (u16), 4 (u32) - use the smallest that fits the value
     ["legend of zelda, the - a link to the past (usa)"] = {
         addr = 0xA2,
         size = 2,
@@ -36,7 +30,19 @@ local games = {
         addr = 0x0545,
         size = 1,
         desc = "world/level"
-    }
+    },
+    ["legend of zelda, the - ocarina of time (usa)"] = {
+        -- 81 - Hyrule Field, 52 - Link's House, 85 - Kokiri Forest
+        addr = 0x1C8544,
+        size = 2,
+        domain = "RDRAM",
+        desc = "Entrance Index",
+
+        -- Only consider entrance changes when this guard word matches.
+        -- In USA 1.0 retail, 001C8540 is 0x00000000 during normal gameplay,
+        -- and nonzero on title/file-select/attract modes.
+        guardWord = { addr = 0x001C8540, size = 4, equals = 0 }
+    },
 }
 
 -- Optional: one-shot automatic probe after game start to discover changed bytes.
@@ -75,36 +81,68 @@ local function try_call(fn, ...)
     return nil
 end
 
-local function safe_read(addr, size, domain)
+-- Abstracted read that handles size and endianness defaults.
+-- NES/SNES/GB/GBA/PS1 are little-endian; N64 is big-endian for 16/32-bit.
+-- We don't auto-detect system; rely on BizHawk's API names where possible,
+-- and fall back to manual composition (little-endian) if not available.
+local function safe_read(addr, size, domain, big_endian)
     if not addr then
         return nil
     end
-    -- prefer memory.readbyte for byte, memory.read_u16_le / read_u32_le where available
-    if size == nil or size == 1 then
+    size = size or 1
+    -- 1 byte
+    if size == 1 then
         local v = try_call(memory.readbyte, addr, domain)
-        if v ~= nil then
-            return v
-        end
+        if v ~= nil then return v end
         v = try_call(memory.read_u8, addr, domain)
-        if v ~= nil then
-            return v
+        if v ~= nil then return v end
+        return nil
+    end
+    -- 2 bytes
+    if size == 2 then
+        if big_endian then
+            local v = try_call(memory.read_u16_be, addr, domain)
+            if v ~= nil then return v end
+            -- fallback manual BE
+            local b0 = try_call(memory.readbyte, addr, domain)
+            local b1 = try_call(memory.readbyte, addr + 1, domain)
+            if b0 and b1 then return b0 * 256 + b1 end
+        else
+            local v = try_call(memory.read_u16_le, addr, domain)
+            if v ~= nil then return v end
+            -- fallback manual LE
+            local b0 = try_call(memory.readbyte, addr, domain)
+            local b1 = try_call(memory.readbyte, addr + 1, domain)
+            if b0 and b1 then return b0 + b1 * 256 end
         end
-    elseif size == 2 then
-        local v = try_call(memory.read_u16_le, addr, domain)
-        if v ~= nil then
-            return v
+        return nil
+    end
+    -- 4 bytes
+    if size == 4 then
+        if big_endian then
+            local v = try_call(memory.read_u32_be, addr, domain)
+            if v ~= nil then return v end
+            -- fallback manual BE
+            local b0 = try_call(memory.readbyte, addr, domain)
+            local b1 = try_call(memory.readbyte, addr + 1, domain)
+            local b2 = try_call(memory.readbyte, addr + 2, domain)
+            local b3 = try_call(memory.readbyte, addr + 3, domain)
+            if b0 and b1 and b2 and b3 then
+                return (((b0 * 256) + b1) * 256 + b2) * 256 + b3
+            end
+        else
+            local v = try_call(memory.read_u32_le, addr, domain)
+            if v ~= nil then return v end
+            -- fallback manual LE
+            local b0 = try_call(memory.readbyte, addr, domain)
+            local b1 = try_call(memory.readbyte, addr + 1, domain)
+            local b2 = try_call(memory.readbyte, addr + 2, domain)
+            local b3 = try_call(memory.readbyte, addr + 3, domain)
+            if b0 and b1 and b2 and b3 then
+                return b0 + b1 * 256 + b2 * 65536 + b3 * 16777216
+            end
         end
-        -- fallback to two bytes (LE)
-        local b0 = try_call(memory.readbyte, addr, domain)
-        local b1 = try_call(memory.readbyte, addr + 1, domain)
-        if b0 and b1 then
-            return b0 + b1 * 256
-        end
-    elseif size == 4 then
-        local v = try_call(memory.read_u32_le, addr, domain)
-        if v ~= nil then
-            return v
-        end
+        return nil
     end
     return nil
 end
@@ -119,6 +157,13 @@ local function choose_domain_preference()
     end
     for _, d in ipairs(domains) do
         local dn = d:lower()
+        if dn:find("rdram") then
+            bestDomainCached = d
+            return d
+        end
+    end
+    for _, d in ipairs(domains) do
+        local dn = d:lower()
         if dn:find("wram") or dn:find("main") or dn:find("ram") or dn:find("system") then
             bestDomainCached = d
             return d
@@ -126,6 +171,35 @@ local function choose_domain_preference()
     end
     bestDomainCached = domains[1]
     return bestDomainCached
+end
+
+-- Determine endianness hint based on domain (simple heuristic):
+-- N64 RDRAM uses big-endian for 16/32-bit values; most others are little-endian.
+local function is_big_endian_domain(domain)
+    if not domain then return false end
+    local d = domain:lower()
+    if d:find("rdram") then return true end
+    return false
+end
+
+-- Evaluate optional guardWord: { addr, size=4, equals=value }
+local function guard_allows(cfg)
+    if not cfg.guardWord then
+        return true
+    end
+    local g = cfg.guardWord
+    local gsize = g.size or 4
+    local gdomain = g.domain or cfg.domain
+    local gbe = is_big_endian_domain(gdomain)
+    local gv = safe_read(g.addr, gsize, gdomain, gbe)
+    if gv == nil then
+        return false
+    end
+    if g.equals ~= nil then
+        return gv == g.equals
+    end
+    -- if equals not specified, treat nonzero as true
+    return gv ~= 0
 end
 
 -- Start a one-shot probe: sample region now, then sample again after framesDelay frames and report changed bytes
@@ -144,7 +218,7 @@ local function start_probe(domain, startaddr, len, framesDelay)
         probe.start, probe.len, probe.framesToWait))
 end
 
--- Called every poll interval to check for room change
+-- === core polling ===
 local function readDoor()
     if not currentGame or not lastRomName then
         return
@@ -164,22 +238,30 @@ local function readDoor()
         return
     end
 
-    local val = safe_read(cfg.addr, cfg.size or 1, cfg.domain)
+    -- Enforce guard(s) if present
+    if not guard_allows(cfg) then
+        return
+    end
+
+    -- Read value with appropriate endianness hint
+    local be = is_big_endian_domain(cfg.domain or choose_domain_preference())
+    local val = safe_read(cfg.addr, cfg.size or 1, cfg.domain, be)
     if val == nil then
         return
     end
+
     local key = currentGame
     local last = lastValueByGame[key]
-    lastValueByGame[key] = val
-    if last ~= val and last ~= nil then
-        console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame), tostring(last),
-            tostring(val), tostring(cfg.desc or "")))
+    if last ~= val then
+        if last ~= nil then
+            console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(
+                tostring(currentGame), tostring(last), tostring(val), tostring(cfg.desc or "")))
+            SendCommand("swap", {
+                ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(
+                    tostring(currentGame), tostring(last), tostring(val), tostring(cfg.desc or ""))
+            })
+        end
         lastValueByGame[key] = val
-
-        SendCommand("swap", {
-            ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
-                tostring(last), tostring(val), tostring(cfg.desc or ""))
-        })
     end
 end
 
@@ -199,6 +281,7 @@ local function on_frame()
         lastInstanceID = InstanceID
         currentGame = lastRomName .. "_" .. (InstanceID or "")
         lastValueByGame[currentGame] = nil
+        bestDomainCached = nil
     end
 
     -- probe state machine
@@ -211,15 +294,11 @@ local function on_frame()
                 local b = try_call(memory.readbyte, probe.start + i, probe.domain) or 0
                 local prev = probe.snapshot[i] or 0
                 if b ~= prev then
-                    changed[#changed + 1] = {
-                        addr = probe.start + i,
-                        old = prev,
-                        new = b
-                    }
+                    changed[#changed + 1] = { addr = probe.start + i, old = prev, new = b }
                 end
             end
-            console.log(("Read Door: probe finished for domain=%s start=0x%X len=%d changed=%d"):format(tostring(
-                probe.domain), probe.start, probe.len, #changed))
+            console.log(("Read Door: probe finished for domain=%s start=0x%X len=%d changed=%d"):format(
+                tostring(probe.domain), probe.start, probe.len, #changed))
             for _, c in ipairs(changed) do
                 console.log(string.format("  0x%X : %s -> %s", c.addr, tostring(c.old), tostring(c.new)))
             end
