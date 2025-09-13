@@ -1,63 +1,55 @@
 # Mario Lives Tracker Plugin
 
-A BizShuffle plugin that detects Super Mario Bros 3 and tracks the player's lives count, automatically cycling back to 4 lives when reaching 1.
+A BizShuffle plugin that detects Super Mario Bros 3 and automatically maintains a minimum of 4 lives by cycling back when lives reach 1 or below.
 
 ## Features
 
 - Automatically detects when Super Mario Bros 3 is loaded
-- Reads the current number of lives from RAM
-- Logs lives changes to the BizHawk console
-- **Automatically cycles lives back to 4 when they reach 1**
+- Monitors lives count from RAM every 300 frames (5 seconds)
+- Automatically cycles lives back to 4 when they reach 1 or below
 - Lightweight polling system that doesn't impact performance
+- Simplified logic for reliable infinite lives functionality
 
 ## How It Works
 
-The plugin monitors the game name to detect Super Mario Bros 3. When detected, it reads the lives value from WRAM address `0x075A` every 60 frames (approximately 1 second at 60 FPS).
+The plugin monitors the game name to detect Super Mario Bros 3. When detected, it reads the lives value from RAM address `0x0736` every 300 frames (approximately 5 seconds at 60 FPS).
 
-Lives values range from 0-99:
-- 0 = Game Over
-- 1-99 = Normal lives count
-
-**Special Feature**: When lives drop to 1, the plugin automatically writes 4 back to memory, effectively giving Mario infinite lives with a minimum of 4.
+**Special Feature**: When lives drop to 1 or below, the plugin immediately writes 4 back to memory, ensuring Mario always has at least 4 lives.
 
 ## Configuration
 
 The plugin is configured for optimal performance out of the box:
 
-- **Poll Interval**: 60 frames (adjustable in `plugin.lua`)
+- **Poll Interval**: 300 frames (adjustable in `plugin.lua`)
 - **Target Game**: "super mario bros. 3" (substring match)
-- **Memory Address**: WRAM 0x075A (standard SMB3 lives address)
-- **Cycle Threshold**: 1 life (triggers cycle to 4)
+- **Memory Address**: RAM 0x0736 (SMB3 lives address)
+- **Cycle Threshold**: ≤ 1 life (triggers cycle to 4)
 - **Cycle Target**: 4 lives (new lives count after cycling)
 
 ## Usage
 
 1. Ensure the plugin is enabled in the server admin interface
 2. Start Super Mario Bros 3 in BizHawk
-3. The plugin will automatically detect the game and begin tracking
-4. Lives changes will be logged to the console
-5. When lives reach 1, they will automatically cycle back to 4
+3. The plugin will automatically detect the game and begin monitoring
+4. Lives are automatically maintained at 4+ with seamless cycling
 
 ## Example Output
 
 ```
-Mario Lives Tracker: Detected Super Mario Bros 3 - Super Mario Bros. 3 (USA)
-Mario Lives Tracker: Initial lives: 4
-Mario Lives Tracker: Lives changed: 4 -> 3
-Mario Lives Tracker: Lives changed: 3 -> 2
-Mario Lives Tracker: Lives changed: 2 -> 1
-Mario Lives Tracker: Lives cycled back to 4!
-Mario Lives Tracker: Lives changed: 4 -> 3
+Mario Lives Tracker: Plugin loaded!
 ```
+
+*Note: The plugin runs silently in the background with minimal console output for performance.*
 
 ## Technical Details
 
-- **Memory Domain**: WRAM
-- **Address**: 0x075A
+- **Memory Domain**: RAM
+- **Address**: 0x0736
 - **Data Type**: 8-bit unsigned integer
-- **Polling Rate**: Every 60 frames
+- **Polling Rate**: Every 300 frames (5 seconds)
 - **Game Detection**: Substring match on ROM name
 - **Memory Write**: Uses BizHawk's memory.writebyte API
+- **Cycle Logic**: Simple threshold check (≤ 1 → 4 lives)
 
 ## Compatibility
 
