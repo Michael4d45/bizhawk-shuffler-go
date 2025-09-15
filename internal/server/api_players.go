@@ -72,8 +72,6 @@ func (s *Server) apiSwapPlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "handler: "+err.Error(), http.StatusBadRequest)
 		return
 	}
-
-	_ = s.SnapshotState()
 }
 
 // apiRemovePlayer: POST {player: ...}

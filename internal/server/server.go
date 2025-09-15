@@ -24,6 +24,9 @@ type Server struct {
 	pending              map[string]chan string
 	schedulerCh          chan struct{}
 	broadcaster          *DiscoveryBroadcaster
+	saveChan             chan struct{}
+	saveTimer            *time.Timer
+	saveMutex            sync.Mutex
 }
 
 // ErrTimeout is exported so callers can detect timeout waiting for a client ack/nack.
@@ -52,11 +55,13 @@ func New() *Server {
 		upgrader:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
 		pending:       make(map[string]chan string),
 		schedulerCh:   make(chan struct{}, 1),
+		saveChan:      make(chan struct{}, 1),
 	}
 	s.loadState()
 	_ = os.MkdirAll("./files", 0755)
 	_ = os.MkdirAll("./saves", 0755)
 	go s.schedulerLoop()
+	go s.startSaver()
 	return s
 }
 

@@ -315,12 +315,12 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 // broadcastToPlayers sends a command to all currently connected players.
 func (s *Server) broadcastToPlayers(cmd types.Command) {
-	s.mu.RLock()
 	clients := make([]*wsClient, 0, len(s.playerClients))
-	for _, cl := range s.playerClients {
-		clients = append(clients, cl)
-	}
-	s.mu.RUnlock()
+	s.withRLock(func() {
+		for _, cl := range s.playerClients {
+			clients = append(clients, cl)
+		}
+	})
 	for _, cl := range clients {
 		go func(cl *wsClient) {
 			select {
@@ -335,12 +335,12 @@ func (s *Server) broadcastToPlayers(cmd types.Command) {
 
 // broadcastToAdmins sends a command to all currently connected admins.
 func (s *Server) broadcastToAdmins(cmd types.Command) {
-	s.mu.RLock()
 	clients := make([]*wsClient, 0, len(s.adminClients))
-	for _, cl := range s.adminClients {
-		clients = append(clients, cl)
-	}
-	s.mu.RUnlock()
+	s.withRLock(func() {
+		for _, cl := range s.adminClients {
+			clients = append(clients, cl)
+		}
+	})
 	for _, cl := range clients {
 		go func(cl *wsClient) {
 			select {
@@ -459,6 +459,21 @@ func (s *Server) sendSwapAll() {
 			continue
 		}
 		s.sendSwap(p)
+	}
+}
+
+func (s *Server) SetPendingAllFiles() {
+	players := []types.Player{}
+	s.withRLock(func() {
+		for _, p := range s.state.Players {
+			players = append(players, p)
+		}
+	})
+	for _, p := range players {
+		if !p.Connected || p.InstanceID == "" {
+			continue
+		}
+		s.setInstanceFileStateWithPlayer(p.InstanceID, types.FileStatePending, p.Name)
 	}
 }
 

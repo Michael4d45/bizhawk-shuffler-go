@@ -184,16 +184,29 @@ func (s *Server) setInstanceFileStateWithPlayer(instanceID string, state types.F
 }
 
 func (s *Server) RequestPendingSaves() {
+	// Collect pending saves outside the lock to avoid holding read lock during network operations
+	var pendingSaves []struct {
+		player     string
+		instanceID string
+	}
 	s.withRLock(func() {
 		for _, instance := range s.state.GameSwapInstances {
 			if instance.FileState == types.FileStatePending && instance.PendingPlayer != "" {
-				fmt.Println("Requesting save from player", instance.PendingPlayer, "for instance", instance.ID)
-				if err := s.RequestSave(instance.PendingPlayer, instance.ID); err != nil {
-					fmt.Printf("Failed to request save from player %s for instance %s: %v\n", instance.PendingPlayer, instance.ID, err)
-				}
+				pendingSaves = append(pendingSaves, struct {
+					player     string
+					instanceID string
+				}{instance.PendingPlayer, instance.ID})
 			}
 		}
 	})
+
+	// Now perform the requests outside the lock
+	for _, save := range pendingSaves {
+		fmt.Println("Requesting save from player", save.player, "for instance", save.instanceID)
+		if err := s.RequestSave(save.player, save.instanceID); err != nil {
+			fmt.Printf("Failed to request save from player %s for instance %s: %v\n", save.player, save.instanceID, err)
+		}
+	}
 }
 
 // waitForFileReady waits for the file state to become ready or none, with timeout

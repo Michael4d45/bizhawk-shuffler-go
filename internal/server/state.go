@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"runtime"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -66,16 +65,34 @@ func (s *Server) loadState() {
 	s.withLock(func() {
 		s.state = tmp
 	})
-	if err := s.saveState(); err != nil {
-		log.Printf("failed to persist state after load: %v", err)
+	select {
+	case s.saveChan <- struct{}{}:
+	default:
+		// Channel is full, ignore (non-blocking send)
 	}
 	log.Printf("loaded state from %s", "state.json")
 }
 
+// startSaver runs a goroutine that debounces save requests.
+// It waits for save signals and delays saving by 500ms to batch rapid updates.
+func (s *Server) startSaver() {
+	for range s.saveChan {
+		s.saveMutex.Lock()
+		if s.saveTimer != nil {
+			s.saveTimer.Stop()
+		}
+		s.saveTimer = time.AfterFunc(500*time.Millisecond, func() {
+			if err := s.saveState(); err != nil {
+				fmt.Printf("failed to persist state: %v\n", err)
+			}
+		})
+		s.saveMutex.Unlock()
+	}
+}
+
 // saveState writes current state atomically to disk.
 func (s *Server) saveState() error {
-	s.mu.Lock()
-	st := s.state
+	st := s.SnapshotState()
 	dir := filepath.Dir("state.json")
 	if dir == "" || dir == "." {
 		dir = "."
@@ -114,7 +131,6 @@ func (s *Server) saveState() error {
 		log.Printf("rename tmp file error: %v", renameErr)
 		return renameErr
 	}
-	s.mu.Unlock()
 	return nil
 }
 
@@ -132,7 +148,6 @@ func (s *Server) handleStateJSON(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) GetGameForPlayer(player string) types.Player {
-	s.withRLock(func() {}) // ensure lock exists for method shape; body uses state access below via SnapshotState
 	// Use direct map lookup by player key. This is deterministic and
 	// avoids relying on the Player.Name field matching the map key.
 	st := s.SnapshotState()
@@ -181,33 +196,18 @@ func (s *Server) SnapshotGames() (games []string, mainGames []types.GameEntry, i
 // that attempt to acquire the server lock.
 func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) {
 	updatedAt := time.Now()
-	_, file, line, ok := runtime.Caller(1)
-	var updatedBy string
-	if ok {
-		// Make path relative to two directories up
-		if wd, err := os.Getwd(); err == nil {
-			baseDir := filepath.Dir(filepath.Dir(wd))
-			if rel, err := filepath.Rel(baseDir, file); err == nil {
-				file = rel
-			}
-		}
-		updatedBy = fmt.Sprintf("%s:%d", file, line)
-	} else {
-		updatedBy = "unknown"
-	}
 	s.withLock(func() {
 		mut(&s.state)
 		s.state.UpdatedAt = updatedAt
 	})
-	if err := s.saveState(); err != nil {
-		fmt.Printf("failed to persist state: %v\n", err)
+	select {
+	case s.saveChan <- struct{}{}:
+	default:
+		// Channel is full, ignore (non-blocking send)
 	}
 	s.broadcastToAdmins(types.Command{
-		Cmd: types.CmdStateUpdate,
-		Payload: map[string]any{
-			"updated_at": updatedAt,
-			"updated_by": updatedBy,
-		},
-		ID: fmt.Sprintf("%d", updatedAt.UnixNano()),
+		Cmd:     types.CmdStateUpdate,
+		Payload: map[string]any{"updated_at": updatedAt},
+		ID:      fmt.Sprintf("%d", updatedAt.UnixNano()),
 	})
 }

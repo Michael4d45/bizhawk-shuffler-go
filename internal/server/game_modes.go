@@ -152,6 +152,7 @@ type SaveModeHandler struct {
 func (h *SaveModeHandler) HandleSwap() error {
 	var waiting bool
 	ticker := time.NewTicker(100 * time.Millisecond)
+	defer ticker.Stop()
 	for range 3 {
 		h.server.withRLock(func() {
 			waiting = h.server.pendingInstancecount > 0
@@ -173,34 +174,38 @@ func (h *SaveModeHandler) HandleSwap() error {
 		return errors.New("no game instances available for swap")
 	}
 
+	h.server.SetPendingAllFiles()
 	// Collect player names and perform state updates under lock where necessary
 	var players []string
-	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
-		for name := range st.Players {
+	playerCurrentGames := make(map[string]string)
+	playerCurrentInstances := make(map[string]string)
+	var gameInstances []types.GameSwapInstance
+	h.server.withRLock(func() {
+		for name := range h.server.state.Players {
 			players = append(players, name)
 		}
-		// Shuffle instances to vary assignment each swap
-		rand.Shuffle(len(st.GameSwapInstances), func(i, j int) {
-			st.GameSwapInstances[i], st.GameSwapInstances[j] = st.GameSwapInstances[j], st.GameSwapInstances[i]
-		})
-		playerCurrentGames := make(map[string]string)
-		playerCurrentInstances := make(map[string]string)
-		// Clear players' InstanceID for a fresh assignment
-
-		for n, p := range st.Players {
+		for n, p := range h.server.state.Players {
 			playerCurrentGames[n] = p.Game
 			playerCurrentInstances[n] = p.InstanceID
-			// If player had an assigned instance, set that instance state to pending (in transition)
-			if p.InstanceID != "" && p.Connected {
-				// we must call setInstanceFileState without holding the main lock to avoid deadlocks
-				go h.server.setInstanceFileStateWithPlayer(p.InstanceID, types.FileStatePending, n)
-			}
+		}
+		gameInstances = make([]types.GameSwapInstance, len(h.server.state.GameSwapInstances))
+		copy(gameInstances, h.server.state.GameSwapInstances)
+	})
+
+	// Shuffle instances outside the lock
+	rand.Shuffle(len(gameInstances), func(i, j int) {
+		gameInstances[i], gameInstances[j] = gameInstances[j], gameInstances[i]
+	})
+
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+		// Clear players' InstanceID for a fresh assignment
+		for n, p := range st.Players {
 			p.InstanceID = ""
 			p.Game = ""
 			st.Players[n] = p
 		}
 		// Assign instances to players: one instance per player up to available instances
-		maxAssign := min(len(players), len(st.GameSwapInstances))
+		maxAssign := min(len(gameInstances), len(players))
 		assignedInstances := make(map[int]bool) // track assigned instance indices
 		for i := range maxAssign {
 			pname := players[i]
@@ -211,16 +216,16 @@ func (h *SaveModeHandler) HandleSwap() error {
 			assignedIdx := -1
 			if preventSame && currentGame != "" {
 				// First pass: try to find instance with different game
-				for j := range st.GameSwapInstances {
-					if !assignedInstances[j] && st.GameSwapInstances[j].Game != currentGame {
+				for j := range gameInstances {
+					if !assignedInstances[j] && gameInstances[j].Game != currentGame {
 						assignedIdx = j
 						break
 					}
 				}
 				// Second pass: try to find different instance if player had an instance assigned
 				if assignedIdx == -1 && currentInstance != "" {
-					for j := range st.GameSwapInstances {
-						if !assignedInstances[j] && st.GameSwapInstances[j].ID != currentInstance {
+					for j := range gameInstances {
+						if !assignedInstances[j] && gameInstances[j].ID != currentInstance {
 							assignedIdx = j
 							break
 						}
@@ -229,7 +234,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 
 				// If no different game found, assign any available
 				if assignedIdx == -1 {
-					for j := range st.GameSwapInstances {
+					for j := range gameInstances {
 						if !assignedInstances[j] {
 							assignedIdx = j
 							break
@@ -238,7 +243,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 				}
 			} else {
 				// Find first available instance
-				for j := range st.GameSwapInstances {
+				for j := range gameInstances {
 					if !assignedInstances[j] {
 						assignedIdx = j
 						break
@@ -248,7 +253,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 
 			if assignedIdx != -1 {
 				p := st.Players[pname]
-				inst := st.GameSwapInstances[assignedIdx]
+				inst := gameInstances[assignedIdx]
 				p.Game = inst.Game
 				p.InstanceID = inst.ID
 				st.Players[pname] = p
@@ -352,8 +357,6 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	if foundInst == nil {
 		return errors.New("instance not found")
 	}
-
-	_ = h.server.saveState()
 
 	// Set instance state to pending before upload starts
 	if foundPlayer != nil {
