@@ -13,8 +13,6 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
-
-	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
 // API centralises HTTP interactions with the server for the client.
@@ -101,7 +99,12 @@ func (a *API) UploadSaveState(instanceID string) error {
 	localPath := "./saves/" + instanceID + ".state"
 	f, err := os.Open(localPath)
 	if err != nil {
-		return err
+		// If the file doesn't exist, just return nil (no save to upload)
+		if os.IsNotExist(err) {
+			// Inform the server that there's no save file
+			return a.UploadNoSaveState(instanceID)
+		}
+		return nil
 	}
 	defer func() { _ = f.Close() }()
 	var buf bytes.Buffer
@@ -130,6 +133,31 @@ func (a *API) UploadSaveState(instanceID string) error {
 	if resp.StatusCode != http.StatusOK {
 		data, _ := io.ReadAll(resp.Body)
 		return fmt.Errorf("upload failed: %s %s", resp.Status, string(data))
+	}
+	return nil
+}
+
+// UploadNoSaveState informs the server that there is no save state for the given instanceID.
+func (a *API) UploadNoSaveState(instanceID string) error {
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	_ = w.WriteField("instance_id", instanceID)
+	if err := w.Close(); err != nil {
+		return err
+	}
+	req, err := http.NewRequestWithContext(a.Ctx, "POST", a.BaseURL+"/save/no-save", &buf)
+	if err != nil {
+		return err
+	}
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	if resp.StatusCode != http.StatusOK {
+		data, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("no-save upload failed: %s %s", resp.Status, string(data))
 	}
 	return nil
 }
@@ -166,199 +194,10 @@ func (a *API) EnsureSaveState(instanceID string) error {
 	return err
 }
 
-// GamesResponse mirrors the server /api/games response.
-type GamesResponse struct {
-	GameInstances []types.GameSwapInstance `json:"game_instances"`
-	MainGames     []types.GameEntry        `json:"main_games"`
-}
-
-// GetGames fetches /api/games and returns the parsed response.
-func (a *API) GetGames() (GamesResponse, error) {
-	var resp GamesResponse
-	if a.BaseURL == "" {
-		return resp, fmt.Errorf("no server configured")
-	}
-	r, err := a.HTTPClient.Get(a.BaseURL + "/api/games")
-	if err != nil {
-		return resp, err
-	}
-	defer func() { _ = r.Body.Close() }()
-	if r.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(r.Body)
-		return resp, fmt.Errorf("bad status %s: %s", r.Status, string(b))
-	}
-	if err := json.NewDecoder(r.Body).Decode(&resp); err != nil {
-		return resp, err
-	}
-	return resp, nil
-}
-
-// UpdateGames posts new games and main_games to the server.
-func (a *API) UpdateGames(instances []types.GameSwapInstance, mainGames []types.GameEntry) error {
-	if a.BaseURL == "" {
-		return fmt.Errorf("no server configured")
-	}
-	body := map[string]any{"game_instances": instances, "main_games": mainGames}
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/games", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("update games failed: %s %s", resp.Status, string(data))
-	}
-	return nil
-}
-
-// GetInterval retrieves min/max interval seconds from /api/interval.
-func (a *API) GetInterval() (min int, max int, err error) {
-	if a.BaseURL == "" {
-		return 0, 0, fmt.Errorf("no server configured")
-	}
-	r, err := a.HTTPClient.Get(a.BaseURL + "/api/interval")
-	if err != nil {
-		return 0, 0, err
-	}
-	defer func() { _ = r.Body.Close() }()
-	if r.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(r.Body)
-		return 0, 0, fmt.Errorf("bad status %s: %s", r.Status, string(b))
-	}
-	var out struct {
-		MinInterval int `json:"min_interval_secs"`
-		MaxInterval int `json:"max_interval_secs"`
-	}
-	if err := json.NewDecoder(r.Body).Decode(&out); err != nil {
-		return 0, 0, err
-	}
-	return out.MinInterval, out.MaxInterval, nil
-}
-
-// SetInterval sets min/max interval seconds.
-func (a *API) SetInterval(min, max int) error {
-	if a.BaseURL == "" {
-		return fmt.Errorf("no server configured")
-	}
-	body := map[string]int{"min_interval_secs": min, "max_interval_secs": max}
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/interval", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return fmt.Errorf("set interval failed: %s %s", resp.Status, string(data))
-	}
-	return nil
-}
-
-// SwapPlayer sends a swap command for a single player and returns the result.
-func (a *API) SwapPlayerToInstance(player, instanceID string) (string, error) {
-	if a.BaseURL == "" {
-		return "", fmt.Errorf("no server configured")
-	}
-	body := map[string]string{"player": player, "instance_id": instanceID}
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/swap_player", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("swap player failed: %s %s", resp.Status, string(data))
-	}
-	var out map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
-	}
-	return out["result"], nil
-}
-
-// RemovePlayer removes a player via POST /api/remove_player and returns the server result.
-func (a *API) RemovePlayer(player string) (string, error) {
-	if a.BaseURL == "" {
-		return "", fmt.Errorf("no server configured")
-	}
-	body := map[string]string{"player": player}
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/remove_player", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return "", err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return "", fmt.Errorf("remove player failed: %s %s", resp.Status, string(data))
-	}
-	var out map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return "", err
-	}
-	return out["result"], nil
-}
-
-// SwapAllToGame requests swaps for all players to the given game and returns the results per player.
-func (a *API) SwapAllToGame(game string) (map[string]string, error) {
-	if a.BaseURL == "" {
-		return nil, fmt.Errorf("no server configured")
-	}
-	body := map[string]string{"game": game}
-	b, _ := json.Marshal(body)
-	req, _ := http.NewRequestWithContext(context.Background(), "POST", a.BaseURL+"/api/swap_all_to_game", bytes.NewReader(b))
-	req.Header.Set("Content-Type", "application/json")
-	resp, err := a.HTTPClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = resp.Body.Close() }()
-	if resp.StatusCode != http.StatusOK {
-		data, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("swap all failed: %s %s", resp.Status, string(data))
-	}
-	var out map[string]string
-	if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
-		return nil, err
-	}
-	return out, nil
-}
-
 // FileInfo mirrors the server file list entry.
 type FileInfo struct {
 	Name string `json:"name"`
 	Size int64  `json:"size"`
-}
-
-// ListFiles returns the server files list from /files/list.json.
-func (a *API) ListFiles() ([]FileInfo, error) {
-	if a.BaseURL == "" {
-		return nil, fmt.Errorf("no server configured")
-	}
-	r, err := a.HTTPClient.Get(a.BaseURL + "/files/list.json")
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = r.Body.Close() }()
-	if r.StatusCode != http.StatusOK {
-		b, _ := io.ReadAll(r.Body)
-		return nil, fmt.Errorf("bad status %s: %s", r.Status, string(b))
-	}
-	var files []FileInfo
-	if err := json.NewDecoder(r.Body).Decode(&files); err != nil {
-		return nil, err
-	}
-	return files, nil
 }
 
 // UploadFile uploads a local file to /upload using form field "file".

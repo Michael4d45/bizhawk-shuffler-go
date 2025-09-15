@@ -596,7 +596,7 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 				}
 				log.Printf("lua incoming: %s", line)
 				if strings.HasPrefix(line, msgHELLO) {
-					log.Printf("ipc handler: received HELLO from lua, sending SYNC")
+					log.Printf("ipc handler: received HELLO from lua")
 					c.bipc.SetReady(true)
 
 					running := c.bipc.running
@@ -620,10 +620,16 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 					if err := c.api.EnsureSaveState(instanceID); err != nil {
 						log.Printf("ipc handler: EnsureSaveState failed: %v", err)
 					}
-					if err := c.bipc.SendSync(ctx2, game, instanceID, running); err != nil {
-						log.Printf("ipc handler: SendSync failed: %v", err)
-					} else {
-						log.Printf("ipc handler: SendSync succeeded (game=%q running=%v)", game, running)
+					if err := c.bipc.SendPause(ctx2); err != nil {
+						log.Printf("ipc handler: failed to send PAUSE command to lua: %v", err)
+					}
+					if err := c.bipc.SendSwap(ctx2, game, instanceID); err != nil {
+						log.Printf("ipc handler: failed to send SWAP command to lua: %v", err)
+					}
+					if running {
+						if err := c.bipc.SendResume(ctx2); err != nil {
+							log.Printf("ipc handler: failed to send RESUME command to lua: %v", err)
+						}
 					}
 					cancel2()
 

@@ -99,10 +99,20 @@ func (s *Server) saveState() error {
 		log.Printf("close tmp file error: %v", err)
 		return err
 	}
-	if err := os.Rename(tmpFile.Name(), "state.json"); err != nil {
+	// Retry rename up to 3 times with small delay to handle Windows file locking issues
+	var renameErr error
+	for i := range 3 {
+		if renameErr = os.Rename(tmpFile.Name(), "state.json"); renameErr == nil {
+			break
+		}
+		if i < 2 {
+			time.Sleep(10 * time.Millisecond)
+		}
+	}
+	if renameErr != nil {
 		_ = os.Remove(tmpFile.Name())
-		log.Printf("rename tmp file error: %v", err)
-		return err
+		log.Printf("rename tmp file error: %v", renameErr)
+		return renameErr
 	}
 	s.mu.Unlock()
 	return nil

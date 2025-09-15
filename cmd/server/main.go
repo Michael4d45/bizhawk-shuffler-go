@@ -10,12 +10,6 @@ import (
 	"github.com/michael4d45/bizshuffle/internal/server"
 )
 
-// TODO: Integrate discovery broadcaster with server lifecycle
-// - Start broadcaster after server begins listening
-// - Stop broadcaster before server exits
-// - Pass server info (host, port) to broadcaster
-// - Handle broadcaster startup/shutdown errors gracefully
-
 func main() {
 	host := flag.String("host", "127.0.0.1", "host to bind")
 	port := flag.Int("port", 8080, "port to bind")
@@ -47,7 +41,6 @@ func main() {
 		protocol = "https"
 	}
 	log.Printf("Starting server on %s://%s", protocol, addr)
-	// TODO: Start discovery broadcaster
 	if err := s.StartBroadcaster(context.Background()); err != nil {
 		log.Printf("Failed to start discovery broadcaster: %v", err)
 	}

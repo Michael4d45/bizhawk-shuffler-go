@@ -305,12 +305,6 @@ func (b *BizhawkIPC) handleLine(line string) {
 			}
 			b.mu.Unlock()
 		}
-	case msgHELLO:
-		// Lua said HELLO, we might want to send a SYNC later. Push incoming event.
-		if !b.safeSend(line) {
-			// dropped because incoming is full or closed - log at debug level
-			log.Printf("bizhawk ipc: incoming channel full or closed, dropping HELLO")
-		}
 	case msgPING:
 		// reply PONG
 		if len(parts) >= 2 {
@@ -393,18 +387,6 @@ func (b *BizhawkIPC) resendLoop(ctx context.Context) {
 	}
 }
 
-// SendSync sends a SYNC command with game, state (running|stopped), and startAt epoch
-func (b *BizhawkIPC) SendSync(ctx context.Context, game string, instanceID string, running bool) error {
-	state := "stopped"
-	if running {
-		state = "running"
-	}
-	b.game = game
-	b.instanceID = instanceID
-	b.running = running
-	return b.SendCommand(ctx, "SYNC", game, instanceID, state)
-}
-
 // Incoming returns the channel with raw lines from Lua for processing
 func (b *BizhawkIPC) Incoming() <-chan string { return b.incoming }
 
@@ -414,15 +396,13 @@ func (b *BizhawkIPC) SendSave(ctx context.Context) error {
 
 // convenience helpers to match previous code
 func (b *BizhawkIPC) SendSwap(ctx context.Context, game string, instanceID string) error {
-	b.instanceID = instanceID
-	return b.SendCommand(ctx, "SWAP", game, instanceID)
-}
-
-func (b *BizhawkIPC) SendStart(ctx context.Context, game string, instanceID string) error {
+	if err := b.SendSave(ctx); err != nil {
+		log.Printf("ipc handler: SendSave failed before SWAP: %v", err)
+		return err
+	}
 	b.instanceID = instanceID
 	b.game = game
-	b.running = true
-	return b.SendCommand(ctx, "START", game, instanceID)
+	return b.SendCommand(ctx, "SWAP", game, instanceID)
 }
 
 func (b *BizhawkIPC) SendPause(ctx context.Context) error {
@@ -444,7 +424,7 @@ func (b *BizhawkIPC) SendStyledMessage(ctx context.Context, msg string, duration
 }
 
 // SetReady sets the internal ready flag. Callers should use this to mark
-// the IPC as ready/unready when a HELLO/SYNC handshake is observed or when
+// the IPC as ready/unready when a HELLO handshake is observed or when
 // the connection is lost.
 func (b *BizhawkIPC) SetReady(v bool) {
 	b.readyMu.Lock()

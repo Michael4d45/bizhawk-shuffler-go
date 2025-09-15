@@ -75,8 +75,18 @@ local function draw_messages()
 end
 
 local function save_state(path)
+    if not path then
+        console.log("No valid save path; skipping save")
+        return
+    end
     console.log("Saving state to: " .. tostring(path))
-    savestate.save(path)
+    local ok, err = pcall(function()
+        savestate.save(path)
+    end)
+    if not ok then
+        console.log("Failed to save state to '" .. tostring(path) .. "': " .. tostring(err))
+        console.log("Save operation failed, but continuing...")
+    end
 end
 
 local function sanitize_filename(name)
@@ -119,10 +129,12 @@ local function load_rom(game)
     client.closerom()
     if file_exists(path) then
         client.openrom(path)
+        local save_loaded = load_state_if_exists()
+        return save_loaded
     else
         console.log("ROM not found: " .. path .. ", cannot load.")
+        return false
     end
-    load_state_if_exists()
 end
 
 local function strip_extension(filename)
@@ -169,37 +181,31 @@ local function do_save()
 end
 
 local function do_swap(target_game, instance)
-    -- save current
-    local cur_id = get_current_canonical_game()
-    local target_id = canonical_game_id_from_filename(target_game) or canonical_game_id_from_display(target_game)
-    local old_save_path = get_save_path()
+    console.log("Starting swap to game: " .. tostring(target_game) .. " with instance: " .. tostring(instance))
 
-    -- save current
-    do_save()
-    InstanceID = instance
+    -- Wrap the entire swap operation in error handling
+    local swap_ok, swap_err = pcall(function()
+        local cur_id = get_current_canonical_game()
+        local target_id = canonical_game_id_from_filename(target_game) or canonical_game_id_from_display(target_game)
+        local old_save_path = get_save_path()
 
-    local new_save_path = get_save_path()
-    if target_id and cur_id and target_id == cur_id and old_save_path == new_save_path then
-        -- same canonical game; skip reload
-        console.log("Swap skipped: target is same as current (" .. tostring(target_id) .. ")")
-        return
+        InstanceID = instance
+
+        local new_save_path = get_save_path()
+        if target_id and cur_id and target_id == cur_id and old_save_path == new_save_path then
+            -- same canonical game; skip reload
+            console.log("Swap skipped: target is same as current (" .. tostring(target_id) .. ")")
+            return
+        end
+        load_rom(target_game)
+    end)
+
+    if not swap_ok then
+        console.log("Swap operation failed: " .. tostring(swap_err))
+        console.log("Attempting to continue with current game state...")
+    else
+        console.log("Swap completed successfully")
     end
-    load_rom(target_game)
-end
-
-local function do_start(game)
-    client.unpause()
-    -- Avoid reloading if the canonical id matches current
-    local cur_id = get_current_canonical_game()
-    local target_id = canonical_game_id_from_filename(game) or canonical_game_id_from_display(game)
-    if target_id and cur_id and target_id == cur_id then
-        console.log("Start skipped: target is same as current (" .. tostring(target_id) .. ")")
-        return
-    end
-    load_rom(game)
-
-    -- Call plugin game start hook
-    call_plugin_hook("on_game_start", game)
 end
 
 local function do_pause()
@@ -337,15 +343,8 @@ local function handle_line(line)
                 do_save()
             end)
         elseif cmd == "SWAP" then
-            local game, instance = parts[4], parts[5]
             safe_exec_and_ack(id, function()
-                do_swap(game, instance)
-            end)
-        elseif cmd == "START" then
-            local game, instance = parts[4], parts[5]
-            InstanceID = instance
-            safe_exec_and_ack(id, function()
-                do_start(game)
+                do_swap(parts[4], parts[5])
             end)
         elseif cmd == "PAUSE" then
             safe_exec_and_ack(id, function()
@@ -357,26 +356,8 @@ local function handle_line(line)
             end)
         elseif cmd == "MSG" then
             safe_exec_and_ack(id, function()
-                show_message(parts[4] or "", tonumber(parts[5]) or 3.0, tonumber(parts[6]) or 10,
-                    tonumber(parts[7]) or 10, tonumber(parts[8]) or 12, parts[9] or "#FFFFFFFF",
-                    parts[10] or "#FF000000")
-            end)
-        elseif cmd == "SYNC" then
-            local game, instance, state = parts[4], parts[5], parts[6]
-            InstanceID = instance
-            safe_exec_and_ack(id, function()
-                if state == "running" then
-                    if game and game ~= "" then
-                        do_start(game)
-                    end
-                else
-                    if game and game ~= "" then
-                        do_start(game)
-                        do_pause()
-                    else
-                        do_pause()
-                    end
-                end
+                show_message(parts[4], tonumber(parts[5]), tonumber(parts[6]), tonumber(parts[7]), tonumber(parts[8]),
+                    parts[9], parts[10])
             end)
         else
             send_line("NACK|" .. id .. "|Unknown command: " .. tostring(cmd))

@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"strconv"
 	"sync"
@@ -22,7 +23,7 @@ type wsClient struct {
 // findPlayerNameForClient returns the player name associated with the given wsClient or
 // empty string if none. Caller must hold s.mu if concurrent access is possible.
 func (s *Server) findPlayerNameForClient(client *wsClient) string {
-	for n, pc := range s.players {
+	for n, pc := range s.playerClients {
 		if pc == client {
 			return n
 		}
@@ -33,7 +34,7 @@ func (s *Server) findPlayerNameForClient(client *wsClient) string {
 // findAdminNameForClient returns the admin name associated with the given wsClient or
 // empty string if none. Caller must hold s.mu if concurrent access is possible.
 func (s *Server) findAdminNameForClient(client *wsClient) string {
-	for n, ac := range s.admins {
+	for n, ac := range s.adminClients {
 		if ac == client {
 			return n
 		}
@@ -144,10 +145,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					pl := st.Players[name]
 					pl.Connected = false
 					st.Players[name] = pl
-					delete(s.players, name)
+					delete(s.playerClients, name)
 				} else if adminName := s.findAdminNameForClient(cl); adminName != "" {
 					// Handle admin disconnection - could add admin state management here if needed
-					delete(s.admins, adminName)
+					delete(s.adminClients, adminName)
 					log.Printf("Admin %s disconnected", adminName)
 				}
 				delete(s.conns, c)
@@ -230,43 +231,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 				player := s.currentPlayer(name)
 				player.Connected = true
-
-				var instances []types.GameSwapInstance
-				var mainGames []types.GameEntry
-				var games []string
 				s.UpdateStateAndPersist(func(st *types.ServerState) {
 					st.Players[name] = player
 					s.conns[c] = client
-					s.players[name] = client
-					instances = append([]types.GameSwapInstance{}, st.GameSwapInstances...)
-					mainGames = append([]types.GameEntry{}, st.MainGames...)
-					games = append([]string{}, st.Games...)
+					s.playerClients[name] = client
 				})
 
-				payload := map[string]any{
-					"game_instances": instances,
-					"main_games":     mainGames,
-					"games":          games,
-				}
-				select {
-				case client.sendCh <- types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())}:
-				case <-time.After(5 * time.Second):
-					fmt.Printf("[ERROR] Failed to send CmdGamesUpdate to %s (queue full after 5s)\n", name)
-				}
-
-				if player.Game != "" {
-					startPayload := map[string]any{"game": player.Game, "instance_id": player.InstanceID}
-					select {
-					case client.sendCh <- types.Command{Cmd: types.CmdStart, Payload: startPayload, ID: fmt.Sprintf("init-%d", time.Now().UnixNano())}:
-					case <-time.After(5 * time.Second):
-						fmt.Printf("[ERROR] Failed to send CmdStart to %s (queue full after 5s)\n", name)
-					}
-				}
-
-				select {
-				case client.sendCh <- types.Command{Cmd: types.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
-				case <-time.After(5 * time.Second):
-					fmt.Printf("[ERROR] Failed to send CmdPing to %s (queue full after 5s)\n", name)
+				s.broadcastGamesUpdate(&player)
+				s.sendSwap(player)
+				if err := s.sendPing(player); err != nil {
+					log.Printf("failed to send ping to player %s: %v", player.Name, err)
 				}
 			} else {
 				fmt.Printf("[ERROR] Invalid payload type for CmdHello: %T\n", cmd.Payload)
@@ -286,7 +260,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				// Register the admin connection
 				s.UpdateStateAndPersist(func(st *types.ServerState) {
 					s.conns[c] = client
-					s.admins[name] = client
+					s.adminClients[name] = client
 				})
 
 				log.Printf("Admin %s connected", name)
@@ -342,8 +316,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 // broadcastToPlayers sends a command to all currently connected players.
 func (s *Server) broadcastToPlayers(cmd types.Command) {
 	s.mu.RLock()
-	clients := make([]*wsClient, 0, len(s.players))
-	for _, cl := range s.players {
+	clients := make([]*wsClient, 0, len(s.playerClients))
+	for _, cl := range s.playerClients {
 		clients = append(clients, cl)
 	}
 	s.mu.RUnlock()
@@ -362,8 +336,8 @@ func (s *Server) broadcastToPlayers(cmd types.Command) {
 // broadcastToAdmins sends a command to all currently connected admins.
 func (s *Server) broadcastToAdmins(cmd types.Command) {
 	s.mu.RLock()
-	clients := make([]*wsClient, 0, len(s.admins))
-	for _, cl := range s.admins {
+	clients := make([]*wsClient, 0, len(s.adminClients))
+	for _, cl := range s.adminClients {
 		clients = append(clients, cl)
 	}
 	s.mu.RUnlock()
@@ -378,20 +352,37 @@ func (s *Server) broadcastToAdmins(cmd types.Command) {
 	}
 }
 
+func (s *Server) broadcastGamesUpdate(player *types.Player) {
+	games, mainGames, gameInstances := s.SnapshotGames()
+	payload := map[string]any{
+		"game_instances": gameInstances,
+		"main_games":     mainGames,
+		"games":          games,
+	}
+	if player != nil {
+		errs := s.sendToPlayer(*player, types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+		if errs != nil {
+			log.Printf("failed to send games update to player %s: %v", player.Name, errs)
+		}
+	} else {
+		s.broadcastToPlayers(types.Command{Cmd: types.CmdGamesUpdate, Payload: payload, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+	}
+}
+
 // sendToPlayer enqueues a command to a player's websocket send queue.
-func (s *Server) sendToPlayer(player string, cmd types.Command) error {
+func (s *Server) sendToPlayer(player types.Player, cmd types.Command) error {
 	var client *wsClient
 	var ok bool
 	s.withRLock(func() {
-		client, ok = s.players[player]
+		client, ok = s.playerClients[player.Name]
 	})
 	if !ok || client == nil {
-		return fmt.Errorf("no connection for player %s", player)
+		return fmt.Errorf("no connection for player %s", player.Name)
 	}
 
 	s.broadcastToAdmins(types.Command{
 		Cmd:     cmd.Cmd,
-		Payload: map[string]any{"player": player, "original_payload": cmd.Payload},
+		Payload: map[string]any{"player": player.Name, "original_payload": cmd.Payload},
 		ID:      cmd.ID,
 	})
 
@@ -399,12 +390,29 @@ func (s *Server) sendToPlayer(player string, cmd types.Command) error {
 	case client.sendCh <- cmd:
 		return nil
 	case <-time.After(5 * time.Second):
-		return fmt.Errorf("send queue full for player %s (timeout after 5s)", player)
+		return fmt.Errorf("send queue full for player %s (timeout after 5s)", player.Name)
 	}
 }
 
+func (s *Server) sendPing(player types.Player) error {
+	var client *wsClient
+	var ok bool
+	s.withRLock(func() {
+		client, ok = s.playerClients[player.Name]
+	})
+	if !ok || client == nil {
+		return fmt.Errorf("no connection for player %s", player.Name)
+	}
+	select {
+	case client.sendCh <- types.Command{Cmd: types.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
+	case <-time.After(5 * time.Second):
+		return fmt.Errorf("send queue full for player %s (timeout after 5s)", player.Name)
+	}
+	return nil
+}
+
 // sendAndWait convenience wrapper that registers pending and waits for ack/nack.
-func (s *Server) sendAndWait(player string, cmd types.Command, timeout time.Duration) (string, error) {
+func (s *Server) sendAndWait(player types.Player, cmd types.Command, timeout time.Duration) (string, error) {
 	ch := make(chan string, 1)
 	s.withLock(func() {
 		s.pending[cmd.ID] = ch
@@ -423,17 +431,53 @@ func (s *Server) sendAndWait(player string, cmd types.Command, timeout time.Dura
 	}
 }
 
-func (s *Server) sendSwap(player string, game string, instanceID string) {
+func (s *Server) sendSwap(player types.Player) {
 	go func() {
-		payload := map[string]string{"game": game}
-		if instanceID != "" {
-			payload["instance_id"] = instanceID
+		payload := map[string]string{"game": player.Game}
+		if player.InstanceID != "" {
+			payload["instance_id"] = player.InstanceID
 		}
 		cmd := types.Command{
 			Cmd:     types.CmdSwap,
 			Payload: payload,
-			ID:      fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), player),
+			ID:      fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), player.Name),
 		}
 		_, _ = s.sendAndWait(player, cmd, 20*time.Second)
 	}()
+}
+
+func (s *Server) sendSwapAll() {
+	// capture local copy of instances for sending without holding lock while network operations run
+	playersMap := map[string]types.Player{}
+	s.withRLock(func() {
+		maps.Copy(playersMap, s.state.Players)
+	})
+
+	// Send swap command to each connected player. Include instance_id when player has an assigned instance.
+	for _, p := range playersMap {
+		if !p.Connected {
+			continue
+		}
+		s.sendSwap(p)
+	}
+}
+
+// RequestSave sends a request to save command to the specified player for the given instance
+func (s *Server) RequestSave(playerName string, instanceID string) error {
+	player, ok := s.state.Players[playerName]
+	if !ok {
+		return fmt.Errorf("player %s not found", playerName)
+	}
+	if !player.Connected {
+		return fmt.Errorf("player %s not connected", playerName)
+	}
+
+	payload := map[string]string{"instance_id": instanceID}
+	cmd := types.Command{
+		Cmd:     types.CmdRequestSave,
+		Payload: payload,
+		ID:      fmt.Sprintf("request-save-%d-%s", time.Now().UnixNano(), playerName),
+	}
+
+	return s.sendToPlayer(player, cmd)
 }

@@ -6,10 +6,6 @@ This directory contains Lua plugins for BizHawk Shuffler.
 
 All plugins are stored directly in this directory with their metadata.
 
-## Plugin Development
-
-See `PLUGIN_TODO.md` in the repository root for comprehensive plugin development documentation and roadmap.
-
 ## Basic Plugin Structure
 
 Each plugin should be in its own subdirectory:
@@ -34,7 +30,3 @@ plugins/my-plugin/
   "entry_point": "plugin.lua"
 }
 ```
-
-## Current Status
-
-🚧 **Under Development** - The plugin system is currently in early development phase. See `PLUGIN_TODO.md` for implementation roadmap.

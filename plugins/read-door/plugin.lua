@@ -16,8 +16,8 @@ console.log("Read Door: Plugin loaded!")
 -- === CONFIG ===
 local pollInterval = 60 -- frames between checks (adjust as needed)
 
--- Per-game config (keys are substrings matched against the game name string passed
--- to on_game_start). Leave empty and use AUTO_PROBE if you need to discover addresses.
+-- Per-game config (keys are substrings matched against the game name string).
+-- Leave empty and use AUTO_PROBE if you need to discover addresses.
 local games = {
     ["legend of zelda, the - a link to the past (usa)"] = {
         addr = 0xA2,
@@ -82,7 +82,7 @@ local games = {
         desc = "map/room index (7E:0100 used by Chrono Compendium location offsets). Save-slot world in SRAM: 0x000005F3"
     },
     ["donkey kong country 2 - diddy's kong quest (usa) (en,fr)"] = {
-        addr = 0xD3, -- ?
+        addr = 0x94, -- (level?) other candidates: 96 (level?), D3 (sublevel), F, 1C
         size = 2,
         domain = "WRAM",
         desc = "current level id (WRAM) — p4plus2 / DonkeyHacks DKC2 RAM map"
@@ -101,11 +101,17 @@ local games = {
     },
     -- 5044 - routes; 5040 - towns
     ['pokemon - leafgreen version (usa)'] = {
-        addr = 0x500D, -- ?
+        addr = 0x5044,
         size = 2,
         domain = "IWRAM",
-        desc = "map number (u8) at 0300500D"
+        desc = "map number (u8) at 03005044"
     },
+    ['harry potter and the sorcerer\'s stone (usa, europe) (en,fr,de,es,it,pt,nl,sv,no,da,fi)'] = {
+        addr = 0x66D2, -- 66D0 stores the last room, 66D2 the current room
+        size = 1,
+        domain = "WRAM",
+        desc = "current room id"
+    }
 }
 
 -- Optional: one-shot automatic probe after game start to discover changed bytes.
@@ -401,24 +407,10 @@ local function on_frame()
     end
 end
 
-local function on_game_start(game_name)
-    console.log("Read Door: Game started - " .. tostring(game_name))
-    currentGame = game_name .. "_" .. (InstanceID or "")
-    lastValueByGame[currentGame] = nil
-    bestDomainCached = nil
-    lastRomName = game_name
-    lastInstanceID = InstanceID
-    -- optional auto-probe
-    if AUTO_PROBE_ON_START then
-        start_probe(PROBE_PARAMS.domain, PROBE_PARAMS.start, PROBE_PARAMS.len, PROBE_PARAMS.framesDelay)
-    end
-end
-
 -- Exported helpers for manual use by whomever calls this plugin table:
 local exported = {
     on_init = on_init,
     on_frame = on_frame,
-    on_game_start = on_game_start
 }
 
 return exported

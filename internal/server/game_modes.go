@@ -2,10 +2,10 @@ package server
 
 import (
 	"errors"
-	"maps"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
@@ -59,24 +59,14 @@ func (h *SyncModeHandler) HandleSwap() error {
 	}
 
 	// In sync mode, set all players to the same game
-	// Update state under write lock, but minimize critical section
-	connectedPlayers := []string{}
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		for name, player := range st.Players {
 			player.Game = game
 			player.InstanceID = ""
 			st.Players[name] = player
 		}
-		for name, player := range st.Players {
-			if player.Connected {
-				connectedPlayers = append(connectedPlayers, name)
-			}
-		}
 	})
-	// Second loop: Execute notifications for connected players
-	for _, name := range connectedPlayers {
-		h.server.sendSwap(name, game, "")
-	}
+	h.server.sendSwapAll()
 	return nil
 }
 
@@ -136,10 +126,12 @@ func (h *SyncModeHandler) SetupState() error {
 	return nil
 }
 
-func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
+func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, _ string) error {
 	// In sync mode we don't use instances; just set the player's current game
+	var p types.Player
+	var ok bool
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
-		p, ok := st.Players[player]
+		p, ok = st.Players[player]
 		if !ok {
 			p = types.Player{Name: player}
 		}
@@ -148,7 +140,7 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, instanceI
 		st.Players[player] = p
 	})
 
-	h.server.sendSwap(player, game, instanceID)
+	h.server.sendSwap(p)
 	return nil
 }
 
@@ -158,6 +150,21 @@ type SaveModeHandler struct {
 }
 
 func (h *SaveModeHandler) HandleSwap() error {
+	var waiting bool
+	ticker := time.NewTicker(100 * time.Millisecond)
+	for range 3 {
+		h.server.withRLock(func() {
+			waiting = h.server.pendingInstancecount > 0
+		})
+		if waiting {
+			h.server.RequestPendingSaves()
+		}
+		<-ticker.C
+	}
+	if waiting {
+		return nil
+	}
+
 	var preventSame bool
 	h.server.withRLock(func() { preventSame = h.server.state.PreventSameGameSwap })
 
@@ -179,13 +186,14 @@ func (h *SaveModeHandler) HandleSwap() error {
 		playerCurrentGames := make(map[string]string)
 		playerCurrentInstances := make(map[string]string)
 		// Clear players' InstanceID for a fresh assignment
+
 		for n, p := range st.Players {
 			playerCurrentGames[n] = p.Game
 			playerCurrentInstances[n] = p.InstanceID
 			// If player had an assigned instance, set that instance state to pending (in transition)
 			if p.InstanceID != "" && p.Connected {
 				// we must call setInstanceFileState without holding the main lock to avoid deadlocks
-				go h.server.setInstanceFileState(p.InstanceID, types.FileStatePending)
+				go h.server.setInstanceFileStateWithPlayer(p.InstanceID, types.FileStatePending, n)
 			}
 			p.InstanceID = ""
 			p.Game = ""
@@ -248,19 +256,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 			}
 		}
 	})
-	// capture local copy of instances for sending without holding lock while network operations run
-	playersMap := map[string]types.Player{}
-	h.server.withRLock(func() {
-		maps.Copy(playersMap, h.server.state.Players)
-	})
-
-	// Send swap command to each connected player. Include instance_id when player has an assigned instance.
-	for name, p := range playersMap {
-		if !p.Connected {
-			continue
-		}
-		h.server.sendSwap(name, p.Game, p.InstanceID)
-	}
+	h.server.sendSwapAll()
 	return nil
 }
 
@@ -311,7 +307,9 @@ func (h *SaveModeHandler) SetupState() error {
 
 func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
 	var foundInst *types.GameSwapInstance
-	var foundPlayer string
+	var foundPlayer *types.Player
+	var ok bool
+	var p types.Player
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		// If instance ID provided, assign that instance to the player (players now store InstanceID)
 		if instanceID == "" {
@@ -331,14 +329,14 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 				swappingPlayer.InstanceID = ""
 				st.Players[playerName] = swappingPlayer
 				if swappingPlayer.Connected {
-					foundPlayer = playerName
+					foundPlayer = &swappingPlayer
 				}
 				break
 			}
 		}
 		// update player entry if we found an instance
 		if foundInst != nil {
-			p, ok := st.Players[player]
+			p, ok = st.Players[player]
 			if !ok {
 				p = types.Player{Name: player}
 			}
@@ -358,13 +356,13 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	_ = h.server.saveState()
 
 	// Set instance state to pending before upload starts
-	if foundPlayer != "" {
-		h.server.setInstanceFileState(foundInst.ID, types.FileStatePending)
-		h.server.sendSwap(foundPlayer, "", "")
+	if foundPlayer != nil {
+		h.server.setInstanceFileStateWithPlayer(foundInst.ID, types.FileStatePending, foundPlayer.Name)
+		h.server.sendSwap(*foundPlayer)
 	} else {
 		h.server.setInstanceFileState(foundInst.ID, types.FileStateNone)
 	}
-	h.server.sendSwap(player, foundInst.Game, foundInst.ID)
+	h.server.sendSwap(p)
 	return nil
 }
 

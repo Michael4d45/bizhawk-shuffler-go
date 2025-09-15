@@ -14,16 +14,16 @@ import (
 
 // Server encapsulates all state and connected websocket clients.
 type Server struct {
-	mu          sync.RWMutex
-	state       types.ServerState
-	conns       map[*websocket.Conn]*wsClient
-	players     map[string]*wsClient
-	admins      map[string]*wsClient
-	upgrader    websocket.Upgrader
-	pending     map[string]chan string
-	schedulerCh chan struct{}
-	// TODO: Add broadcaster field: *DiscoveryBroadcaster
-	broadcaster *DiscoveryBroadcaster
+	mu                   sync.RWMutex
+	pendingInstancecount int
+	state                types.ServerState
+	conns                map[*websocket.Conn]*wsClient
+	playerClients        map[string]*wsClient
+	adminClients         map[string]*wsClient
+	upgrader             websocket.Upgrader
+	pending              map[string]chan string
+	schedulerCh          chan struct{}
+	broadcaster          *DiscoveryBroadcaster
 }
 
 // ErrTimeout is exported so callers can detect timeout waiting for a client ack/nack.
@@ -46,12 +46,12 @@ func New() *Server {
 			MaxIntervalSecs:     300,
 			PreventSameGameSwap: false, // Default to false
 		},
-		conns:       make(map[*websocket.Conn]*wsClient),
-		players:     make(map[string]*wsClient),
-		admins:      make(map[string]*wsClient),
-		upgrader:    websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
-		pending:     make(map[string]chan string),
-		schedulerCh: make(chan struct{}, 1),
+		conns:         make(map[*websocket.Conn]*wsClient),
+		playerClients: make(map[string]*wsClient),
+		adminClients:  make(map[string]*wsClient),
+		upgrader:      websocket.Upgrader{CheckOrigin: func(r *http.Request) bool { return true }},
+		pending:       make(map[string]chan string),
+		schedulerCh:   make(chan struct{}, 1),
 	}
 	s.loadState()
 	_ = os.MkdirAll("./files", 0755)
@@ -94,6 +94,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/message_all", s.apiMessageAll)
 	// Save state management endpoints
 	mux.HandleFunc("/save/upload", s.handleSaveUpload)
+	mux.HandleFunc("/save/no-save", s.handleNoSaveState)
 	mux.HandleFunc("/save/", s.handleSaveDownload)
 }
 

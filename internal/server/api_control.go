@@ -15,7 +15,7 @@ func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.Running = true
 	})
-	s.broadcastToPlayers(types.Command{Cmd: types.CmdStart, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
+	s.broadcastToPlayers(types.Command{Cmd: types.CmdResume, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
 	select {
 	case s.schedulerCh <- struct{}{}:
 	default:
@@ -55,7 +55,19 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 	savesDir := "./saves"
 	if _, err := os.Stat(savesDir); err == nil {
 		trash := fmt.Sprintf("%s.trash.%d", savesDir, time.Now().Unix())
-		_ = os.Rename(savesDir, trash)
+		// Retry rename up to 3 times with small delay to handle Windows file locking issues
+		var renameErr error
+		for i := 0; i < 3; i++ {
+			if renameErr = os.Rename(savesDir, trash); renameErr == nil {
+				break
+			}
+			if i < 2 {
+				time.Sleep(10 * time.Millisecond)
+			}
+		}
+		if renameErr != nil {
+			fmt.Printf("failed to rename saves dir to trash: %v\n", renameErr)
+		}
 	}
 	_ = os.MkdirAll(savesDir, 0755)
 	s.broadcastToPlayers(types.Command{Cmd: types.CmdClearSaves, ID: fmt.Sprintf("%d", time.Now().UnixNano())})

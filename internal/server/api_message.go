@@ -70,8 +70,17 @@ func (s *Server) apiMessagePlayer(w http.ResponseWriter, r *http.Request) {
 		},
 		ID: fmt.Sprintf("message-%d-%s", time.Now().UnixNano(), b.Player),
 	}
+	var player types.Player
+	var ok bool
+	s.withRLock(func() {
+		player, ok = s.state.Players[b.Player]
+	})
+	if !ok {
+		http.Error(w, "player not found", http.StatusNotFound)
+		return
+	}
 
-	err := s.sendToPlayer(b.Player, cmd)
+	err := s.sendToPlayer(player, cmd)
 	w.Header().Set("Content-Type", "application/json")
 	if err != nil {
 		http.Error(w, fmt.Sprintf("failed to send message: %v", err), http.StatusInternalServerError)

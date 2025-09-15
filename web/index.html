@@ -295,7 +295,16 @@
                 <div class="flex flex-col">
                   <span class="text-sm font-mono text-gray-200" x-text="inst.id"></span>
                   <span class="text-sm text-gray-400" x-text="inst.game || '(no game)'"></span>
-                  <span class="text-xs text-gray-500" x-text="inst.player ? 'assigned:' : 'unassigned'"></span>
+                  <div class="flex items-center gap-2">
+                    <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                      :class="inst.file_state === 'ready' ? 'bg-green-500/20 text-green-400' : inst.file_state === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'"
+                      x-text="inst.file_state || 'none'"></span>
+                    <span class="text-xs text-gray-500" x-text="inst.player ? 'assigned:' : 'unassigned'"></span>
+                    <template x-if="inst.pending_player">
+                      <span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300"
+                        x-text="'pending: ' + inst.pending_player"></span>
+                    </template>
+                  </div>
                   <template x-if="inst.player">
                     <span
                       class="px-2 py-1 bg-blue-600/20 text-blue-300 rounded text-xs cursor-move select-none flex items-center gap-1 hover:bg-blue-600/30 transition-colors"
@@ -860,7 +869,7 @@
               const newMap = Object.fromEntries(
                 st.game_instances.map((i) => [
                   i.id,
-                  { id: i.id, game: i.game || "", player: playerNameByInstanceId[i.id] || "", _saved: true },
+                  { id: i.id, game: i.game || "", file_state: i.file_state || "none", player: playerNameByInstanceId[i.id] || "", _saved: true },
                 ])
               );
 
@@ -877,6 +886,7 @@
                     ...oldMap[id],
                     id: oldMap[id]._dirtyId ? oldMap[id].id : newInst.id,
                     game: oldMap[id]._dirtyGame ? oldMap[id].game : newInst.game,
+                    file_state: newInst.file_state,
                     player: playerNameByInstanceId[id] || "",
                     _saved: true,
                   };
@@ -1155,6 +1165,7 @@
           const newInst = {
             id: this.newInstance.id,
             game: this.newInstance.game,
+            file_state: "none",
             player: "" // New instances don't have assigned players initially
           };
           this.gameInstances.push(newInst); // Add to UI list immediately
@@ -1664,6 +1675,7 @@
               const newInstance = {
                 id: newInstanceId,
                 game: gameFile,
+                file_state: "none",
                 player: firstUnassigned
               };
 

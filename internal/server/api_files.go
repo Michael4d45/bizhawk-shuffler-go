@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"time"
 )
 
 // handleAdmin serves the admin UI index page.
@@ -134,8 +135,18 @@ func (s *Server) handleBizhawkFilesZip(w http.ResponseWriter, r *http.Request) {
 					log.Printf("failed to build BizhawkFiles.zip to temp: %v", err)
 					_ = os.Remove(tmpName)
 				} else {
-					if err := os.Rename(tmpName, zipPath); err != nil {
-						log.Printf("failed to rename temp zip into place: %v", err)
+					// Retry rename up to 3 times with small delay to handle Windows file locking issues
+					var renameErr error
+					for i := 0; i < 3; i++ {
+						if renameErr = os.Rename(tmpName, zipPath); renameErr == nil {
+							break
+						}
+						if i < 2 {
+							time.Sleep(10 * time.Millisecond)
+						}
+					}
+					if renameErr != nil {
+						log.Printf("failed to rename temp zip into place: %v", renameErr)
 						_ = os.Remove(tmpName)
 					}
 				}

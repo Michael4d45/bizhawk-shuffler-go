@@ -34,7 +34,7 @@ type Client struct {
 	api          *API
 	bhController *BizHawkController
 	bipc         *BizhawkIPC
-	// TODO: Add discovery listener field
+
 	discoveryListener *DiscoveryListener
 	pluginSyncManager *PluginSyncManager
 }
@@ -203,8 +203,9 @@ func New(args []string) (*Client, error) {
 		api:          api,
 		bhController: bhController,
 		bipc:         bipc,
-		// TODO: Initialize discovery listener
+
 		discoveryListener: nil,
+
 		pluginSyncManager: pluginSyncManager,
 	}
 
@@ -365,7 +366,6 @@ func MonitorProcess(cmd *exec.Cmd, onExit func(error)) {
 	}()
 }
 
-// TODO: Add methods for managing discovery listener
 // StartDiscovery initializes and starts the discovery listener
 func (c *Client) StartDiscovery(ctx context.Context) error {
 	if c.discoveryListener != nil {

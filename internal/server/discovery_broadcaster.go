@@ -1,13 +1,5 @@
 package server
 
-// TODO: Implement LAN server discovery broadcaster
-// - Add DiscoveryBroadcaster struct with UDP connection
-// - Implement Start() method to begin periodic broadcasting
-// - Implement Stop() method to clean up UDP connection
-// - Broadcast server info (host, port, name) via UDP multicast
-// - Handle broadcast errors gracefully
-// - Make broadcast interval configurable
-
 import (
 	"context"
 	"encoding/json"
@@ -33,7 +25,6 @@ type DiscoveryBroadcaster struct {
 
 // NewDiscoveryBroadcaster creates a new discovery broadcaster
 func NewDiscoveryBroadcaster(config *types.DiscoveryConfig, serverHost string, serverPort int, serverName string) *DiscoveryBroadcaster {
-	// TODO: Initialize broadcaster with configuration
 	return &DiscoveryBroadcaster{
 		config:     config,
 		serverHost: serverHost,

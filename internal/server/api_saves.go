@@ -69,6 +69,7 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Set state to ready after successful upload
+	fmt.Println("Uploaded save file for instance", instanceID, "to", dstPath)
 	s.setInstanceFileState(instanceID, types.FileStateReady)
 
 	if _, err := w.Write([]byte("ok")); err != nil {
@@ -120,18 +121,76 @@ func (s *Server) handleSaveDownload(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "save file not found", http.StatusNotFound)
 		return
 	}
+	s.setInstanceFileState(instanceID, types.FileStateReady)
 
 	// Serve the file
 	http.ServeFile(w, r, savePath)
 }
 
+// handleNoSaveState handles POST /save/no-save to indicate no save file exists for an instance
+func (s *Server) handleNoSaveState(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	err := r.ParseForm()
+	if err != nil {
+		http.Error(w, "parse form: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	instanceID := r.FormValue("instance_id")
+	if instanceID == "" {
+		http.Error(w, "instance_id required", http.StatusBadRequest)
+		return
+	}
+
+	// Set state to none since there's no save file
+	s.setInstanceFileState(instanceID, types.FileStateNone)
+
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}
+
 // setInstanceFileState updates the file state for a given instance ID
 func (s *Server) setInstanceFileState(instanceID string, state types.FileState) {
+	s.setInstanceFileStateWithPlayer(instanceID, state, "")
+}
+
+// setInstanceFileStateWithPlayer updates the file state for a given instance ID and sets the pending player
+func (s *Server) setInstanceFileStateWithPlayer(instanceID string, state types.FileState, pendingPlayer string) {
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		for i, instance := range st.GameSwapInstances {
 			if instance.ID == instanceID {
+				if st.GameSwapInstances[i].FileState == state && st.GameSwapInstances[i].PendingPlayer == pendingPlayer {
+					// No change
+					return
+				}
+				if state == types.FileStatePending {
+					s.pendingInstancecount++
+				}
+				if st.GameSwapInstances[i].FileState == types.FileStatePending && state != types.FileStatePending {
+					s.pendingInstancecount--
+				}
+				fmt.Println("Setting file state for instance", instanceID, "to", state, "pending player:", pendingPlayer)
 				st.GameSwapInstances[i].FileState = state
+				st.GameSwapInstances[i].PendingPlayer = pendingPlayer
 				break
+			}
+		}
+	})
+}
+
+func (s *Server) RequestPendingSaves() {
+	s.withRLock(func() {
+		for _, instance := range s.state.GameSwapInstances {
+			if instance.FileState == types.FileStatePending && instance.PendingPlayer != "" {
+				fmt.Println("Requesting save from player", instance.PendingPlayer, "for instance", instance.ID)
+				if err := s.RequestSave(instance.PendingPlayer, instance.ID); err != nil {
+					fmt.Printf("Failed to request save from player %s for instance %s: %v\n", instance.PendingPlayer, instance.ID, err)
+				}
 			}
 		}
 	})

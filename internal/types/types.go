@@ -1,8 +1,3 @@
-// TODO: Add discovery message structures and server info types
-// - DiscoveryMessage: UDP broadcast message containing server info
-// - ServerInfo: Basic server information (host, port, name, version)
-// - DiscoveryConfig: Configuration for discovery behavior (multicast address, interval, enabled)
-
 package types
 
 import (
@@ -55,13 +50,14 @@ const (
 
 	// From Server to Client
 	CmdPing        CommandName = "ping"
-	CmdStart       CommandName = "start"
+	CmdResume      CommandName = "start"
 	CmdPause       CommandName = "pause"
 	CmdSwap        CommandName = "swap"
 	CmdMessage     CommandName = "message"
 	CmdGamesUpdate CommandName = "games_update"
 	CmdClearSaves  CommandName = "clear_saves"
 	CmdReset       CommandName = "reset"
+	CmdRequestSave CommandName = "request_save"
 
 	// From Admin to Server
 	CmdHelloAdmin CommandName = "hello_admin"
@@ -222,9 +218,10 @@ type Player struct {
 }
 
 type GameSwapInstance struct {
-	ID        string    `json:"id"`
-	Game      string    `json:"game"`
-	FileState FileState `json:"file_state"`
+	ID            string    `json:"id"`
+	Game          string    `json:"game"`
+	FileState     FileState `json:"file_state"`
+	PendingPlayer string    `json:"pending_player,omitempty"`
 }
 
 // Plugin represents a Lua plugin that can be loaded into BizHawk

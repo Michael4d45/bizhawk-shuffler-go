@@ -14,14 +14,8 @@ local function on_frame()
     -- For demo purposes, do nothing
 end
 
--- Game start hook
-local function on_game_start(game_name)
-    console.log("Example plugin: Game started - " .. tostring(game_name))
-end
-
 -- Export plugin hooks for the main server.lua to call
 return {
     on_init = on_init,
     on_frame = on_frame,
-    on_game_start = on_game_start
 }

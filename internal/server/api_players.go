@@ -2,11 +2,8 @@ package server
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 	"net/http"
-	"sync"
-	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
@@ -98,7 +95,7 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 	}
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
 		delete(st.Players, b.Player)
-		if cl, ok := s.players[b.Player]; ok {
+		if cl, ok := s.playerClients[b.Player]; ok {
 			for c, client := range s.conns {
 				if client == cl {
 					delete(s.conns, c)
@@ -106,7 +103,7 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 					break
 				}
 			}
-			delete(s.players, b.Player)
+			delete(s.playerClients, b.Player)
 		}
 	})
 	w.Header().Set("Content-Type", "application/json")
@@ -136,38 +133,8 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 			st.Players[name] = player
 		}
 	})
-	results := map[string]string{}
-	var mu sync.Mutex
-	var wg sync.WaitGroup
-
-	for _, p := range players {
-		wg.Add(1)
-		go func(p string) {
-			defer wg.Done()
-			cmdID := fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), p)
-			cmd := types.Command{
-				Cmd:     types.CmdSwap,
-				ID:      cmdID,
-				Payload: map[string]string{"game": b.Game},
-			}
-			res, err := s.sendAndWait(p, cmd, 20*time.Second)
-
-			mu.Lock()
-			defer mu.Unlock()
-			if err != nil {
-				if errors.Is(err, ErrTimeout) {
-					results[p] = "timeout"
-				} else {
-					results[p] = "send_failed: " + err.Error()
-				}
-			} else {
-				results[p] = res
-			}
-		}(p)
-	}
-
-	wg.Wait()
-	if err := json.NewEncoder(w).Encode(results); err != nil {
+	s.sendSwapAll()
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}
 }

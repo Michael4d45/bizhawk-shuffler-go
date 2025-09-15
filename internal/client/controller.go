@@ -45,45 +45,11 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	}
 
 	switch cmd.Cmd {
-	case types.CmdStart:
+	case types.CmdResume:
 		go func(id string) {
-			game := ""
-			instanceID := ""
-			if m, ok := cmd.Payload.(map[string]any); ok {
-				if g, ok := m["game"].(string); ok {
-					game = g
-				}
-				if iid, ok := m["instance_id"].(string); ok {
-					instanceID = iid
-				}
-			}
-			// If no game provided, treat as a resume/unpause signal.
-			if game == "" {
-				ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
-				defer cancel2()
-				if err := c.bipc.SendResume(ctx2); err != nil {
-					sendNack(id, err.Error())
-					return
-				}
-				sendAck(id)
-				return
-			} else {
-				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
-				if err := c.progressTracking.EnsureFileWithProgress(ctx2, game); err != nil {
-					cancel2()
-					sendNack(id, "download failed: "+err.Error())
-					return
-				}
-				cancel2()
-			}
-
-			if err := c.EnsureSaveState(instanceID); err != nil {
-				sendNack(id, "save state orchestration failed: "+err.Error())
-				return
-			}
-
-			log.Printf("handling start command for game=%s", game)
-			if err := c.bipc.SendStart(ctx, game, instanceID); err != nil {
+			ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
+			defer cancel2()
+			if err := c.bipc.SendResume(ctx2); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
@@ -295,6 +261,33 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				sendNack(id, err.Error())
 				return
 			}
+			sendAck(id)
+		}(cmd.ID)
+	case types.CmdRequestSave:
+		go func(id string) {
+			instanceID := ""
+			if m, ok := cmd.Payload.(map[string]any); ok {
+				if iid, ok := m["instance_id"].(string); ok {
+					instanceID = iid
+				}
+			}
+			if instanceID == "" {
+				sendNack(id, "missing instance_id")
+				return
+			}
+
+			// Save the current state
+			if err := c.bipc.SendSave(ctx); err != nil {
+				sendNack(id, "save failed: "+err.Error())
+				return
+			}
+
+			// Upload the save state
+			if err := c.api.UploadSaveState(instanceID); err != nil {
+				sendNack(id, "upload failed: "+err.Error())
+				return
+			}
+
 			sendAck(id)
 		}(cmd.ID)
 	default:
