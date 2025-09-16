@@ -151,7 +151,7 @@ func (s *Server) apiModeSetup(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "something went wrong "+err.Error(), http.StatusBadRequest)
 		return
 	}
-	s.broadcastGamesUpdate()
+	s.broadcastGamesUpdate(nil)
 
 	if _, err := w.Write([]byte("ok")); err != nil {
 		fmt.Printf("write response error: %v\n", err)
