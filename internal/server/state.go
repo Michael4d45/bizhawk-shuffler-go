@@ -151,7 +151,9 @@ func (s *Server) saveState() error {
 			// Don't save state if any plugin is in error state
 			return fmt.Errorf("not saving state due to plugin %s", plugin.Name)
 		}
-		s.savePluginConfig(plugin)
+		if err := s.savePluginConfig(plugin); err != nil {
+			return fmt.Errorf("failed to save plugin config for %s: %w", plugin.Name, err)
+		}
 	}
 	st.Plugins = nil // Don't persist plugins in state.json
 	return s.saveJson(st, "state.json")
