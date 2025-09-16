@@ -176,7 +176,7 @@ func (psm *PluginSyncManager) fetchServerPlugins() (map[string]types.Plugin, err
 	// Filter to only enabled plugins
 	enabledPlugins := make(map[string]types.Plugin)
 	for name, plugin := range response.Plugins {
-		if plugin.Enabled {
+		if plugin.Status == types.PluginStatusEnabled {
 			enabledPlugins[name] = plugin
 			log.Printf("Server has enabled plugin: %s (v%s)", name, plugin.Version)
 		} else {
@@ -222,7 +222,7 @@ func (psm *PluginSyncManager) scanLocalPlugins() (map[string]types.Plugin, error
 				Name:        pluginName,
 				Version:     "unknown",
 				Description: "Plugin without metadata",
-				Enabled:     true, // Assume enabled if present
+				Status:      types.PluginStatusDisabled,
 			}
 			continue
 		}

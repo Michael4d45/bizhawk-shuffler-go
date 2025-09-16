@@ -12,23 +12,54 @@ import (
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
+func (s *Server) loadJson(filename string, out any) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("close %s error: %v", filename, closeErr)
+		}
+	}()
+	dec := json.NewDecoder(file)
+	dec.DisallowUnknownFields()
+	if err := dec.Decode(out); err != nil {
+		return err
+	}
+	return nil
+}
+
+func (s *Server) saveJson(data any, filename string) error {
+	file, err := os.Create(filename)
+	if err != nil {
+		return err
+	}
+	defer func() {
+		if closeErr := file.Close(); closeErr != nil {
+			log.Printf("close %s error: %v", filename, closeErr)
+		}
+	}()
+	enc := json.NewEncoder(file)
+	enc.SetIndent("", "  ")
+	if err := enc.Encode(data); err != nil {
+		return err
+	}
+	return file.Sync()
+}
+
 // loadState loads persisted server state from disk if present.
 func (s *Server) loadState() {
-	f, err := os.Open("state.json")
-	if err != nil {
-		log.Printf("state file not found, using defaults: %v", err)
-		return
-	}
-
 	var tmp types.ServerState
-	dec := json.NewDecoder(f)
-	dec.DisallowUnknownFields()
-	if err := dec.Decode(&tmp); err != nil {
-		log.Printf("failed to decode state file %s: %v", "state.json", err)
-		return
+	if err := s.loadJson("state.json", &tmp); err != nil {
+		if os.IsNotExist(err) {
+			log.Printf("no existing state file found, starting fresh")
+			tmp = s.SnapshotState()
+		} else {
+			log.Printf("failed to load state from disk: %v", err)
+			return
+		}
 	}
-	// Close the file immediately after decoding to avoid locking issues on Windows
-	_ = f.Close()
 	if tmp.GameSwapInstances == nil {
 		tmp.GameSwapInstances = []types.GameSwapInstance{}
 	}
@@ -62,6 +93,22 @@ func (s *Server) loadState() {
 		player.Connected = false
 		tmp.Players[name] = player
 	}
+
+	// Load plugins from plugins directory, ignore tmp.Plugins
+	tmp.Plugins = make(map[string]types.Plugin)
+	pluginsDir := "./plugins"
+	if entries, err := os.ReadDir(pluginsDir); err == nil {
+		for _, entry := range entries {
+			if entry.IsDir() {
+				pluginName := entry.Name()
+				if plugin := s.loadPluginMetadata(pluginName); plugin != nil {
+					tmp.Plugins[pluginName] = *plugin
+					fmt.Println("loaded plugin metadata for", pluginName)
+				}
+			}
+		}
+	}
+
 	s.withLock(func() {
 		s.state = tmp
 	})
@@ -99,45 +146,45 @@ func (s *Server) startSaver() {
 // saveState writes current state atomically to disk.
 func (s *Server) saveState() error {
 	st := s.SnapshotState()
-	dir := filepath.Dir("state.json")
-	if dir == "" || dir == "." {
-		dir = "."
-	}
-	tmpFile, err := os.CreateTemp(dir, "state-*.tmp")
-	if err != nil {
-		return err
-	}
-	enc := json.NewEncoder(tmpFile)
-	enc.SetIndent("", "  ")
-	if err := enc.Encode(&st); err != nil {
-		if err2 := tmpFile.Close(); err2 != nil {
-			log.Printf("close tmp file error: %v", err2)
+	for _, plugin := range st.Plugins {
+		if plugin.Status == types.PluginStatusError {
+			// Don't save state if any plugin is in error state
+			return fmt.Errorf("not saving state due to plugin %s", plugin.Name)
 		}
-		_ = os.Remove(tmpFile.Name())
-		return err
+		s.savePluginConfig(plugin)
 	}
-	_ = tmpFile.Sync()
-	if err := tmpFile.Close(); err != nil {
-		_ = os.Remove(tmpFile.Name())
-		log.Printf("close tmp file error: %v", err)
-		return err
+	st.Plugins = nil // Don't persist plugins in state.json
+	return s.saveJson(st, "state.json")
+}
+
+func (s *Server) savePluginConfig(plugin types.Plugin) error {
+	pluginDir := filepath.Join("./plugins", plugin.Name)
+	if err := os.MkdirAll(pluginDir, 0755); err != nil {
+		return fmt.Errorf("failed to create plugin dir: %w", err)
 	}
-	// Retry rename up to 3 times with small delay to handle Windows file locking issues
-	var renameErr error
-	for i := range 3 {
-		if renameErr = os.Rename(tmpFile.Name(), "state.json"); renameErr == nil {
-			break
-		}
-		if i < 2 {
-			time.Sleep(10 * time.Millisecond)
-		}
+	metaPath := filepath.Join(pluginDir, "meta.json")
+
+	var existing types.Plugin
+	// load json, overwrite just the fields: [status].
+	if err := s.loadJson(metaPath, &existing); err != nil {
+		return fmt.Errorf("failed to load existing plugin metadata: %w", err)
 	}
-	if renameErr != nil {
-		_ = os.Remove(tmpFile.Name())
-		log.Printf("rename tmp file error: %v", renameErr)
-		return renameErr
+	existing.Status = plugin.Status
+	s.state.Plugins[plugin.Name] = existing
+	return s.saveJson(existing, metaPath)
+}
+
+// loadPluginMetadata loads plugin metadata from disk
+func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
+	var plugin types.Plugin
+	pluginDir := filepath.Join("./plugins", pluginName)
+	metaPath := filepath.Join(pluginDir, "meta.json")
+	if err := s.loadJson(metaPath, &plugin); err != nil {
+		fmt.Printf("failed to load plugin metadata for %s: %v\n", pluginName, err)
+		return nil
 	}
-	return nil
+
+	return &plugin
 }
 
 // handleStateJSON returns the server state as JSON.

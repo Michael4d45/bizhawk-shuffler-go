@@ -24,10 +24,12 @@ local function file_exists(name)
     end
 end
 
+local available_hooks = {"on_init", "on_frame"}
+
 -- Plugin hook functions
 local function call_plugin_hook(hook_name, ...)
     for plugin_name, plugin_data in pairs(loaded_plugins) do
-        local hook_func = plugin_data.module[hook_name]
+        local hook_func = plugin_data[hook_name]
         if hook_func then
             local ok, err = pcall(hook_func, ...)
             if not ok then
@@ -394,56 +396,55 @@ local function load_plugins()
     -- Load each plugin
     for _, plugin_name in ipairs(plugin_dirs) do
         local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
-        local meta_path = plugin_path .. "/meta.json"
         local plugin_lua_path = plugin_path .. "/plugin.lua"
 
         -- Check if meta.json exists
-        if file_exists(meta_path) and file_exists(plugin_lua_path) then
+        if file_exists(plugin_lua_path) then
             -- Read and parse meta.json (simple approach)
-            local meta_file = io.open(meta_path, "r")
-            if meta_file then
-                local meta_content = meta_file:read("*all")
-                meta_file:close()
+            console.log("Found plugin: " .. plugin_name)
 
-                console.log("Found plugin: " .. plugin_name)
+            -- Load the plugin Lua file
+            local plugin_ok, plugin_module = pcall(dofile, plugin_lua_path)
 
-                -- Simple check for enabled status in JSON
-                local enabled = string.find(meta_content, '"enabled"%s*:%s*true') ~= nil
-                local meta = {
-                    name = plugin_name,
-                    enabled = enabled,
-                    entry_point = "plugin.lua"
-                }
-
-                if meta.enabled then
-                    console.log("Loading plugin: " .. plugin_name)
-
-                    -- Load the plugin Lua file
-                    local plugin_ok, plugin_module = pcall(dofile, plugin_lua_path)
-
-                    if plugin_ok and plugin_module then
-                        loaded_plugins[plugin_name] = {
-                            meta = meta,
-                            module = plugin_module
-                        }
-
-                        -- Call on_init hook if available
-                        if plugin_module.on_init then
-                            local init_ok, init_err = pcall(plugin_module.on_init)
-                            if not init_ok then
-                                console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
+            if plugin_ok and plugin_module then
+                local is_valid = true
+                for _, hook in ipairs(available_hooks) do
+                    if plugin_module[hook] and type(plugin_module[hook]) ~= "function" then
+                        console.log("Plugin " .. plugin_name .. " has invalid hook '" .. hook .. "'; must be a function")
+                        is_valid = false
+                    end
+                end
+                for k, v in pairs(plugin_module) do
+                    if type(v) == "function" then
+                        local is_hook = false
+                        for _, hook in ipairs(available_hooks) do
+                            if k == hook then
+                                is_hook = true
+                                break
                             end
                         end
-
-                        console.log("Plugin " .. plugin_name .. " loaded successfully")
-                    else
-                        console.log("Failed to load plugin " .. plugin_name .. ": " .. tostring(plugin_module))
+                        if not is_hook then
+                            console.log("Plugin " .. plugin_name .. " has unknown function '" .. k .. "'; ignoring")
+                        end
                     end
+                end
+
+                if not is_valid then
+                    console.log("Plugin " .. plugin_name .. " is invalid and will not be loaded")
                 else
-                    console.log("Plugin " .. plugin_name .. " is disabled")
+                    loaded_plugins[plugin_name] = plugin_module
+
+                    -- Call on_init hook if available
+                    if plugin_module.on_init then
+                        local init_ok, init_err = pcall(plugin_module.on_init)
+                        if not init_ok then
+                            console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
+                        end
+                    end
+                    console.log("Plugin " .. plugin_name .. " loaded successfully")
                 end
             else
-                console.log("Could not read meta.json for plugin " .. plugin_name)
+                console.log("Failed to load plugin " .. plugin_name .. ": " .. tostring(plugin_module))
             end
         else
             console.log("Plugin " .. plugin_name .. " missing required files")

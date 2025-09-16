@@ -225,16 +225,13 @@ type GameSwapInstance struct {
 
 // Plugin represents a Lua plugin that can be loaded into BizHawk
 type Plugin struct {
-	Name         string         `json:"name"`
-	Version      string         `json:"version"`
-	Description  string         `json:"description"`
-	Author       string         `json:"author"`
-	Enabled      bool           `json:"enabled"`
-	EntryPoint   string         `json:"entry_point"`
-	Dependencies []string       `json:"dependencies,omitempty"`
-	Config       map[string]any `json:"config,omitempty"`
-	Status       PluginStatus   `json:"status"`
-	Path         string         `json:"path"`
+	Name           string       `json:"name"`
+	Version        string       `json:"version"`
+	BizHawkVersion string       `json:"bizhawk_version"`
+	Description    string       `json:"description"`
+	Author         string       `json:"author"`
+	EntryPoint     string       `json:"entry_point"`
+	Status         PluginStatus `json:"status"`
 }
 
 // PluginStatus represents the current status of a plugin

@@ -103,10 +103,8 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		Version:     "1.0.0",
 		Description: "Uploaded plugin",
 		Author:      "Unknown",
-		Enabled:     false,
 		EntryPoint:  "plugin.lua",
 		Status:      types.PluginStatusDisabled,
-		Path:        pluginDir,
 	}
 
 	metaPath := filepath.Join(pluginDir, "meta.json")
@@ -126,44 +124,6 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 	if _, err := fmt.Fprintf(w, "Plugin %s uploaded successfully", pluginName); err != nil {
 		log.Printf("write response error: %v", err)
 	}
-}
-
-// loadPluginMetadata loads plugin metadata from disk
-func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
-	pluginDir := filepath.Join("./plugins", pluginName)
-	metaPath := filepath.Join(pluginDir, "meta.json")
-
-	metaFile, err := os.Open(metaPath)
-	if err != nil {
-		// If no meta.json, create a basic plugin entry
-		return &types.Plugin{
-			Name:        pluginName,
-			Version:     "unknown",
-			Description: "Plugin without metadata",
-			Author:      "Unknown",
-			Enabled:     false,
-			EntryPoint:  "plugin.lua",
-			Status:      types.PluginStatusDisabled,
-			Path:        pluginDir,
-		}
-	}
-	defer func() {
-		if err := metaFile.Close(); err != nil {
-			log.Printf("close metaFile error: %v", err)
-		}
-	}()
-
-	var plugin types.Plugin
-	if err := json.NewDecoder(metaFile).Decode(&plugin); err != nil {
-		return nil
-	}
-
-	plugin.Path = pluginDir
-	if plugin.Status == "" {
-		plugin.Status = types.PluginStatusDisabled
-	}
-
-	return &plugin
 }
 
 // handlePluginAction routes plugin-specific actions based on URL path
@@ -191,13 +151,9 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 			s.withRLock(func() {
 				if s.state.Plugins != nil {
 					if sp, ok := s.state.Plugins[pluginName]; ok {
-						// prefer state for Enabled/Status and Path
-						p.Enabled = sp.Enabled
+						// prefer state for Status and Path
 						if sp.Status != "" {
 							p.Status = sp.Status
-						}
-						if sp.Path != "" {
-							p.Path = sp.Path
 						}
 					}
 				}
@@ -258,10 +214,6 @@ func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request
 	}
 
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
-		if st.Plugins == nil {
-			st.Plugins = make(map[string]types.Plugin)
-		}
-
 		// Load plugin metadata if not already loaded
 		plugin, exists := st.Plugins[pluginName]
 		if !exists {
@@ -270,7 +222,6 @@ func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request
 			}
 		}
 
-		plugin.Enabled = true
 		plugin.Status = types.PluginStatusEnabled
 		st.Plugins[pluginName] = plugin
 	})
@@ -289,9 +240,6 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 
 	var exists bool
 	s.UpdateStateAndPersist(func(st *types.ServerState) {
-		if st.Plugins == nil {
-			st.Plugins = make(map[string]types.Plugin)
-		}
 		// Avoid shadowing the outer 'exists' variable. Use a local ok and set
 		// the outer flag so it is visible after the closure.
 		plugin, ok := st.Plugins[pluginName]
@@ -307,7 +255,6 @@ func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		// Update status to disabled
-		plugin.Enabled = false
 		plugin.Status = types.PluginStatusDisabled
 		st.Plugins[pluginName] = plugin
 	})

@@ -257,12 +257,13 @@
           <div
             :class="showGamesExpanded ? 'mt-2 flex-1 overflow-auto space-y-2' : 'mt-2 space-y-2 max-h-60 overflow-auto'">
             <!-- If sync mode, show list of available games with a Swap All button -->
-            <template x-for="(g, idx) in gamesList" :key="g">
+            <template x-for="(g, idx) in mainGamesList" :key="g">
               <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
                 <div class="flex items-center gap-3">
-                  <input type="checkbox" :id="'sync-game-'+idx" :value="g" x-bind:checked="selectedGames.includes(g)"
+                  <input type="checkbox" :id="'sync-game-'+idx" :value="g" x-bind:checked="state.games.includes(g)"
                     @change="toggleSyncGame(g, $event.target.checked)" class="w-4 h-4" />
                   <label :for="'sync-game-'+idx" class="text-sm font-mono text-gray-200 truncate" x-text="g"></label>
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-500 text-white" x-show="countPlayersOnGame(g) > 0" x-text="countPlayersOnGame(g) + ' player' + (countPlayersOnGame(g) > 1 ? 's' : '')"></span>
                 </div>
                 <div class="flex gap-2">
                   <button @click="swapAll(g)" :disabled="loadingAction === 'swapAll:' + g"
@@ -366,7 +367,7 @@
               <select x-model="newInstance.game" @change="autofillId()"
                 class="bg-slate-700 rounded px-2 py-1 text-sm max-w-[12rem]">
                 <option value="">-- select file --</option>
-                <template x-for="f in gamesList" :key="f">
+                <template x-for="f in mainGamesList" :key="f">
                   <option :value="f" x-text="f"></option>
                 </template>
               </select>
@@ -405,10 +406,10 @@
                   x-text="'v' + (plugin.version || '1.0.0') + ' by ' + (plugin.author || 'Unknown')"></div>
               </div>
               <div class="flex gap-1">
-                <button @click="togglePlugin(name, !plugin.enabled)" :disabled="loadingAction === 'plugin:' + name"
-                  class="text-xs px-2 py-1 rounded transition-colors"
-                  :class="plugin.enabled ? 'bg-orange-500 hover:bg-orange-400 text-black' : 'bg-green-500 hover:bg-green-400 text-black'"
-                  x-text="plugin.enabled ? 'Disable' : 'Enable'">
+                <button @click="togglePlugin(name, plugin.status !== 'enabled')"
+                  :disabled="loadingAction === 'plugin:' + name" class="text-xs px-2 py-1 rounded transition-colors"
+                  :class="plugin.status === 'enabled' ? 'bg-orange-500 hover:bg-orange-400 text-black' : 'bg-green-500 hover:bg-green-400 text-black'"
+                  x-text="plugin.status === 'enabled' ? 'Disable' : 'Enable'">
                 </button>
                 <button @click="showPluginDetails(name)"
                   class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">Details</button>
@@ -537,7 +538,7 @@
             class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Add</button>
           <button @click="saveMainGames(); showCatalog = false"
             class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Save Catalog</button>
-          <button @click="refreshFilesList(); refreshMainGames()"
+          <button @click="refreshFilesList()"
             class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Refresh Files</button>
         </div>
       </div>
@@ -624,7 +625,6 @@
         state: { running: false, games: [], players: {} },
         // UI-managed list of game instances for CRUD
         gameInstances: [],
-        // --- NEW: Form state for adding a new instance ---
         newInstance: { id: "", game: "" },
         showCatalog: false,
         // main catalog and available files under /files
@@ -713,10 +713,8 @@
           );
         },
         // unified games list used for displaying file options in the UI.
-        get gamesList() {
+        get mainGamesList() {
           if (this.mainGames && this.mainGames.length) return this.mainGames.map(e => e.file).filter(Boolean);
-          if (this.files && this.files.length) return this.files.slice();
-          if (this.state && Array.isArray(this.state.games)) return this.state.games.slice();
           return [];
         },
         // helper to list available instances for selection (id + game)
@@ -740,19 +738,8 @@
           }
           return Object.keys(this.state.players || {}).filter(player => !assignedPlayers.has(player));
         },
-        // generate a simple v4 uuid for new instances
-        uuidv4() {
-          if (window.crypto && crypto.getRandomValues) {
-            const buf = new Uint8Array(16);
-            crypto.getRandomValues(buf);
-            // set version bits
-            buf[6] = (buf[6] & 0x0f) | 0x40;
-            buf[8] = (buf[8] & 0x3f) | 0x80;
-            const toHex = (b) => ('0' + b.toString(16)).slice(-2);
-            return `${toHex(buf[0])}${toHex(buf[1])}${toHex(buf[2])}${toHex(buf[3])}-${toHex(buf[4])}${toHex(buf[5])}-${toHex(buf[6])}${toHex(buf[7])}-${toHex(buf[8])}${toHex(buf[9])}-${toHex(buf[10])}${toHex(buf[11])}${toHex(buf[12])}${toHex(buf[13])}${toHex(buf[14])}${toHex(buf[15])}`;
-          }
-          // fallback
-          return 'id-' + Math.random().toString(36).slice(2, 10) + Date.now().toString(36);
+        countPlayersOnGame(game) {
+          return Object.values(this.state.players || {}).filter(p => p.game === game).length;
         },
         getButtonClass(btn) {
           if (btn.path === '/api/toggle_swaps') {
@@ -776,11 +763,9 @@
           if (this.loaded) return;
           this.loaded = true;
           await this.refreshFilesList();
-          await this.refreshMainGames();
           await this.refreshPlugins();
           this.startWS();
           // load server mode
-          this.fetchMode();
           await this.refreshState();
           // start a high-resolution animation loop to update nowMs for smooth progress
           const rafTick = () => {
@@ -834,27 +819,7 @@
             }
 
             // --- 2) games list ---
-            let effectiveGames = [];
-            if (!st.games || st.games.length === 0) {
-              if (this.mainGames && this.mainGames.length) {
-                effectiveGames = this.mainGames.map((e) => e.file).filter(Boolean);
-              } else {
-                effectiveGames = (st.games && st.games.length)
-                  ? st.games.slice()
-                  : (this.files || []).slice();
-              }
-            } else {
-              effectiveGames = st.games.slice();
-            }
-            if (
-              JSON.stringify(effectiveGames) !==
-              JSON.stringify(this.state.games || [])
-            ) {
-              this.state.games = effectiveGames;
-              this.selectedGames = Array.isArray(this.state.games)
-                ? this.state.games.slice()
-                : [];
-            }
+            this.state.games = st.games;
 
             const playerNameByInstanceId = Object.fromEntries(
               Object.entries(st.players || {}).map(([name, p]) => [p.instance_id, name])
@@ -969,17 +934,6 @@
             this.log("state fetch error: " + e.message);
           }
         },
-        async fetchMode() {
-          try {
-            const r = await fetch('/api/mode');
-            if (!r.ok) return;
-            const js = await r.json();
-            if (js && js.mode) this.state.mode = js.mode;
-          } catch (e) {
-            this.log('mode fetch err: ' + e.message);
-          }
-        },
-
         async setMode(mode) {
           try {
             const res = await fetch('/api/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
@@ -992,7 +946,6 @@
             this.log('mode set err: ' + e.message);
           }
         },
-
         async setupGameMode() {
           this.loadingAction = 'setupGameMode';
           try {
@@ -1080,29 +1033,6 @@
             this.log('files list error: ' + e.message);
           }
         },
-        async refreshMainGames() {
-          try {
-            const r = await fetch('/api/games');
-            if (r.ok) {
-              const body = await r.json();
-              // body may be legacy array or new object; normalize
-              if (Array.isArray(body)) {
-                this.mainGames = [];
-                this.state.games = body;
-                // sync selected games to match the server-provided games
-                this.selectedGames = Array.isArray(this.state.games) ? this.state.games.slice() : [];
-              } else {
-                this.mainGames = body.main_games || [];
-                this.state.games = body.games || this.state.games;
-                // sync selected games if body provided games
-                if (Array.isArray(body.games)) this.selectedGames = body.games.slice();
-              }
-            }
-          } catch (e) {
-            this.log('refresh main games err: ' + e.message);
-          }
-        },
-
         // availableFiles(allowUsedInPrimaryOnly=false)
         // returns filenames from this.files that are not already used as a primary file
         // or extra file in the catalog. If allowUsedInPrimaryOnly is true, then
@@ -1127,7 +1057,6 @@
           // For primary dropdown: exclude files already used anywhere as primary or extra
           return this.files.filter(f => f && !usedAnywhere.has(f));
         },
-
         addMainEntry() {
           if (!this.newMain.primary) return;
           const entry = { file: this.newMain.primary, extra_files: Array.isArray(this.newMain.extras) ? this.newMain.extras.slice() : [] };
@@ -1140,11 +1069,9 @@
           this.newMain.primary = '';
           this.newMain.extras = [];
         },
-
         removeMainEntry(idx) {
           this.mainGames.splice(idx, 1);
         },
-
         async saveMainGames() {
           try {
             const payload = { main_games: this.mainGames, game_instances: this.gameInstances };
@@ -1153,7 +1080,6 @@
               this.log('main games saved');
               this.newMain._dirtyPrimary = false;
               this.newMain._dirtyExtras = false;
-              await this.refreshMainGames();
             } else {
               this.log('save main games failed');
             }
@@ -1161,21 +1087,6 @@
             this.log('save main err: ' + e.message);
           }
         },
-        async saveGames() {
-          try {
-            // Legacy compatibility: save selected games into server.games
-            const res = await fetch("/api/games", {
-              method: "POST",
-              headers: { "Content-Type": "application/json" },
-              body: JSON.stringify({ games: this.selectedGames }),
-            });
-            if (res.ok) this.log("games saved");
-          } catch (e) {
-            this.log("save games err " + e.message);
-          }
-        },
-
-        // --- NEW: Add Instance Logic ---
         addInstance() {
           if (!this.newInstance.id || !this.newInstance.game) {
             this.log("Please enter both Instance ID and Game file.");
@@ -1191,7 +1102,6 @@
           this.saveInstances(); // Persist to server
           this.newInstance = { id: "", game: "" }; // Reset the form
         },
-
         autofillId() {
           if (this.newInstance.game) {
             // Generate ID from game filename: remove extension and sanitize
@@ -1201,7 +1111,6 @@
             this.newInstance.id = "";
           }
         },
-
         async saveInstances() {
           try {
             // Ensure all instances are marked as saved when we attempt to save
@@ -1224,7 +1133,6 @@
             this.log('save instances err: ' + e.message);
           }
         },
-
         async saveInterval() {
           if (!this.intervalValid) {
             this.log("Invalid interval values");
@@ -1449,7 +1357,6 @@
             // nothing heavy here; future hooks could recalc virtual lists
           }, 100);
         },
-
         // Plugin management functions
         async refreshPlugins() {
           try {
@@ -1462,7 +1369,6 @@
             this.log('refresh plugins err: ' + e.message);
           }
         },
-
         async showPluginDetails(name) {
           try {
             const res = await fetch(`/api/plugins/${encodeURIComponent(name)}`);
@@ -1481,7 +1387,6 @@
           }
           this.pluginDetailsVisible = true;
         },
-
         async deletePlugin(name) {
           if (!confirm(`Delete plugin '${name}' from server? This cannot be undone.`)) return;
           this.loadingAction = 'plugin:' + name;
@@ -1500,7 +1405,6 @@
             this.loadingAction = null;
           }
         },
-
         async togglePlugin(name, enable) {
           const action = enable ? 'enable' : 'disable';
           this.loadingAction = 'plugin:' + name;
@@ -1518,7 +1422,6 @@
             this.loadingAction = null;
           }
         },
-
         async uploadPlugin(event) {
           const file = event.target.files[0];
           if (!file) return;
@@ -1615,7 +1518,6 @@
             this.loadingAction = null;
           }
         },
-
         // Drag and Drop Functions
         onDragStart(event, playerName, type) {
           this.draggedPlayer = playerName;
@@ -1624,7 +1526,6 @@
           event.dataTransfer.setData('text/plain', playerName);
           event.target.classList.add('opacity-50');
         },
-
         onDragEnd(event) {
           this.draggedPlayer = null;
           this.draggedType = null;
@@ -1634,7 +1535,6 @@
             el.classList.remove('drag-over', 'bg-blue-900/50', 'border-blue-500', 'bg-blue-900/30', 'border-blue-400', 'scale-105');
           });
         },
-
         onDragOver(event) {
           event.preventDefault();
           event.dataTransfer.dropEffect = 'move';
@@ -1646,11 +1546,9 @@
             event.currentTarget.classList.add('bg-blue-900/50', 'border-blue-500', 'scale-105');
           }
         },
-
         onDragLeave(event) {
           event.currentTarget.classList.remove('drag-over', 'bg-blue-900/50', 'border-blue-500', 'bg-blue-900/30', 'border-blue-400', 'scale-105');
         },
-
         async onDrop(event, targetId, targetType) {
           event.preventDefault();
           event.currentTarget.classList.remove('drag-over', 'bg-blue-900/50', 'border-blue-500', 'bg-blue-900/30', 'border-blue-400', 'scale-105');
@@ -1672,7 +1570,6 @@
           this.draggedPlayer = null;
           this.draggedType = null;
         },
-
         async handlePlayerToInstanceDrop(playerName, instanceId) {
           // Find the target instance
           const targetInstance = this.gameInstances.find(inst => inst.id === instanceId);
@@ -1686,7 +1583,7 @@
               this.log(`Creating new instance for unassigned player ${firstUnassigned}`);
 
               // Generate a new instance ID based on the game file
-              const gameFile = this.gamesList[0] || 'unknown';
+              const gameFile = this.mainGamesList[0] || 'unknown';
               const base = gameFile.replace(/\.[^/.]+$/, ""); // remove extension
               const newInstanceId = base.replace(/[^a-zA-Z0-9]/g, "_").toLowerCase() + '_' + Date.now();
 
@@ -1732,7 +1629,6 @@
             await this.swapPlayer(playerName, instanceId);
           }
         },
-
         async handlePlayerToUnassignedDrop(playerName) {
           // Find if player is currently assigned to an instance
           const currentInstance = this.gameInstances.find(inst => inst.player === playerName);
