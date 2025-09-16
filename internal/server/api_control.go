@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"slices"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -40,24 +41,13 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
-	s.UpdateStateAndPersist(func(st *types.ServerState) {
-		st.GameSwapInstances = []types.GameSwapInstance{}
-		st.Running = false
-	})
-	s.broadcastToPlayers(types.Command{Cmd: types.CmdReset, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-	if _, err := w.Write([]byte("ok")); err != nil {
-		fmt.Printf("write response error: %v\n", err)
-	}
-}
-
 func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 	savesDir := "./saves"
 	if _, err := os.Stat(savesDir); err == nil {
 		trash := fmt.Sprintf("%s.trash.%d", savesDir, time.Now().Unix())
 		// Retry rename up to 3 times with small delay to handle Windows file locking issues
 		var renameErr error
-		for i := 0; i < 3; i++ {
+		for i := range 3 {
 			if renameErr = os.Rename(savesDir, trash); renameErr == nil {
 				break
 			}
@@ -132,20 +122,40 @@ func (s *Server) apiMode(w http.ResponseWriter, r *http.Request) {
 
 // apiMode sets or reads the swap mode
 func (s *Server) apiModeSetup(w http.ResponseWriter, r *http.Request) {
-	if r.Method == http.MethodPost {
-
-		handler := s.GetGameModeHandler()
-		if err := handler.SetupState(); err != nil {
-			http.Error(w, "something went wrong "+err.Error(), http.StatusBadRequest)
-			return
-		}
-
-		if _, err := w.Write([]byte("ok")); err != nil {
-			fmt.Printf("write response error: %v\n", err)
-		}
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
-	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+	// auto fill game catalog
+	files, errr := s.getFilesList()
+	if errr != nil {
+		http.Error(w, "failed to list files: "+errr.Error(), http.StatusInternalServerError)
+		return
+	}
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
+		games := st.MainGames
+		for _, f := range files {
+			// if game not in catalog or is an extra file, add it
+			if !slices.ContainsFunc(games, func(g types.GameEntry) bool {
+				return g.File == f || slices.Contains(g.ExtraFiles, f)
+			}) {
+				fmt.Println("Adding game to catalog:", f)
+				games = append(games, types.GameEntry{File: f})
+			}
+		}
+		st.MainGames = games
+	})
+
+	handler := s.GetGameModeHandler()
+	if err := handler.SetupState(); err != nil {
+		http.Error(w, "something went wrong "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	s.broadcastGamesUpdate()
+
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
 }
 
 // apiDoSwap triggers an immediate swap

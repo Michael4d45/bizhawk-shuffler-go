@@ -180,7 +180,7 @@ local function do_save()
     save_state(get_save_path())
 end
 
-local function do_swap(target_game, instance)
+local function do_swap(target_game, instance, skip_check)
     console.log("Starting swap to game: " .. tostring(target_game) .. " with instance: " .. tostring(instance))
 
     -- Wrap the entire swap operation in error handling
@@ -192,7 +192,7 @@ local function do_swap(target_game, instance)
         InstanceID = instance
 
         local new_save_path = get_save_path()
-        if target_id and cur_id and target_id == cur_id and old_save_path == new_save_path then
+        if (target_id and cur_id and target_id == cur_id and old_save_path == new_save_path) and not skip_check then
             -- same canonical game; skip reload
             console.log("Swap skipped: target is same as current (" .. tostring(target_id) .. ")")
             return
@@ -342,9 +342,13 @@ local function handle_line(line)
             safe_exec_and_ack(id, function()
                 do_save()
             end)
+        elseif cmd == "LOAD" then
+            safe_exec_and_ack(id, function()
+                do_swap(parts[4], parts[5], true)
+            end)
         elseif cmd == "SWAP" then
             safe_exec_and_ack(id, function()
-                do_swap(parts[4], parts[5])
+                do_swap(parts[4], parts[5], false)
             end)
         elseif cmd == "PAUSE" then
             safe_exec_and_ack(id, function()

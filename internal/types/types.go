@@ -56,7 +56,6 @@ const (
 	CmdMessage     CommandName = "message"
 	CmdGamesUpdate CommandName = "games_update"
 	CmdClearSaves  CommandName = "clear_saves"
-	CmdReset       CommandName = "reset"
 	CmdRequestSave CommandName = "request_save"
 
 	// From Admin to Server

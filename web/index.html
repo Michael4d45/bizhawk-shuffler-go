@@ -249,6 +249,9 @@
             <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
               Catalog
             </button>
+            <button @click="setupGameMode()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Auto Setup
+            </button>
           </div>
           <!-- Saved instances list -->
           <div
@@ -281,6 +284,9 @@
             </button>
             <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
               Catalog
+            </button>
+            <button @click="setupGameMode()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
+              Auto Setup
             </button>
           </div>
           <!-- Saved instances list -->
@@ -368,15 +374,6 @@
                 Add
               </button>
             </div>
-          </div>
-
-          <div class="mt-3 flex gap-2 items-center">
-            <button @click="showCatalog = true" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-              Catalog
-            </button>
-            <button @click="setupGameMode()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
-              Set up game mode
-            </button>
           </div>
         </section>
       </template>
@@ -667,7 +664,6 @@
           { label: "Auto Swaps", path: "/api/toggle_swaps", class: "bg-slate-700" },
           { label: "Better Random", path: "/api/toggle_prevent_same_game", class: "bg-slate-700" },
           { label: "Clear Saves", path: "/api/clear_saves", class: "bg-orange-500 text-black" },
-          { label: "Reset", path: "/api/reset", class: "bg-slate-700" },
         ],
         get lastUpdated() {
           return this.state.updated_at
@@ -994,6 +990,29 @@
             }
           } catch (e) {
             this.log('mode set err: ' + e.message);
+          }
+        },
+
+        async setupGameMode() {
+          this.loadingAction = 'setupGameMode';
+          try {
+            const res = await fetch('/api/mode/setup', { method: 'POST' });
+            if (res.ok) {
+              const contentType = res.headers.get('content-type');
+              this.log('Game mode setup completed');
+              this.toast = 'Game mode setup completed';
+              setTimeout(() => this.toast = '', 2000);
+            } else {
+              this.log('Game mode setup failed');
+              this.toast = 'Game mode setup failed';
+              setTimeout(() => this.toast = '', 2000);
+            }
+          } catch (e) {
+            this.log('Game mode setup error: ' + e.message);
+            this.toast = 'Game mode setup error';
+            setTimeout(() => this.toast = '', 2000);
+          } finally {
+            this.loadingAction = null;
           }
         },
         async trigger(path) {

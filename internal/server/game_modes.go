@@ -1,10 +1,14 @@
 package server
 
 import (
+	"crypto/md5"
+	"encoding/hex"
 	"errors"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -119,9 +123,19 @@ func (h *SyncModeHandler) GetPlayer(player string) types.Player {
 }
 
 func (h *SyncModeHandler) SetupState() error {
-	if len(h.server.state.MainGames) < 2 {
-		return errors.New("expected multiple games")
-	}
+	// add all gaemes in catalog to available games if not already present
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+		existing := make(map[string]bool)
+		for _, g := range st.Games {
+			existing[g] = true
+		}
+		for _, entry := range st.MainGames {
+			if !existing[entry.File] {
+				st.Games = append(st.Games, entry.File)
+				existing[entry.File] = true
+			}
+		}
+	})
 
 	return nil
 }
@@ -307,6 +321,24 @@ func (h *SaveModeHandler) GetPlayer(player string) types.Player {
 }
 
 func (h *SaveModeHandler) SetupState() error {
+	// Ensure there are instances for all games in the catalog
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+		existing := make(map[string]bool)
+		for _, inst := range st.GameSwapInstances {
+			existing[inst.Game] = true
+		}
+		for _, entry := range st.MainGames {
+			if !existing[entry.File] {
+				newInst := types.GameSwapInstance{
+					ID:        generateInstanceID(entry.File),
+					Game:      entry.File,
+					FileState: types.FileStateNone,
+				}
+				st.GameSwapInstances = append(st.GameSwapInstances, newInst)
+				existing[entry.File] = true
+			}
+		}
+	})
 	return nil
 }
 
@@ -386,4 +418,30 @@ func (s *Server) GetGameModeHandler() GameModeHandler {
 	default:
 		panic("unexpected game mode: \"" + mode + "\"")
 	}
+}
+
+// generateInstanceID creates a unique instance ID for a game file
+func generateInstanceID(gameFile string) string {
+	// Extract a portion of the game file name (remove extension and take first part)
+	nameWithoutExt := strings.TrimSuffix(gameFile, filepath.Ext(gameFile))
+
+	// Take first 10 characters of the name, replace spaces/special chars with hyphens
+	cleanName := strings.Map(func(r rune) rune {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
+			return r
+		}
+		return '-'
+	}, nameWithoutExt)
+
+	// Limit to 10 characters
+	if len(cleanName) > 10 {
+		cleanName = cleanName[:10]
+	}
+
+	// Add timestamp hash for uniqueness
+	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	hash := md5.Sum([]byte(gameFile + timestamp))
+	shortHash := hex.EncodeToString(hash[:2]) // 4 characters
+
+	return cleanName + "-" + shortHash
 }

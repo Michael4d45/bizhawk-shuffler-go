@@ -67,11 +67,20 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 
 // handleFilesList returns a JSON list of files under ./files
 func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
-	type fileInfo struct {
-		Name string `json:"name"`
-		Size int64  `json:"size"`
+	files, err := s.getFilesList()
+	if err != nil {
+		http.Error(w, "failed to list files: "+err.Error(), http.StatusInternalServerError)
+		return
 	}
-	files := []fileInfo{}
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(files); err != nil {
+		http.Error(w, "failed to encode files list: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+}
+
+func (s *Server) getFilesList() ([]string, error) {
+	files := []string{}
 	if err := filepath.Walk("./files", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
@@ -80,17 +89,12 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 			return nil
 		}
 		rel, _ := filepath.Rel("./files", p)
-		files = append(files, fileInfo{Name: rel, Size: info.Size()})
+		files = append(files, rel)
 		return nil
 	}); err != nil {
-		http.Error(w, "failed to walk files: "+err.Error(), http.StatusInternalServerError)
-		return
+		return nil, err
 	}
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(files); err != nil {
-		http.Error(w, "failed to encode files list: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
+	return files, nil
 }
 
 // handleBizhawkFilesZip serves a BizhawkFiles.zip by streaming or creating a zip

@@ -71,7 +71,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/", s.handleAdmin)
 	mux.HandleFunc("/api/start", s.apiStart)
 	mux.HandleFunc("/api/pause", s.apiPause)
-	mux.HandleFunc("/api/reset", s.apiReset)
 	mux.HandleFunc("/api/clear_saves", s.apiClearSaves)
 	mux.HandleFunc("/api/toggle_swaps", s.apiToggleSwaps)
 	mux.HandleFunc("/api/do_swap", s.apiDoSwap)

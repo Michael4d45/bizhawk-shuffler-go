@@ -415,6 +415,10 @@ func (b *BizhawkIPC) SendResume(ctx context.Context) error {
 	return b.SendCommand(ctx, "RESUME")
 }
 
+func (b *BizhawkIPC) SendRestart(ctx context.Context) error {
+	return b.SendCommand(ctx, "LOAD", b.game, b.instanceID)
+}
+
 func (b *BizhawkIPC) SendMessage(ctx context.Context, msg string) error {
 	return b.SendCommand(ctx, "MSG", msg, "3.0", "10", "10", "12", "#FFFFFF", "#000000")
 }

@@ -101,29 +101,13 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 		}(cmd.ID)
 	case types.CmdClearSaves:
 		go func(id string) {
-
-			// delete files in ./saves directory
-			files, err := os.ReadDir("./saves")
-			if err != nil {
-				log.Printf("Failed to read saves directory: %v", err)
-			} else {
-				for _, file := range files {
-					err := os.RemoveAll(filepath.Join("./saves", file.Name()))
-					if err != nil {
-						log.Printf("Failed to delete save file %s: %v", file.Name(), err)
-					}
-				}
-			}
-
-			if err := c.bipc.SendMessage(ctx, "clear_saves"); err != nil {
+			c.ClearSaves()
+			if err := c.bipc.SendRestart(ctx); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
-			sendAck(id)
-		}(cmd.ID)
-	case types.CmdReset:
-		go func(id string) {
-			if err := c.bipc.SendMessage(ctx, "reset"); err != nil {
+
+			if err := c.bipc.SendMessage(ctx, "clear_saves"); err != nil {
 				sendNack(id, err.Error())
 				return
 			}
@@ -371,4 +355,35 @@ func (c *Controller) GetExtraFilesForGame(game string) []string {
 		}
 	}
 	return nil
+}
+
+// clearDir removes all files from the specified directory
+func clearDir(dir string) {
+	files, err := os.ReadDir(dir)
+	if err != nil {
+		log.Printf("Failed to read directory %s: %v", dir, err)
+		return
+	}
+	for _, file := range files {
+		if file.IsDir() {
+			continue
+		}
+		err := os.Remove(filepath.Join(dir, file.Name()))
+		if err != nil {
+			log.Printf("Failed to remove file %s from %s: %v", file.Name(), dir, err)
+		}
+	}
+}
+
+// ClearSaves removes all save files from the ./saves directory and BizHawk SaveRAM directories
+func (c *Controller) ClearSaves() {
+	// Clear local saves directory
+	clearDir("./saves")
+
+	// Clear BizHawk SaveRAM directories
+	bizhawkDir := filepath.Dir(c.cfg["bizhawk_path"])
+	subdirs := []string{"Gameboy/SaveRAM", "GBA/SaveRAM", "N64/SaveRAM", "NES/SaveRAM", "SNES/SaveRAM", "PSX/SaveRAM"}
+	for _, subdir := range subdirs {
+		clearDir(filepath.Join(bizhawkDir, subdir))
+	}
 }
