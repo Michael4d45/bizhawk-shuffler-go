@@ -85,6 +85,12 @@ func (s *Server) startSaver() {
 			if err := s.saveState(); err != nil {
 				fmt.Printf("failed to persist state: %v\n", err)
 			}
+			updatedAt := s.SnapshotState().UpdatedAt
+			s.broadcastToAdmins(types.Command{
+				Cmd:     types.CmdStateUpdate,
+				Payload: map[string]any{"updated_at": updatedAt},
+				ID:      fmt.Sprintf("%d", updatedAt.UnixNano()),
+			})
 		})
 		s.saveMutex.Unlock()
 	}
@@ -205,9 +211,4 @@ func (s *Server) UpdateStateAndPersist(mut func(*types.ServerState)) {
 	default:
 		// Channel is full, ignore (non-blocking send)
 	}
-	s.broadcastToAdmins(types.Command{
-		Cmd:     types.CmdStateUpdate,
-		Payload: map[string]any{"updated_at": updatedAt},
-		ID:      fmt.Sprintf("%d", updatedAt.UnixNano()),
-	})
 }

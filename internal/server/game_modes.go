@@ -425,7 +425,7 @@ func generateInstanceID(gameFile string) string {
 	// Extract a portion of the game file name (remove extension and take first part)
 	nameWithoutExt := strings.TrimSuffix(gameFile, filepath.Ext(gameFile))
 
-	// Take first 10 characters of the name, replace spaces/special chars with hyphens
+	// Take first 20 characters of the name, replace spaces/special chars with hyphens
 	cleanName := strings.Map(func(r rune) rune {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
 			return r
@@ -433,13 +433,13 @@ func generateInstanceID(gameFile string) string {
 		return '-'
 	}, nameWithoutExt)
 
-	// Limit to 10 characters
-	if len(cleanName) > 10 {
-		cleanName = cleanName[:10]
+	// Limit to 20 characters
+	if len(cleanName) > 20 {
+		cleanName = cleanName[:20]
 	}
 
 	// Add timestamp hash for uniqueness
-	timestamp := strconv.FormatInt(time.Now().UnixNano(), 10)
+	timestamp := strconv.FormatInt(time.Now().UnixNano(), 5)
 	hash := md5.Sum([]byte(gameFile + timestamp))
 	shortHash := hex.EncodeToString(hash[:2]) // 4 characters
 
