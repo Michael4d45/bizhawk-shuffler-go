@@ -111,7 +111,20 @@ local games = {
         size = 1,
         domain = "WRAM",
         desc = "current room id"
-    }
+    },
+    -- 0x24E Maybe as well?
+    ['mega man battle network (usa)'] = {
+        addr = 0x24A,
+        size = 1,
+        domain = "EWRAM",
+        desc = "current room id"
+    },
+    ['kirby - nightmare in dream land (usa)'] = {
+        addr = 0xAFF4,
+        size = 1,
+        domain = "EWRAM",
+        desc = "current room id"
+    },
 }
 
 -- Optional: one-shot automatic probe after game start to discover changed bytes.
