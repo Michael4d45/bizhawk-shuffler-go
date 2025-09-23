@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"log"
 	"net"
+	"os"
 	"runtime"
 	"strconv"
 	"strings"
@@ -56,9 +57,24 @@ type BizhawkIPC struct {
 }
 
 // NewBizhawkIPC creates an instance targeting host:port
-func NewBizhawkIPC(host string, port int) *BizhawkIPC {
+func NewBizhawkIPC() *BizhawkIPC {
+	port := 55355 // default port
+	// check if port is already used; if so, increment until we find a free one
+	for {
+		ln, err := net.Listen("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+		if err != nil {
+			port++
+			continue
+		}
+		_ = ln.Close()
+		break
+	}
+	// save port to lua_server_port.txt for Lua script to read
+	if err := writePortFile(port); err != nil {
+		log.Printf("bizhawk ipc: failed to write port file: %v", err)
+	}
 	return &BizhawkIPC{
-		addr:     fmt.Sprintf("%s:%d", host, port),
+		addr:     fmt.Sprintf("%s:%d", "127.0.0.1", port),
 		pending:  make(map[string]*pendingCmd),
 		incoming: make(chan string, 16),
 	}
@@ -77,6 +93,8 @@ func (b *BizhawkIPC) Start(ctx context.Context) error {
 		log.Printf("bizhawk ipc: starting readLoop goroutine")
 		b.readLoop(ctx)
 		log.Printf("bizhawk ipc: readLoop goroutine exited")
+		// delete lua_server_port.txt
+		_ = os.Remove("lua_server_port.txt")
 	}()
 	go func() {
 		log.Printf("bizhawk ipc: starting resendLoop goroutine")
@@ -442,4 +460,23 @@ func (b *BizhawkIPC) IsReady() bool {
 	v := b.ready
 	b.readyMu.Unlock()
 	return v
+}
+
+// writePortFile writes the selected TCP port number to a file named
+// "lua_server_port.txt" in the current working directory so the Lua script
+// launched inside BizHawk can read which port to connect back to.
+func writePortFile(port int) error {
+	fname := "lua_server_port.txt"
+	// ensure parent directory exists (for completeness if fname contained a path)
+	// but since fname is a simple filename this will be a no-op. Keep for parity
+	// with other write helpers in the project.
+	// Write the port as plain text with a trailing newline to make it easy to read.
+	data := fmt.Appendf(nil, "%d\n", port)
+	dir := "."
+	if dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return err
+		}
+	}
+	return os.WriteFile(fname, data, 0644)
 }

@@ -4,6 +4,18 @@
 local socket = require("socket.core")
 local HOST = "127.0.0.1"
 local PORT = 55355
+-- read port from lua_server_port.txt if it exists
+do
+    local f = io.open("lua_server_port.txt", "r")
+    if f then
+        local line = f:read("*l")
+        f:close()
+        local p = tonumber(line)
+        if p and p > 0 and p < 65536 then
+            PORT = p
+        end
+    end
+end
 
 local ROM_DIR = "./roms"
 local SAVE_DIR = "./saves"
@@ -455,12 +467,13 @@ local function load_plugins()
 end
 
 -- Initialize plugin system
-load_plugins()
+-- load_plugins()
 
 -- Main loop: accept connection, then read lines non-blocking and process scheduled tasks
 local next_auto_save = now() + 10.0
 while true do
     if not client_socket then
+        console.log("Waiting for controller to connect...")
         local c = server:accept()
         if c then
             console.log("Controller connected")

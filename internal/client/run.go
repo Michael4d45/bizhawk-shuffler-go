@@ -183,7 +183,7 @@ func New(args []string) (*Client, error) {
 
 	api := NewAPI(serverHTTP, httpClient, cfg)
 
-	bipc := NewBizhawkIPC("127.0.0.1", 55355)
+	bipc := NewBizhawkIPC()
 
 	wsClient := NewWSClient(wsURL, api, bipc)
 
