@@ -467,7 +467,7 @@ local function load_plugins()
 end
 
 -- Initialize plugin system
--- load_plugins()
+load_plugins()
 
 -- Main loop: accept connection, then read lines non-blocking and process scheduled tasks
 local next_auto_save = now() + 10.0

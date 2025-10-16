@@ -125,6 +125,70 @@ local games = {
         domain = "EWRAM",
         desc = "current room id"
     },
+    ['legend of zelda, the - phantom hourglass (usa) (en,fr,es)'] = {
+        addr = 0x1B2F36,
+        equals = 0x1,
+        size = 1,
+        domain = "Main RAM",
+        desc = "transition screen"
+    },
+    ['legend of zelda, the - spirit tracks (usa) (en,fr,es) (rev 1)'] = {
+        addr = 0x0B5298,
+        equals = 0x1,
+        size = 1,
+        domain = "Main RAM",
+        desc = "transition screen"
+    },
+    ['legend of zelda, the - spirit tracks (usa) (video)'] = {
+        addr = 0x7D80,
+        size = 1,
+        domain = "ARM7 WRAM",
+        desc = "current room id"
+    },
+    ['legend of zelda, the - twilight princess - zelda gallery (usa) (kiosk) (e3 2005)'] = {
+        addr = 0xAF30,
+        size = 1,
+        domain = "ARM7 WRAM",
+        desc = "current room id"
+    },
+    ['legend of zelda, the (gc)'] = {
+        addr = 0xEC,
+        size = 1,
+        domain = "RAM",
+        desc = "current room id"
+    },
+    ['legend of zelda, the - link\'s awakening dx (usa)'] = {
+        addr = 0x1404,
+        size = 2,
+        domain = "WRAM",
+        desc = "current room id"
+    },
+    ['legend of zelda, the - oracle of seasons (usa)'] = {
+        addr = 0xC63,
+        size = 4,
+        domain = "WRAM",
+        desc = "current room id"
+    },
+    ['legend of zelda, the - oracle of ages (usa)'] = {
+        addr = 0xC34,
+        size = 4,
+        domain = "WRAM",
+        desc = "current room id"
+    },
+    -- Minish Cap - or 0x12C = 0
+    ['legend of zelda, the - the minish cap (usa)'] = {
+        addr = 0x17650,
+        size = 4,
+        domain = "WRAM",
+        desc = "current room id"
+    },
+    ['legend of zelda, the - majora\'s mask (usa)'] = {
+        addr = 0x1F342B,
+        equals = 0x1,
+        size = 4,
+        domain = "RDRAM",
+        desc = "transition screen"
+    }
 }
 
 -- Optional: one-shot automatic probe after game start to discover changed bytes.
@@ -304,20 +368,13 @@ local function guard_allows(cfg)
     return gv ~= 0
 end
 
--- Start a one-shot probe: sample region now, then sample again after framesDelay frames and report changed bytes
-local function start_probe(domain, startaddr, len, framesDelay)
-    probe.active = true
-    probe.domain = domain or choose_domain_preference()
-    probe.start = startaddr or 0
-    probe.len = math.max(1, math.min(len or 4096, 65536))
-    probe.framesToWait = framesDelay or 20
-    probe.snapshot = {}
-    for i = 0, probe.len - 1 do
-        local b = try_call(memory.readbyte, probe.start + i, probe.domain)
-        probe.snapshot[i] = b or 0
-    end
-    console.log(("Read Door: probe started domain=%s start=0x%X len=%d wait=%d"):format(tostring(probe.domain),
-        probe.start, probe.len, probe.framesToWait))
+local function do_send(last, val, cfg)
+console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
+                    tostring(last), tostring(val), tostring(cfg.desc or "")))
+                SendCommand("swap", {
+                    ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
+                        tostring(last), tostring(val), tostring(cfg.desc or ""))
+                })
 end
 
 -- === core polling ===
@@ -352,19 +409,22 @@ local function readDoor()
         return
     end
 
-    console.log(("Read Door: %s read addr=0x%X size=%d domain=%s value=%s"):format(tostring(currentGame),
-        cfg.addr, cfg.size or 1, tostring(cfg.domain or "best-guess"), tostring(val)))
+    console.log(("Read Door: %s read addr=0x%X size=%d domain=%s value=%s"):format(tostring(currentGame), cfg.addr,
+        cfg.size or 1, tostring(cfg.domain or "best-guess"), tostring(val)))
 
     local key = currentGame
     local last = lastValueByGame[key]
     if last ~= val then
-        if last ~= nil then
-            console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
-                tostring(last), tostring(val), tostring(cfg.desc or "")))
-            SendCommand("swap", {
-                ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
-                    tostring(last), tostring(val), tostring(cfg.desc or ""))
-            })
+        if cfg.equals then -- only trigger if equals specified value
+            if val ~= cfg.equals then 
+                return
+            elseif last ~= cfg.equals then
+                do_send(last, val, cfg)
+            end
+        else -- check for any change
+            if last ~= nil then
+                do_send(last, val, cfg)
+            end
         end
         lastValueByGame[key] = val
     end
@@ -423,7 +483,7 @@ end
 -- Exported helpers for manual use by whomever calls this plugin table:
 local exported = {
     on_init = on_init,
-    on_frame = on_frame,
+    on_frame = on_frame
 }
 
 return exported
