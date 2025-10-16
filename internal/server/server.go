@@ -74,6 +74,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/clear_saves", s.apiClearSaves)
 	mux.HandleFunc("/api/toggle_swaps", s.apiToggleSwaps)
 	mux.HandleFunc("/api/do_swap", s.apiDoSwap)
+	mux.HandleFunc("/api/random_swap", s.apiRandomSwapForPlayer)
 	mux.HandleFunc("/api/mode/setup", s.apiModeSetup)
 	mux.HandleFunc("/api/mode", s.apiMode)
 	mux.HandleFunc("/api/toggle_prevent_same_game", s.apiTogglePreventSameGame)

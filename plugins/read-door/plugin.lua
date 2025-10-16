@@ -371,7 +371,7 @@ end
 local function do_send(last, val, cfg)
 console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
                     tostring(last), tostring(val), tostring(cfg.desc or "")))
-                SendCommand("swap", {
+                SendCommand("swap_me", {
                     ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
                         tostring(last), tostring(val), tostring(cfg.desc or ""))
                 })

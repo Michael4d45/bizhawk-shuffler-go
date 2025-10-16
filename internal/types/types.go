@@ -65,6 +65,14 @@ const (
 	CmdStateUpdate CommandName = "state_update"
 )
 
+type LuaCmd string
+
+const (
+	LuaCmdSwap    LuaCmd = "swap"
+	LuaCmdSwapMe  LuaCmd = "swap_me"
+	LuaCmdMessage LuaCmd = "message"
+)
+
 // GameMode enumerates the available game swapping modes. Use string constants
 // so callers can use the literal values directly.
 type GameMode string
@@ -301,7 +309,7 @@ func GetDefaultDiscoveryConfig() *DiscoveryConfig {
 //     contain '='
 type LuaCommand struct {
 	Raw    string            // full raw line
-	Kind   CommandName       // lowercased command kind (e.g., "message")
+	Kind   LuaCmd            // lowercased command kind (e.g., "message")
 	Fields map[string]string // parsed key=value fields
 }
 
@@ -323,7 +331,7 @@ func ParseLuaCommand(line string) (*LuaCommand, error) {
 	if i >= len(parts) {
 		return nil, fmt.Errorf("missing kind in CMD: %q", line)
 	}
-	cmd.Kind = CommandName(strings.ToLower(strings.TrimSpace(parts[i])))
+	cmd.Kind = LuaCmd(strings.ToLower(strings.TrimSpace(parts[i])))
 	i++
 
 	// New format from Lua: exactly one payload segment with escaped k=v pairs separated by ';'

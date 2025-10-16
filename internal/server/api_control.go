@@ -169,3 +169,26 @@ func (s *Server) apiDoSwap(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("write response error: %v\n", err)
 	}
 }
+
+func (s *Server) apiRandomSwapForPlayer(w http.ResponseWriter, r *http.Request) {
+	var b struct {
+		PlayerName string `json:"player"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	playerName := b.PlayerName
+	if playerName == "" {
+		http.Error(w, "missing player", http.StatusBadRequest)
+		return
+	}
+	go func() {
+		if err := s.performRandomSwapForPlayer(playerName); err != nil {
+			fmt.Printf("performRandomSwapForPlayer error: %v\n", err)
+		}
+	}()
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}

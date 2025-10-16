@@ -93,10 +93,10 @@
 
         <div class="mt-4 flex flex-wrap gap-2">
           <template x-for="btn in sessionButtons" :key="btn.label">
-            <button @click="trigger(btn.path)" :disabled="loadingAction === btn.path"
+            <button @click="trigger(btn.path)"
               class="px-1 py-1 rounded font-semibold transition btn-stable" :class="getButtonClass(btn)"
               :title="getButtonTitle(btn)">
-              <span x-show="loadingAction !== btn.path" class="inline-flex items-center gap-2 justify-center w-full">
+              <span class="inline-flex items-center gap-2 justify-center w-full">
                 <span x-text="btn.label"></span>
                 <!-- small On/Off badge for the Toggle Swaps button -->
                 <template x-if="btn.path === '/api/toggle_swaps'">
@@ -110,14 +110,6 @@
                     :class="state.prevent_same_game_swap ? 'bg-white/90 text-black' : 'bg-slate-800 text-gray-300'"
                     x-text="state.prevent_same_game_swap ? 'On' : 'Off'"></span>
                 </template>
-              </span>
-              <span x-show="loadingAction === btn.path" class="inline-flex items-center gap-1 justify-center w-full">
-                <svg class="animate-spin h-4 w-4 text-white" xmlns="http://www.w3.org/2000/svg" fill="none"
-                  viewBox="0 0 24 24">
-                  <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
-                  <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v8H4z"></path>
-                </svg>
-                Working...
               </span>
             </button>
           </template>
@@ -198,7 +190,7 @@
               <div class="flex items-center gap-2 min-w-0">
                 <!-- If in sync mode, let user pick a game; otherwise pick an instance -->
                 <template x-if="state.mode === 'sync'">
-                  <select x-model="p.selectedGame" @change="p._dirtySelected = true"
+                  <select x-model="p.selectedGame"
                     class="bg-slate-700 rounded text-sm max-w-[12rem] truncate">
                     <option value="">-- select game --</option>
                     <template x-for="g in state.games" :key="g">
@@ -207,7 +199,7 @@
                   </select>
                 </template>
                 <template x-if="state.mode !== 'sync'">
-                  <select x-model="p.selectedGame" @change="p._dirtySelected = true"
+                  <select x-model="p.selectedGame"
                     class="bg-slate-700 rounded text-sm max-w-[12rem] truncate">
                     <option value="">-- select instance --</option>
                     <template x-for="inst in instancesList" :key="inst.id">
@@ -217,10 +209,13 @@
                 </template>
 
                 <button @click="swapPlayer(name, p.selectedGame)"
-                  :disabled="!p.selectedGame || loadingAction === 'swap:' + name"
                   class="px-2 py-1 rounded text-xs font-semibold transition whitespace-nowrap"
                   :class="p.selectedGame ? 'bg-slate-700 hover:bg-slate-600' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
                   Swap
+                </button>
+                <button @click="randomSwap(name)"
+                  class="px-2 py-1 rounded text-xs font-semibold transition bg-emerald-500 hover:bg-emerald-400 text-black">
+                  Random
                 </button>
                 <button @click="messagePlayer(name)"
                   class="px-2 py-1 rounded text-xs font-semibold transition bg-blue-600 hover:bg-blue-500">
@@ -266,7 +261,7 @@
                   <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-500 text-white" x-show="countPlayersOnGame(g) > 0" x-text="countPlayersOnGame(g) + ' player' + (countPlayersOnGame(g) > 1 ? 's' : '')"></span>
                 </div>
                 <div class="flex gap-2">
-                  <button @click="swapAll(g)" :disabled="loadingAction === 'swapAll:' + g"
+                  <button @click="swapAll(g)"
                     class="text-xs px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-black">Swap All</button>
                 </div>
               </div>
@@ -407,7 +402,7 @@
               </div>
               <div class="flex gap-1">
                 <button @click="togglePlugin(name, plugin.status !== 'enabled')"
-                  :disabled="loadingAction === 'plugin:' + name" class="text-xs px-2 py-1 rounded transition-colors"
+                  class="text-xs px-2 py-1 rounded transition-colors"
                   :class="plugin.status === 'enabled' ? 'bg-orange-500 hover:bg-orange-400 text-black' : 'bg-green-500 hover:bg-green-400 text-black'"
                   x-text="plugin.status === 'enabled' ? 'Disable' : 'Enable'">
                 </button>
@@ -638,7 +633,6 @@
         saves: {},
         logs: [],
         interval: { min: null, max: null },
-        loadingAction: null,
         toast: "",
         selectedGames: [],
         ws: null, // store websocket instance
@@ -890,13 +884,10 @@
                 if (this.state.players && this.state.players[name]) {
                   uiPlayers[name] = {
                     ...newP,
-                    selectedGame: this.state.players[name]._dirtySelected
-                      ? this.state.players[name].selectedGame
-                      : (this.state.players[name].selectedGame || ""),
-                    _dirtySelected: this.state.players[name]._dirtySelected || false,
+                    selectedGame: this.state.players[name].selectedGame || "",
                   };
                 } else {
-                  uiPlayers[name] = { ...newP, selectedGame: "", _dirtySelected: false };
+                  uiPlayers[name] = { ...newP, selectedGame: "" };
                 }
               }
 
@@ -947,7 +938,6 @@
           }
         },
         async setupGameMode() {
-          this.loadingAction = 'setupGameMode';
           try {
             const res = await fetch('/api/mode/setup', { method: 'POST' });
             if (res.ok) {
@@ -964,12 +954,9 @@
             this.log('Game mode setup error: ' + e.message);
             this.toast = 'Game mode setup error';
             setTimeout(() => this.toast = '', 2000);
-          } finally {
-            this.loadingAction = null;
           }
         },
         async trigger(path) {
-          this.loadingAction = path;
           try {
             const r = await fetch(path, { method: "POST" });
             if (r.ok) {
@@ -1015,8 +1002,6 @@
             setTimeout(() => (this.toast = ""), 2000);
           } catch (e) {
             this.log("err " + e.message);
-          } finally {
-            this.loadingAction = null;
           }
         },
         async refreshFilesList() {
@@ -1151,7 +1136,6 @@
         },
         async swapPlayer(player, instanceIDOrGame) {
           if (!instanceIDOrGame) return;
-          this.loadingAction = "swap:" + player;
           try {
             // If server is in sync mode, send {player, game}, otherwise send {player, instance_id}
             const payload = this.state && this.state.mode === 'sync'
@@ -1162,73 +1146,37 @@
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify(payload),
             });
-            if (res.ok) {
-              const contentType = res.headers.get('content-type');
-              if (contentType && contentType.includes('application/json')) {
-                const body = await res.json();
-                if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
-                  this.state = body;
-                } else {
-                  // action-style response
-                  if (body.status) {
-                    this.log(`/api/swap_player status: ${body.status}`);
-                    const results = body.swap_results || body.results || [];
-                    if (results.length) this.log(`swap_player results: ${JSON.stringify(results)}`);
-                    const dl = body.download_results || [];
-                    if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
-                  } else {
-                    this.log(`/api/swap_player response: ${JSON.stringify(body)}`);
-                  }
-                }
-              }
-            }
           } catch (e) {
             this.log("swap_player err " + e.message);
-          } finally {
-            this.loadingAction = null;
-            if (this.state.players[player]) {
-              this.state.players[player]._dirtySelected = false;
-            }
+          }
+        },
+        async randomSwap(player) {
+          if (!player) return;
+          try {
+            const res = await fetch("/api/random_swap", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({ player }),
+            });
+          } catch (e) {
+            this.log("random_swap err " + e.message);
           }
         },
         async swapAll(game) {
           if (!game) return;
-          this.loadingAction = "swapAll:" + game;
           try {
             const res = await fetch("/api/swap_all_to_game", {
               method: "POST",
               headers: { "Content-Type": "application/json" },
               body: JSON.stringify({ game }),
             });
-            if (res.ok) {
-              const contentType = res.headers.get('content-type');
-              if (contentType && contentType.includes('application/json')) {
-                const body = await res.json();
-                if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
-                  this.state = body;
-                } else {
-                  if (body.status) {
-                    this.log(`/api/swap_all_to_game status: ${body.status}`);
-                    const results = body.swap_results || body.results || [];
-                    if (results.length) this.log(`swap_all results: ${JSON.stringify(results)}`);
-                    const dl = body.download_results || [];
-                    if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
-                  } else {
-                    this.log(`/api/swap_all_to_game response: ${JSON.stringify(body)}`);
-                  }
-                }
-              }
-            }
           } catch (e) {
             this.log("swap_all err " + e.message);
-          } finally {
-            this.loadingAction = null;
           }
         },
         async removePlayer(player) {
           if (!player) return;
           if (!confirm(`Remove player '${player}' from session? This will disconnect them.`)) return;
-          this.loadingAction = 'remove:' + player;
           try {
             const res = await fetch('/api/remove_player', {
               method: 'POST',
@@ -1243,8 +1191,6 @@
             }
           } catch (e) {
             this.log('remove_player err ' + e.message);
-          } finally {
-            this.loadingAction = null;
           }
         },
         async messagePlayer(player) {
@@ -1389,7 +1335,6 @@
         },
         async deletePlugin(name) {
           if (!confirm(`Delete plugin '${name}' from server? This cannot be undone.`)) return;
-          this.loadingAction = 'plugin:' + name;
           try {
             const res = await fetch(`/api/plugins/${encodeURIComponent(name)}`, { method: 'DELETE' });
             if (res.ok) {
@@ -1401,13 +1346,10 @@
             }
           } catch (e) {
             this.log('delete plugin err: ' + e.message);
-          } finally {
-            this.loadingAction = null;
           }
         },
         async togglePlugin(name, enable) {
           const action = enable ? 'enable' : 'disable';
-          this.loadingAction = 'plugin:' + name;
           try {
             const res = await fetch(`/api/plugins/${name}/${action}`, { method: 'POST' });
             if (res.ok) {
@@ -1418,15 +1360,12 @@
             }
           } catch (e) {
             this.log(`Plugin ${action} err: ` + e.message);
-          } finally {
-            this.loadingAction = null;
           }
         },
         async uploadPlugin(event) {
           const file = event.target.files[0];
           if (!file) return;
 
-          this.loadingAction = 'plugin-upload';
           try {
             const formData = new FormData();
             formData.append('plugin', file);
@@ -1447,7 +1386,6 @@
           } catch (e) {
             this.log('Upload error: ' + e.message);
           } finally {
-            this.loadingAction = null;
             // Reset the file input
             event.target.value = '';
           }
@@ -1476,7 +1414,6 @@
         async sendComposedMessage() {
           if (!this.messageComposer.text.trim()) return;
 
-          this.loadingAction = 'message-compose';
           try {
             const payload = {
               message: this.messageComposer.text,
@@ -1514,8 +1451,6 @@
             }
           } catch (e) {
             this.log('Message send error: ' + e.message);
-          } finally {
-            this.loadingAction = null;
           }
         },
         // Drag and Drop Functions

@@ -347,6 +347,7 @@ Core server management:
 - `POST /api/pause` - Pause session
 - `POST /api/reset` - Reset session
 - `POST /api/do_swap` - Trigger manual swap
+- `POST /api/random_swap` - Trigger random swap
 - `POST /api/mode` - Change game mode
 - `POST /api/toggle_swaps` - Enable/disable swaps
 

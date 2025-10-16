@@ -23,8 +23,12 @@ type GameModeHandler interface {
 	GetPlayer(player string) types.Player
 
 	SetupState() error
+
 	// HandlePlayerSwap updates server state for a player-level swap (assign instances, set player->game mapping, etc)
 	HandlePlayerSwap(player string, game string, instanceID string) error
+
+	// Perform a random swap for a specific player
+	HandleRandomSwapForPlayer(param1 string) error
 }
 
 // SyncModeHandler implements the sync game mode
@@ -158,12 +162,43 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, _ string)
 	return nil
 }
 
+// HandleRandomSwapForPlayer performs a random swap for a specific player in sync mode
+func (h *SyncModeHandler) HandleRandomSwapForPlayer(player string) error {
+	var preventSame bool
+	h.server.withRLock(func() { preventSame = h.server.state.PreventSameGameSwap })
+
+	game := h.randomGame()
+	if game == "" {
+		return errors.New("no games available for swap")
+	}
+
+	// If preventing same game swap, check if picked game is same as current
+	if preventSame {
+		currentGame := ""
+		h.server.withRLock(func() {
+			if p, ok := h.server.state.Players[player]; ok {
+				currentGame = p.Game
+			}
+		})
+		if game == currentGame {
+			// Try to pick a different game
+			game = h.randomGameExcluding(currentGame)
+			if game == "" {
+				// If no other game available, do nothing
+				return nil
+			}
+		}
+	}
+
+	return h.HandlePlayerSwap(player, game, "")
+}
+
 // SaveModeHandler implements the save game mode
 type SaveModeHandler struct {
 	server *Server
 }
 
-func (h *SaveModeHandler) HandleSwap() error {
+func (h *SaveModeHandler) waitForFileCheck() bool {
 	var waiting bool
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
@@ -176,7 +211,11 @@ func (h *SaveModeHandler) HandleSwap() error {
 		}
 		<-ticker.C
 	}
-	if waiting {
+	return waiting
+}
+
+func (h *SaveModeHandler) HandleSwap() error {
+	if h.waitForFileCheck() {
 		return nil
 	}
 
@@ -398,6 +437,134 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 		h.server.setInstanceFileState(foundInst.ID, types.FileStateNone)
 	}
 	h.server.sendSwap(p)
+	return nil
+}
+
+// getRandomInstanceForPlayer selects a random game instance for the player, avoiding their current game if possible
+func (h *SaveModeHandler) getRandomInstanceForPlayer(player types.Player) (types.GameSwapInstance, bool, types.Player, bool) {
+	// First, try to find instances with different games than the player's current game
+	// and that are not currently assigned to any player
+	var (
+		preventSame                                    bool
+		playersByInstance                              = make(map[string]types.Player)
+		instanceIDs                                    []string
+		instancesWithPlayer                            []string
+		instancesWithPlayerWithoutPlayersGame          []string
+		instancesWithPlayerWithoutPlayersInstanceID    []string
+		instancesWithoutPlayer                         []string
+		instancesWithoutPlayerWithoutPlayersGame       []string
+		instancesWithoutPlayerWithoutPlayersInstanceID []string
+	)
+	h.server.withRLock(func() {
+		preventSame = h.server.state.PreventSameGameSwap
+		for _, pl := range h.server.state.Players {
+			if pl.InstanceID != "" {
+				playersByInstance[pl.InstanceID] = pl
+			}
+		}
+		for _, inst := range h.server.state.GameSwapInstances {
+			instanceIDs = append(instanceIDs, inst.ID)
+			if playerByInstance, ok := playersByInstance[inst.ID]; ok {
+				if inst.Game != player.Game {
+					instancesWithPlayerWithoutPlayersGame = append(instancesWithPlayerWithoutPlayersGame, inst.ID)
+				} else if inst.ID != player.InstanceID {
+					instancesWithPlayerWithoutPlayersInstanceID = append(instancesWithPlayerWithoutPlayersInstanceID, inst.ID)
+				} else if playerByInstance.Name != player.Name {
+					instancesWithPlayer = append(instancesWithPlayer, inst.ID)
+				}
+			} else {
+				if inst.Game != player.Game {
+					instancesWithoutPlayerWithoutPlayersGame = append(instancesWithoutPlayerWithoutPlayersGame, inst.ID)
+				} else if inst.ID != player.InstanceID {
+					instancesWithoutPlayerWithoutPlayersInstanceID = append(instancesWithoutPlayerWithoutPlayersInstanceID, inst.ID)
+				} else {
+					instancesWithoutPlayer = append(instancesWithoutPlayer, inst.ID)
+				}
+			}
+		}
+	})
+
+	var instanceID string
+	if !preventSame && len(instanceIDs) > 0 {
+		instanceID = instanceIDs[rand.Intn(len(instanceIDs))]
+	} else if len(instancesWithoutPlayerWithoutPlayersGame) > 0 {
+		instanceID = instancesWithoutPlayerWithoutPlayersGame[rand.Intn(len(instancesWithoutPlayerWithoutPlayersGame))]
+	} else if len(instancesWithoutPlayerWithoutPlayersInstanceID) > 0 {
+		instanceID = instancesWithoutPlayerWithoutPlayersInstanceID[rand.Intn(len(instancesWithoutPlayerWithoutPlayersInstanceID))]
+	} else if len(instancesWithoutPlayer) > 0 {
+		instanceID = instancesWithoutPlayer[rand.Intn(len(instancesWithoutPlayer))]
+	} else if len(instancesWithPlayerWithoutPlayersGame) > 0 {
+		instanceID = instancesWithPlayerWithoutPlayersGame[rand.Intn(len(instancesWithPlayerWithoutPlayersGame))]
+	} else if len(instancesWithPlayerWithoutPlayersInstanceID) > 0 {
+		instanceID = instancesWithPlayerWithoutPlayersInstanceID[rand.Intn(len(instancesWithPlayerWithoutPlayersInstanceID))]
+	} else if len(instancesWithPlayer) > 0 {
+		instanceID = instancesWithPlayer[rand.Intn(len(instancesWithPlayer))]
+	} else {
+		return types.GameSwapInstance{}, false, types.Player{}, false
+	}
+	otherPlayer, hasOtherPlayer := playersByInstance[instanceID]
+	var instance types.GameSwapInstance
+	h.server.withRLock(func() {
+		for _, inst := range h.server.state.GameSwapInstances {
+			if inst.ID == instanceID {
+				instance = inst
+				break
+			}
+		}
+	})
+	return instance, instance.ID != "", otherPlayer, hasOtherPlayer
+}
+
+// HandleRandomSwapForPlayer performs a random swap for a specific player in save mode
+func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
+	if h.waitForFileCheck() {
+		return nil
+	}
+
+	var (
+		player         types.Player
+		foundPlayer    bool
+		swappedPlayers = make(map[string]bool)
+	)
+	// Read current state
+	h.server.withRLock(func() {
+		for name := range h.server.state.Players {
+			swappedPlayers[name] = false
+		}
+	})
+
+	for true {
+		// Refresh player data
+		h.server.withRLock(func() {
+			player, foundPlayer = h.server.state.Players[playerName]
+		})
+		if !foundPlayer {
+			return errors.New("player not found: " + playerName)
+		}
+
+		instance, hasInstance, otherPlayer, hasOtherPlayer := h.getRandomInstanceForPlayer(player)
+		if !hasInstance {
+			break
+		}
+		h.server.setPlayerFilePending(player)
+
+		player.InstanceID = instance.ID
+		player.Game = instance.Game
+		h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+			st.Players[player.Name] = player
+		})
+		h.server.sendSwap(player)
+		swappedPlayers[player.Name] = true
+
+		if !hasOtherPlayer {
+			break
+		}
+		playerName = otherPlayer.Name
+		if swappedPlayers[playerName] {
+			break
+		}
+	}
+
 	return nil
 }
 

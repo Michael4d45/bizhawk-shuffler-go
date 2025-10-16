@@ -71,16 +71,15 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			sent := time.Unix(0, ts)
 			rtt := time.Since(sent)
 			// Attempt to find player name for this client and store ping in server state
-			pname := ""
-			// findPlayerNameForClient requires s.mu for safe access
+			name := ""
 			s.withRLock(func() {
-				pname = s.findPlayerNameForClient(client)
+				name = s.findPlayerNameForClient(client)
 			})
-			if pname != "" {
+			if name != "" {
 				s.UpdateStateAndPersist(func(st *types.ServerState) {
-					pl := st.Players[pname]
+					pl := st.Players[name]
 					pl.PingMs = int(rtt.Milliseconds())
-					st.Players[pname] = pl
+					st.Players[name] = pl
 				})
 			}
 		}
@@ -202,17 +201,17 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			continue
 		case types.CmdGamesUpdateAck:
 			// determine player name and update under locks
-			pname := ""
+			name := ""
 			s.withRLock(func() {
-				pname = s.findPlayerNameForClient(client)
+				name = s.findPlayerNameForClient(client)
 			})
-			if pname != "" {
+			if name != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
 					if hf, ok := pl["has_files"].(bool); ok {
 						s.UpdateStateAndPersist(func(st *types.ServerState) {
-							p := st.Players[pname]
+							p := st.Players[name]
 							p.HasFiles = hf
-							st.Players[pname] = p
+							st.Players[name] = p
 						})
 						continue
 					}
@@ -291,16 +290,28 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				log.Printf("Received Lua command: kind=%q fields=%v", luaCmd.Kind, luaCmd.Fields)
 
 				switch luaCmd.Kind {
-				case types.CmdMessage:
+				case types.LuaCmdMessage:
 					// Broadcast message to all players and admins
 					s.broadcastToPlayers(types.Command{
 						Cmd:     types.CmdTypeLua,
 						Payload: luaCmd,
 					})
-				case types.CmdSwap:
+				case types.LuaCmdSwap:
 					// Handle swap command
 					if err := s.performSwap(); err != nil {
 						fmt.Printf("performSwap error: %v\n", err)
+					}
+				case types.LuaCmdSwapMe:
+					name := ""
+					s.withRLock(func() {
+						name = s.findPlayerNameForClient(client)
+					})
+					if name == "" {
+						fmt.Printf("[ERROR] LuaCmdSwapMe: could not determine player name for client\n")
+						continue
+					}
+					if err := s.performRandomSwapForPlayer(name); err != nil {
+						fmt.Printf("performRandomSwapForPlayer error: %v\n", err)
 					}
 				}
 			} else {
@@ -462,6 +473,13 @@ func (s *Server) sendSwapAll() {
 	}
 }
 
+func (s *Server) setPlayerFilePending(player types.Player) {
+	if !player.Connected || player.InstanceID == "" {
+		return
+	}
+	s.setInstanceFileStateWithPlayer(player.InstanceID, types.FileStatePending, player.Name)
+}
+
 func (s *Server) SetPendingAllFiles() {
 	players := []types.Player{}
 	s.withRLock(func() {
@@ -470,10 +488,7 @@ func (s *Server) SetPendingAllFiles() {
 		}
 	})
 	for _, p := range players {
-		if !p.Connected || p.InstanceID == "" {
-			continue
-		}
-		s.setInstanceFileStateWithPlayer(p.InstanceID, types.FileStatePending, p.Name)
+		s.setPlayerFilePending(p)
 	}
 }
 

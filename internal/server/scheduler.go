@@ -18,6 +18,15 @@ func (s *Server) performSwap() error {
 	return nil
 }
 
+func (s *Server) performRandomSwapForPlayer(playerName string) any {
+	handler := s.GetGameModeHandler()
+	// Call the mode-specific swap handler.
+	if err := handler.HandleRandomSwapForPlayer(playerName); err != nil {
+		return err
+	}
+	return nil
+}
+
 // schedulerLoop schedules automatic swaps when enabled.
 func (s *Server) schedulerLoop() {
 	for {
