@@ -47,7 +47,7 @@ func New() *Server {
 			UpdatedAt:           time.Now(),
 			MinIntervalSecs:     5,
 			MaxIntervalSecs:     300,
-			PreventSameGameSwap: false, // Default to false
+			PreventSameGameSwap: false,
 		},
 		conns:         make(map[*websocket.Conn]*wsClient),
 		playerClients: make(map[string]*wsClient),

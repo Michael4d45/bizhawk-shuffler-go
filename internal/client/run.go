@@ -24,6 +24,9 @@ import (
 // ErrNotFound is returned when a requested remote save/file is not present on the server
 var ErrNotFound = errors.New("not found")
 
+// ErrFileLocked is returned when a save file cannot be accessed because it's in use by another process
+var ErrFileLocked = errors.New("file locked by another process")
+
 // Client represents a running client instance and holds its dependencies
 // and runtime state.
 type Client struct {

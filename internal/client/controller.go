@@ -310,8 +310,8 @@ func (c *Controller) EnsureSaveState(instanceID string) error {
 	log.Printf("Downloading save state for new instance: %s", instanceID)
 	err := c.api.EnsureSaveState(instanceID)
 	if err != nil {
-		if err == ErrNotFound {
-			log.Printf("Save state for instance %s not found on server (this is OK, Lua will create one)", instanceID)
+		if err == ErrNotFound || err == ErrFileLocked {
+			log.Printf("Save state for instance %s not available on server (this is OK, Lua will create one): %v", instanceID, err)
 		} else {
 			log.Printf("Failed to download save state for instance %s: %v", instanceID, err)
 			return err

@@ -199,19 +199,23 @@ type SaveModeHandler struct {
 }
 
 func (h *SaveModeHandler) waitForFileCheck() bool {
-	var waiting bool
+	var waitingForPendingFiles bool
+	var waitingForPendingCommands bool
 	ticker := time.NewTicker(100 * time.Millisecond)
 	defer ticker.Stop()
 	for range 3 {
 		h.server.withRLock(func() {
-			waiting = h.server.pendingInstancecount > 0
+			waitingForPendingFiles = h.server.pendingInstancecount > 0
+			waitingForPendingCommands = len(h.server.pending) > 0
 		})
-		if waiting {
+		if waitingForPendingFiles {
 			h.server.RequestPendingSaves()
+		} else if !waitingForPendingCommands {
+			break
 		}
 		<-ticker.C
 	}
-	return waiting
+	return waitingForPendingFiles
 }
 
 func (h *SaveModeHandler) HandleSwap() error {
@@ -533,7 +537,7 @@ func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 		}
 	})
 
-	for true {
+	for {
 		// Refresh player data
 		h.server.withRLock(func() {
 			player, foundPlayer = h.server.state.Players[playerName]

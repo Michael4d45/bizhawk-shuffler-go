@@ -164,6 +164,7 @@ func (a *API) UploadNoSaveState(instanceID string) error {
 
 // DownloadSave downloads a save file for player/filename into ./saves/player.
 // Returns ErrNotFound when the server responds 404.
+// Returns ErrFileLocked when the save file is in use by another process.
 func (a *API) EnsureSaveState(instanceID string) error {
 	if instanceID == "" {
 		return nil
@@ -185,10 +186,30 @@ func (a *API) EnsureSaveState(instanceID string) error {
 		return fmt.Errorf("bad status: %s %s", resp.Status, string(body))
 	}
 	outPath := filepath.Join("./saves", instanceID+".state")
-	out, err := os.Create(outPath)
-	if err != nil {
-		return err
+
+	// Try to create the file, retrying if it's locked by another process
+	var out *os.File
+	var createErr error
+	for retries := range 3 {
+		out, createErr = os.Create(outPath)
+		if createErr == nil {
+			break // Success
+		}
+		// Check if it's a file locking error
+		if strings.Contains(createErr.Error(), "being used by another process") {
+			if retries < 2 { // Don't sleep on the last attempt
+				time.Sleep(500 * time.Millisecond)
+				continue
+			}
+			return ErrFileLocked
+		}
+		// For other errors, fail immediately
+		return createErr
 	}
+	if createErr != nil {
+		return createErr
+	}
+
 	defer func() { _ = out.Close() }()
 	_, err = io.Copy(out, resp.Body)
 	return err

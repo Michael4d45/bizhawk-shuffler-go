@@ -76,6 +76,7 @@ func (s *Server) loadState() {
 			fmt.Println("no save state found for instance", instance.ID)
 			tmp.GameSwapInstances[i].FileState = types.FileStateNone
 		}
+		tmp.GameSwapInstances[i].PendingPlayer = ""
 	}
 	if tmp.Games == nil {
 		tmp.Games = []string{}
