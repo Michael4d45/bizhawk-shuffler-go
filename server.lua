@@ -272,6 +272,7 @@ console.log("Listening on " .. HOST .. ":" .. tostring(PORT))
 local client_socket = nil
 
 local function send_line(line)
+    console.log("Sending: " .. tostring(line))
     if client_socket then
         local ok, err = pcall(function()
             client_socket:send(line .. "\n")

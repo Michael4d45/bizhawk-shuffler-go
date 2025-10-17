@@ -262,20 +262,30 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				return
 			}
 
+			// Check if IPC is ready
+			if !c.bipc.IsReady() {
+				log.Printf("IPC not ready, cannot send SAVE command")
+				sendNack(id, "IPC not ready")
+				return
+			}
+
 			// Save the current state
+			log.Printf("about to send SAVE command to BizHawk")
 			if err := c.bipc.SendSave(ctx); err != nil {
+				log.Printf("SendSave failed: %v", err)
 				sendNack(id, "save failed: "+err.Error())
 				return
 			}
 			log.Printf("save command sent to BizHawk")
 
 			// Upload the save state
+			log.Printf("about to upload save state for instanceID=%s", instanceID)
 			if err := c.api.UploadSaveState(instanceID); err != nil {
+				log.Printf("UploadSaveState failed: %v", err)
 				sendNack(id, "upload failed: "+err.Error())
 				return
 			}
 			log.Printf("save state uploaded for instanceID=%s", instanceID)
-
 			sendAck(id)
 		}(cmd.ID)
 	default:

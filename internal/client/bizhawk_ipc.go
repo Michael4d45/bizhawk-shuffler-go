@@ -327,6 +327,8 @@ func (b *BizhawkIPC) handleLine(line string) {
 				pc.ch <- nil
 				log.Printf("bizhawk ipc: ACK received for id=%s", id)
 				delete(b.pending, id)
+			} else {
+				log.Printf("bizhawk ipc: ACK received for id=%s but not in pending", id)
 			}
 			b.mu.Unlock()
 		}
