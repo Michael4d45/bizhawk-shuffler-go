@@ -36,13 +36,19 @@ type pendingCmd struct {
 	line     string
 }
 
+// Queued command to be sent sequentially
+type queuedCmd struct {
+	parts []string
+	ch    chan error
+}
+
 // BizhawkIPC provides a small bridge to the Lua script listening on a TCP port
 type BizhawkIPC struct {
 	addr     string
 	mu       sync.Mutex
 	conn     net.Conn
 	reader   *bufio.Reader
-	pending  map[string]*pendingCmd
+	pending  *pendingCmd
 	incoming chan string
 	closed   bool
 	// ready indicates whether the Lua side has completed its HELLO handshake
@@ -50,6 +56,8 @@ type BizhawkIPC struct {
 	// accessor methods to read/update this flag.
 	readyMu sync.Mutex
 	ready   bool
+
+	commandQueue chan *queuedCmd
 
 	instanceID string
 	game       string
@@ -74,9 +82,10 @@ func NewBizhawkIPC() *BizhawkIPC {
 		log.Printf("bizhawk ipc: failed to write port file: %v", err)
 	}
 	return &BizhawkIPC{
-		addr:     fmt.Sprintf("%s:%d", "127.0.0.1", port),
-		pending:  make(map[string]*pendingCmd),
-		incoming: make(chan string, 16),
+		addr:         fmt.Sprintf("%s:%d", "127.0.0.1", port),
+		pending:      nil,
+		incoming:     make(chan string, 16),
+		commandQueue: make(chan *queuedCmd, 16),
 	}
 }
 
@@ -97,9 +106,9 @@ func (b *BizhawkIPC) Start(ctx context.Context) error {
 		_ = os.Remove("lua_server_port.txt")
 	}()
 	go func() {
-		log.Printf("bizhawk ipc: starting resendLoop goroutine")
-		b.resendLoop(ctx)
-		log.Printf("bizhawk ipc: resendLoop goroutine exited")
+		log.Printf("bizhawk ipc: starting commandProcessor goroutine")
+		b.commandProcessor(ctx)
+		log.Printf("bizhawk ipc: commandProcessor goroutine exited")
 	}()
 	return nil
 }
@@ -110,7 +119,13 @@ func (b *BizhawkIPC) connect() error {
 	if b.conn != nil {
 		return nil
 	}
-	log.Printf("bizhawk ipc: attempting connect to %s; goroutines=%d pending=%d", b.addr, runtime.NumGoroutine(), len(b.pending))
+	log.Printf("bizhawk ipc: attempting connect to %s; goroutines=%d pending=%d", b.addr, runtime.NumGoroutine(), func() int {
+		if b.pending != nil {
+			return 1
+		} else {
+			return 0
+		}
+	}())
 	c, err := net.DialTimeout("tcp", b.addr, 2*time.Second)
 	if err != nil {
 		log.Printf("bizhawk ipc: connect error: %v", err)
@@ -132,12 +147,12 @@ func (b *BizhawkIPC) Close() error {
 
 	// notify any pending commands that the IPC is closing so callers
 	// waiting for ACK/NACK don't block indefinitely.
-	for id, pc := range b.pending {
+	if b.pending != nil {
 		select {
-		case pc.ch <- errors.New("ipc closed"):
+		case b.pending.ch <- errors.New("ipc closed"):
 		default:
 		}
-		delete(b.pending, id)
+		b.pending = nil
 	}
 
 	// closing incoming so consumers will see range() end
@@ -163,54 +178,17 @@ func (b *BizhawkIPC) sendLine(line string) error {
 
 // SendCommand sends a command and waits for ACK or NACK or timeout
 func (b *BizhawkIPC) SendCommand(ctx context.Context, parts ...string) error {
-	id := strconv.FormatInt(time.Now().UnixNano(), 10)
-	line := "CMD|" + id + "|" + strings.Join(parts, "|")
-
-	pc := &pendingCmd{id: id, ch: make(chan error, 1), sentAt: time.Now(), attempts: 0, line: line}
-	b.mu.Lock()
-	b.pending[id] = pc
-	b.mu.Unlock()
-
-	// send immediately
-	if err := b.sendLine(line); err != nil {
-		b.mu.Lock()
-		delete(b.pending, id)
-		b.mu.Unlock()
-		log.Printf("bizhawk ipc: SendCommand sendLine failed: %v", err)
-		return err
+	qc := &queuedCmd{parts: parts, ch: make(chan error, 1)}
+	select {
+	case b.commandQueue <- qc:
+	case <-ctx.Done():
+		return ctx.Err()
 	}
-	pc.sentAt = time.Now()
-	pc.attempts++
-
 	select {
 	case <-ctx.Done():
 		return ctx.Err()
-	case err := <-pc.ch:
+	case err := <-qc.ch:
 		return err
-	case <-time.After(5 * time.Second):
-
-		// Investigate why we timed out
-		b.mu.Lock()
-		defer b.mu.Unlock()
-		if pc, ok := b.pending[id]; ok {
-			// Check connection status
-			if b.conn == nil {
-				log.Printf("bizhawk ipc: SendCommand timeout but connection is nil, will try to reconnect")
-				if err := b.connect(); err != nil {
-					return fmt.Errorf("timeout waiting for ACK: %v", err)
-				}
-			}
-
-			// Still pending, return timeout error
-			log.Printf("bizhawk ipc: SendCommand timeout waiting for ACK for id=%s", id)
-			pc.ch <- fmt.Errorf("timeout waiting for ACK: %s", line)
-			delete(b.pending, id)
-			return fmt.Errorf("timeout waiting for ACK: %s", line)
-		} else {
-			// If we don't have the pending command, it means it was already handled
-			log.Printf("bizhawk ipc: SendCommand timeout but command %s already handled", id)
-			return nil
-		}
 	}
 }
 
@@ -272,12 +250,12 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 
 			// notify any pending commands that the IPC disconnected so callers
 			// waiting for ACK/NACK don't block indefinitely.
-			for id, pc := range b.pending {
+			if b.pending != nil {
 				select {
-				case pc.ch <- errors.New("ipc disconnected"):
+				case b.pending.ch <- errors.New("ipc disconnected"):
 				default:
 				}
-				delete(b.pending, id)
+				b.pending = nil
 			}
 
 			b.mu.Unlock()
@@ -289,7 +267,13 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 				// dump brief stack and pending info to help debugging who is listening
 				buf := make([]byte, 1<<12)
 				m := runtime.Stack(buf, false)
-				log.Printf("bizhawk ipc: notifying MsgDisconnected; goroutines=%d pending=%d stack:\n%s", runtime.NumGoroutine(), len(b.pending), string(buf[:m]))
+				log.Printf("bizhawk ipc: notifying MsgDisconnected; goroutines=%d pending=%d stack:\n%s", runtime.NumGoroutine(), func() int {
+					if b.pending != nil {
+						return 1
+					} else {
+						return 0
+					}
+				}(), string(buf[:m]))
 				if b.safeSend(MsgDisconnected) {
 					log.Printf("bizhawk ipc: signaled MsgDisconnected to incoming consumers")
 				} else {
@@ -323,10 +307,10 @@ func (b *BizhawkIPC) handleLine(line string) {
 		if len(parts) >= 2 {
 			id := parts[1]
 			b.mu.Lock()
-			if pc, ok := b.pending[id]; ok {
-				pc.ch <- nil
+			if b.pending != nil && b.pending.id == id {
+				b.pending.ch <- nil
 				log.Printf("bizhawk ipc: ACK received for id=%s", id)
-				delete(b.pending, id)
+				b.pending = nil
 			} else {
 				log.Printf("bizhawk ipc: ACK received for id=%s but not in pending", id)
 			}
@@ -340,10 +324,10 @@ func (b *BizhawkIPC) handleLine(line string) {
 				reason = strings.Join(parts[2:], "|")
 			}
 			b.mu.Lock()
-			if pc, ok := b.pending[id]; ok {
-				pc.ch <- fmt.Errorf("nack: %s", reason)
+			if b.pending != nil && b.pending.id == id {
+				b.pending.ch <- fmt.Errorf("nack: %s", reason)
 				log.Printf("bizhawk ipc: NACK received for id=%s reason=%s", id, reason)
-				delete(b.pending, id)
+				b.pending = nil
 			}
 			b.mu.Unlock()
 		}
@@ -384,48 +368,49 @@ func (b *BizhawkIPC) safeSend(s string) bool {
 	}
 }
 
-// resendLoop retries pending commands periodically
-func (b *BizhawkIPC) resendLoop(ctx context.Context) {
-	ticker := time.NewTicker(1 * time.Second)
-	defer ticker.Stop()
+// commandProcessor processes queued commands sequentially
+func (b *BizhawkIPC) commandProcessor(ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
-			log.Printf("bizhawk ipc: resendLoop context cancelled, exiting")
-			// Notify any remaining pending commands
-			b.mu.Lock()
-			for id, pc := range b.pending {
-				select {
-				case pc.ch <- errors.New("ipc shutdown"):
-				default:
-				}
-				delete(b.pending, id)
-			}
-			b.mu.Unlock()
+			log.Printf("bizhawk ipc: commandProcessor context cancelled, exiting")
 			return
-		case <-ticker.C:
-			now := time.Now()
-			b.mu.Lock()
-			for id, pc := range b.pending {
-				if pc.attempts >= 3 {
-					pc.ch <- errors.New("max attempts reached")
-					delete(b.pending, id)
-					continue
-				}
-				if now.Sub(pc.sentAt) > 2*time.Second {
-					// resend the stored original line
-					if pc.line != "" {
-						_ = b.sendLine(pc.line)
-						pc.sentAt = now
-						pc.attempts++
-					} else {
-						pc.ch <- errors.New("no original line to resend")
-						delete(b.pending, id)
-					}
-				}
-			}
-			b.mu.Unlock()
+		case qc := <-b.commandQueue:
+			b.processCommand(ctx, qc)
 		}
+	}
+}
+
+// processCommand sends a command and waits for response
+func (b *BizhawkIPC) processCommand(ctx context.Context, qc *queuedCmd) {
+	id := strconv.FormatInt(time.Now().UnixNano(), 10)
+	line := "CMD|" + id + "|" + strings.Join(qc.parts, "|")
+
+	pc := &pendingCmd{id: id, ch: make(chan error, 1), sentAt: time.Now(), attempts: 1, line: line}
+	b.mu.Lock()
+	b.pending = pc
+	b.mu.Unlock()
+
+	if err := b.sendLine(line); err != nil {
+		b.mu.Lock()
+		b.pending = nil
+		b.mu.Unlock()
+		qc.ch <- err
+		return
+	}
+
+	select {
+	case <-ctx.Done():
+		qc.ch <- ctx.Err()
+	case err := <-pc.ch:
+		qc.ch <- err
+	case <-time.After(10 * time.Second):
+		b.mu.Lock()
+		if b.pending == pc {
+			b.pending = nil
+		}
+		b.mu.Unlock()
+		qc.ch <- fmt.Errorf("timeout waiting for ACK: %s", line)
 	}
 }
 
