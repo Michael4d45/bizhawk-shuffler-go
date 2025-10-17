@@ -32,7 +32,7 @@ Repository layout
 │   ├── README.md
 │   ├── example-plugin/
 │   └── read-door/
-├── bin/                   # Build artifacts (created by make)
+├── dist/                   # Build artifacts (created by make)
 │   ├── server/
 │   │   ├── bizshuffle-server
 │   │   ├── state.json      # Server state persistence
@@ -68,16 +68,16 @@ make client  # Builds client with Lua script
 Alternative manual build method:
 
 ```
-mkdir -p bin/server bin/client
-cd cmd/server && go build -o ../../bin/server/bizshuffle-server
-cd cmd/client && go build -o ../../bin/client/bizshuffle-client
+mkdir -p dist/server dist/client
+cd cmd/server && go build -o ../../dist/server/bizshuffle-server
+cd cmd/client && go build -o ../../dist/client/bizshuffle-client
 # Note: Manual build doesn't copy web UI, plugins, or Lua script
 ```
 
 2) Run server (flags override config file)
 
 ```
-./bin/bizshuffle-server --host 0.0.0.0 --port 8080
+./dist/server/bizshuffle-server --host 0.0.0.0 --port 8080
 ```
 
 3) Install client

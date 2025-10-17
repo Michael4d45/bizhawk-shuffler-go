@@ -13,6 +13,9 @@ jobs:
     name: Build and Release
     runs-on: ubuntu-latest
 
+    env:
+      DIST_DIR: dist/server
+
     steps:
       - uses: actions/checkout@v5
 
@@ -23,26 +26,26 @@ jobs:
       - name: Build binaries
         run: |
           set -e
-          mkdir -p dist
+          mkdir -p $DIST_DIR
           
           # Build server binaries for different platforms
-          GOOS=windows GOARCH=amd64 go build -o dist/bizshuffle-server.exe ./cmd/server
-          GOOS=linux   GOARCH=amd64 go build -o dist/bizshuffle-server ./cmd/server
+          GOOS=windows GOARCH=amd64 go build -o $DIST_DIR/bizshuffle-server.exe ./cmd/server
+          GOOS=linux   GOARCH=amd64 go build -o $DIST_DIR/bizshuffle-server ./cmd/server
           
           # Copy web UI files
-          mkdir -p dist/web
+          mkdir -p $DIST_DIR/web
           if [ -d web ]; then
-            cp -r web/* dist/web/
+            cp -r web/* $DIST_DIR/web/
           fi
           
           # Copy plugins
-          mkdir -p dist/plugins
+          mkdir -p $DIST_DIR/plugins
           if [ -d plugins ]; then
-            cp -r plugins/* dist/plugins/
+            cp -r plugins/* $DIST_DIR/plugins/
           fi
           
           # Create release archives
-          cd dist
+          cd $DIST_DIR
           zip -r bizshuffle-server-windows-amd64.zip bizshuffle-server.exe web plugins
           zip -r bizshuffle-server-linux-amd64.zip bizshuffle-server web plugins
           cd ..
@@ -51,7 +54,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            dist/bizshuffle-server-windows-amd64.zip
-            dist/bizshuffle-server-linux-amd64.zip
+            ${{ env.DIST_DIR }}/bizshuffle-server-windows-amd64.zip
+            ${{ env.DIST_DIR }}/bizshuffle-server-linux-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

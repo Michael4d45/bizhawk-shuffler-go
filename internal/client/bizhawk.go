@@ -321,18 +321,7 @@ func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error
 			} else {
 				log.Printf("Debug: os.Executable() failed: %v", err2)
 			}
-			// b) ./bin/client/<bp> (common distributed bundle)
-			if resolved == "" {
-				candidate2 := filepath.Join("bin", "client", bp)
-				log.Printf("Debug: checking candidate bin/client: %q", candidate2)
-				if _, err4 := os.Stat(candidate2); err4 == nil {
-					log.Printf("Debug: candidate exists: %q", candidate2)
-					resolved = candidate2
-				} else {
-					log.Printf("Debug: candidate missing: %q (%v)", candidate2, err4)
-				}
-			}
-			// c) try cwd + bp
+			// b) try cwd + bp
 			if resolved == "" {
 				if cwd, err := os.Getwd(); err == nil {
 					candidate3 := filepath.Join(cwd, bp)
@@ -348,7 +337,7 @@ func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error
 				}
 			}
 		}
-		// d) try to find on PATH
+		// c) try to find on PATH
 		if resolved == "" {
 			log.Printf("Debug: trying exec.LookPath for %q", bp)
 			if pth, err := exec.LookPath(bp); err == nil {

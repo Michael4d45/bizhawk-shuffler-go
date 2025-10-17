@@ -19,11 +19,11 @@ Always reference these instructions first and fallback to search or bash command
 
 ### Run the Applications
 - **ALWAYS build first** using the bootstrap steps above
-- **Run server**: `./bin/server/bizshuffle-server --host 127.0.0.1 --port 8080`
+- **Run server**: `./dist/server/bizshuffle-server --host 127.0.0.1 --port 8080`
   - Server serves admin web UI at http://127.0.0.1:8080/
   - API endpoints available at `/api/*` and `/state.json`
   - File serving from `./files/` directory at `/files/*`
-- **Run client**: `./bin/client/bizshuffle-client`
+- **Run client**: `./dist/client/bizshuffle-client`
   - **First run**: Will prompt for server websocket URL (e.g., `ws://127.0.0.1:8080/ws`) and username
   - **Subsequent runs**: Reads configuration from `config.json`
   - **BizHawk dependency**: Client attempts to download BizHawk emulator on first run (Windows .exe)
@@ -33,7 +33,7 @@ Always reference these instructions first and fallback to search or bash command
   - `golangci-lint run --timeout 2m` -- takes ~2 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
   - `gofmt -d .` -- takes <1 second. Set timeout to 10+ seconds.
   - `make build <server|client>` -- takes <5 seconds. Set timeout to 30+ seconds.
-  - if you want to test the code, cd ./bin/<server|client> ; ./bizshuffle-<server|client>(.exe)
+  - if you want to test the code, cd ./dist/<server|client> ; ./bizshuffle-<server|client>(.exe)
 - **Manual functional testing**:
   - Start server and access web UI at http://127.0.0.1:8080/
   - Test API endpoint: `curl http://127.0.0.1:8080/api/games` should return valid JSON with games list
@@ -47,7 +47,7 @@ Always reference these instructions first and fallback to search or bash command
 After making changes, ALWAYS run through these complete scenarios:
 
 ### Server Validation
-1. **Build and run server**: `make server && ./bin/server/bizshuffle-server --port 8080`
+1. **Build and run server**: `make server && ./dist/server/bizshuffle-server --port 8080`
 2. **Test web UI**: Navigate to http://127.0.0.1:8080/ and verify admin interface loads
 3. **Test API endpoints**: 
    - `curl http://127.0.0.1:8080/api/games` returns valid JSON
@@ -59,7 +59,7 @@ After making changes, ALWAYS run through these complete scenarios:
 
 ### Client Validation  
 1. **Build client**: `make client`
-2. **Test configuration flow**: Run `./bin/client/bizshuffle-client` and verify discovery/prompts work
+2. **Test configuration flow**: Run `./dist/client/bizshuffle-client` and verify discovery/prompts work
 3. **Test plugin sync**: Verify client downloads and loads plugins from server
 4. **Expected behavior**: Client will attempt BizHawk download (may fail on non-Windows)
 
@@ -93,7 +93,7 @@ After making changes, ALWAYS run through these complete scenarios:
 │   ├── README.md
 │   ├── example-plugin/
 │   └── read-door/
-├── bin/                   # Build artifacts (created by make)
+├── dist/                   # Build artifacts (created by make)
 │   ├── server/
 │   │   ├── bizshuffle-server
 │   │   ├── state.json      # Server state persistence
@@ -114,7 +114,7 @@ After making changes, ALWAYS run through these complete scenarios:
 ### Key Commands Reference
 - **Build everything**: `make all` (1-20s, timeout 60s)
 - **Lint code**: `go vet ./... && gofmt -d .` (2-3s, timeout 30s)  
-- **Run server**: `./bin/server/bizshuffle-server --port 8080`
+- **Run server**: `./dist/server/bizshuffle-server --port 8080`
 - **Test APIs**: `curl http://127.0.0.1:8080/state.json`
 - **Clean builds**: `make clean`
 
@@ -124,7 +124,7 @@ After making changes, ALWAYS run through these complete scenarios:
 - **API handlers**: `internal/server/api_*.go`
 - **Message types**: `internal/types/types.go`
 - **Web admin UI**: `web/index.html`
-- **Build artifacts**: `bin/server/` and `bin/client/`
+- **Build artifacts**: `dist/server/` and `dist/client/`
 
 ### Development Workflow
 1. **Make code changes**

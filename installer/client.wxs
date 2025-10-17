@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
+
+  <Product
+    Id="*"
+    Name="BizShuffle Client"
+    Language="1033"
+    Version="$(var.Version)"
+    Manufacturer="BizShuffle"
+    UpgradeCode="12345678-1234-1234-1234-123456789012">
+
+    <!-- Package MUST come first -->
+    <Package InstallerVersion="500" Compressed="yes" InstallScope="perMachine" Platform="x64" />
+
+    <Icon Id="AppIcon.ico" SourceFile="$(var.DistDir)\bizshuffle-client.ico" />
+
+    <!-- ARP (Add/Remove Programs) metadata -->
+    <Property Id="ARPHELPLINK" Value="https://bizshuffle.com/support" />
+    <Property Id="ARPCOMMENTS" Value="BizShuffle Client" />
+    <Property Id="ARPCONTACT" Value="support@bizshuffle.com" />
+    <Property Id="ARPURLINFOABOUT" Value="https://bizshuffle.com" />
+    <Property Id="ARPPRODUCTICON" Value="AppIcon.ico" />
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of [ProductName] is already installed." />
+    <Media Id="1" Cabinet="media.cab" EmbedCab="yes" />
+
+    <CustomAction Id="OpenInstallDir" Directory="INSTALLFOLDER" ExeCommand="cmd.exe /c start explorer.exe ." Execute="immediate" />
+
+    <InstallExecuteSequence>
+      <Custom Action="OpenInstallDir" After="InstallFinalize">NOT Installed</Custom>
+    </InstallExecuteSequence>
+
+    <Feature Id="ProductFeature" Title="BizShuffle Client" Level="1" Display="expand">
+      <ComponentRef Id="bizshuffle_client_exe" />
+      <ComponentRef Id="server_lua" />
+    </Feature>
+  </Product>
+
+  <!-- ============================================================ -->
+  <!--  Directories                                                 -->
+  <!-- ============================================================ -->
+  <Fragment>
+    <Directory Id="TARGETDIR" Name="SourceDir">
+      <Directory Id="ProgramFiles64Folder">
+        <Directory Id="INSTALLFOLDER" Name="BizShuffle Client" />
+      </Directory>
+    </Directory>
+  </Fragment>
+
+  <!-- ============================================================ -->
+  <!--  Product Components                                          -->
+  <!-- ============================================================ -->
+  <Fragment>
+    <ComponentGroup Id="ProductComponents" Directory="INSTALLFOLDER">
+
+      <Component Id="bizshuffle_client_exe" Guid="*" Win64="yes">
+        <File Id="bizshuffle_client_exe" Source="$(var.DistDir)\bizshuffle-client.exe" KeyPath="yes" />
+      </Component>
+
+      <Component Id="server_lua" Guid="*" Win64="yes">
+        <File Id="server_lua" Source="$(var.DistDir)\server.lua" KeyPath="yes" />
+      </Component>
+
+    </ComponentGroup>
+  </Fragment>
+
+</Wix>
