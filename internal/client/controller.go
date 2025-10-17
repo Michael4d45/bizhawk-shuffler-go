@@ -249,12 +249,14 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 		}(cmd.ID)
 	case types.CmdRequestSave:
 		go func(id string) {
+			log.Printf("handling request_save command")
 			instanceID := ""
 			if m, ok := cmd.Payload.(map[string]any); ok {
 				if iid, ok := m["instance_id"].(string); ok {
 					instanceID = iid
 				}
 			}
+			log.Printf("request_save for instanceID=%s", instanceID)
 			if instanceID == "" {
 				sendNack(id, "missing instance_id")
 				return
@@ -265,12 +267,14 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				sendNack(id, "save failed: "+err.Error())
 				return
 			}
+			log.Printf("save command sent to BizHawk")
 
 			// Upload the save state
 			if err := c.api.UploadSaveState(instanceID); err != nil {
 				sendNack(id, "upload failed: "+err.Error())
 				return
 			}
+			log.Printf("save state uploaded for instanceID=%s", instanceID)
 
 			sendAck(id)
 		}(cmd.ID)

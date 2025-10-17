@@ -188,7 +188,29 @@ func (b *BizhawkIPC) SendCommand(ctx context.Context, parts ...string) error {
 	case err := <-pc.ch:
 		return err
 	case <-time.After(5 * time.Second):
-		return errors.New("timeout waiting for ACK")
+
+		// Investigate why we timed out
+		b.mu.Lock()
+		defer b.mu.Unlock()
+		if pc, ok := b.pending[id]; ok {
+			// Check connection status
+			if b.conn == nil {
+				log.Printf("bizhawk ipc: SendCommand timeout but connection is nil, will try to reconnect")
+				if err := b.connect(); err != nil {
+					return fmt.Errorf("timeout waiting for ACK: %v", err)
+				}
+			}
+
+			// Still pending, return timeout error
+			log.Printf("bizhawk ipc: SendCommand timeout waiting for ACK for id=%s", id)
+			pc.ch <- fmt.Errorf("timeout waiting for ACK: %s", line)
+			delete(b.pending, id)
+			return fmt.Errorf("timeout waiting for ACK: %s", line)
+		} else {
+			// If we don't have the pending command, it means it was already handled
+			log.Printf("bizhawk ipc: SendCommand timeout but command %s already handled", id)
+			return nil
+		}
 	}
 }
 

@@ -84,8 +84,7 @@
 
         <div class="mt-3">
           <label class="block text-sm text-gray-300 mb-1">Mode</label>
-          <select x-model="state.mode" @change="state._dirtyMode = true; setMode(state.mode)"
-            class="px-2 py-1 rounded bg-slate-700">
+          <select x-model="state.mode" @change="setMode(state.mode)" class="px-2 py-1 rounded bg-slate-700">
             <option value="sync">Sync swap (all same game)</option>
             <option value="save">Save swap (per-player saves)</option>
           </select>
@@ -93,9 +92,8 @@
 
         <div class="mt-4 flex flex-wrap gap-2">
           <template x-for="btn in sessionButtons" :key="btn.label">
-            <button @click="trigger(btn.path)"
-              class="px-1 py-1 rounded font-semibold transition btn-stable" :class="getButtonClass(btn)"
-              :title="getButtonTitle(btn)">
+            <button @click="trigger(btn.path)" class="px-1 py-1 rounded font-semibold transition btn-stable"
+              :class="getButtonClass(btn)" :title="getButtonTitle(btn)">
               <span class="inline-flex items-center gap-2 justify-center w-full">
                 <span x-text="btn.label"></span>
                 <!-- small On/Off badge for the Toggle Swaps button -->
@@ -121,9 +119,9 @@
           <p class="text-sm text-gray-400 mb-2 numeric" x-text="intervalDisplay"></p>
 
           <div class="flex flex-wrap items-center gap-3">
-            <input x-model.number="interval.min" @input="interval._dirtyMin = true" type="number" placeholder="min"
+            <input x-model.number="interval.min" type="number" placeholder="min"
               class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white numeric" />
-            <input x-model.number="interval.max" @input="interval._dirtyMax = true" type="number" placeholder="max"
+            <input x-model.number="interval.max" type="number" placeholder="max"
               class="w-24 px-2 py-1 rounded bg-transparent border border-white/20 text-white numeric" />
             <button @click="saveInterval()" :disabled="!intervalValid"
               class="px-4 py-1 rounded font-semibold transition"
@@ -190,8 +188,7 @@
               <div class="flex items-center gap-2 min-w-0">
                 <!-- If in sync mode, let user pick a game; otherwise pick an instance -->
                 <template x-if="state.mode === 'sync'">
-                  <select x-model="p.selectedGame"
-                    class="bg-slate-700 rounded text-sm max-w-[12rem] truncate">
+                  <select x-model="p.selectedGame" class="bg-slate-700 rounded text-sm max-w-[12rem] truncate">
                     <option value="">-- select game --</option>
                     <template x-for="g in state.games" :key="g">
                       <option :value="g" x-text="g"></option>
@@ -199,10 +196,9 @@
                   </select>
                 </template>
                 <template x-if="state.mode !== 'sync'">
-                  <select x-model="p.selectedGame"
-                    class="bg-slate-700 rounded text-sm max-w-[12rem] truncate">
+                  <select x-model="p.selectedGame" class="bg-slate-700 rounded text-sm max-w-[12rem] truncate">
                     <option value="">-- select instance --</option>
-                    <template x-for="inst in instancesList" :key="inst.id">
+                    <template x-for="inst in gameInstances" :key="inst.id">
                       <option :value="inst.id" x-text="inst.id + ' — ' + inst.game"></option>
                     </template>
                   </select>
@@ -258,7 +254,9 @@
                   <input type="checkbox" :id="'sync-game-'+idx" :value="g" x-bind:checked="state.games.includes(g)"
                     @change="toggleSyncGame(g, $event.target.checked)" class="w-4 h-4" />
                   <label :for="'sync-game-'+idx" class="text-sm font-mono text-gray-200 truncate" x-text="g"></label>
-                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-500 text-white" x-show="countPlayersOnGame(g) > 0" x-text="countPlayersOnGame(g) + ' player' + (countPlayersOnGame(g) > 1 ? 's' : '')"></span>
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-500 text-white"
+                    x-show="countPlayersOnGame(g) > 0"
+                    x-text="countPlayersOnGame(g) + ' player' + (countPlayersOnGame(g) > 1 ? 's' : '')"></span>
                 </div>
                 <div class="flex gap-2">
                   <button @click="swapAll(g)"
@@ -300,12 +298,9 @@
                   <div class="flex items-center gap-2">
                     <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
                       :class="inst.file_state === 'ready' ? 'bg-green-500/20 text-green-400' : inst.file_state === 'pending' ? 'bg-yellow-500/20 text-yellow-400' : 'bg-gray-500/20 text-gray-400'"
-                      x-text="inst.file_state || 'none'"></span>
+                      x-text="(inst.file_state || 'none') + (inst.pending_player ? ': ' + inst.pending_player : '')">
+                    </span>
                     <span class="text-xs text-gray-500" x-text="inst.player ? 'assigned:' : 'unassigned'"></span>
-                    <template x-if="inst.pending_player">
-                      <span class="text-xs px-2 py-0.5 rounded-full bg-orange-500/20 text-orange-300"
-                        x-text="'pending: ' + inst.pending_player"></span>
-                    </template>
                   </div>
                   <template x-if="inst.player">
                     <span
@@ -510,8 +505,7 @@
         <div class="flex items-center gap-2">
           <div class="flex-1">
             <label class="block text-xs text-gray-400 mb-1">Primary file</label>
-            <select x-model="newMain.primary" @change="newMain._dirtyPrimary = true"
-              class="w-full bg-slate-700 rounded px-2 py-1 text-sm">
+            <select x-model="newMain.primary" class="w-full bg-slate-700 rounded px-2 py-1 text-sm">
               <option value="">-- select file --</option>
               <template x-for="f in availableFiles()" :key="f">
                 <option :value="f" x-text="f"></option>
@@ -520,8 +514,7 @@
           </div>
           <div class="w-36">
             <label class="block text-xs text-gray-400 mb-1">Extras</label>
-            <select x-model="newMain.extras" multiple @change="newMain._dirtyExtras = true"
-              class="w-full bg-slate-700 rounded px-2 py-1 text-sm">
+            <select x-model="newMain.extras" multiple class="w-full bg-slate-700 rounded px-2 py-1 text-sm">
               <template x-for="f in availableFiles(true)" :key="f">
                 <option :value="f" x-text="f"></option>
               </template>
@@ -533,8 +526,8 @@
             class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Add</button>
           <button @click="saveMainGames(); showCatalog = false"
             class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Save Catalog</button>
-          <button @click="refreshFilesList()"
-            class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Refresh Files</button>
+          <button @click="refreshFilesList()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Refresh
+            Files</button>
         </div>
       </div>
     </div>
@@ -711,10 +704,6 @@
           if (this.mainGames && this.mainGames.length) return this.mainGames.map(e => e.file).filter(Boolean);
           return [];
         },
-        // helper to list available instances for selection (id + game)
-        get instancesList() {
-          return (this.gameInstances || []).map(i => ({ id: i.id, game: i.game }));
-        },
         get intervalError() {
           if (!this.interval.min || !this.interval.max)
             return "Both values required";
@@ -799,128 +788,29 @@
             const envelope = await r.json();
             const st = envelope && envelope.state ? envelope.state : envelope;
 
-            this.state = this.state || {};
+            // Replace all values directly
+            this.state = st || {};
+            this.mainGames = (st.main_games || []).map((e) => ({
+              file: e.file,
+              extra_files: e.extra_files || [],
+            }));
+            this.gameInstances = st.game_instances || [];
 
-            // --- 1) main_games ---
-            if (st.main_games && Array.isArray(st.main_games)) {
-              const normalized = st.main_games.map((e) => ({
-                file: e.file,
-                extra_files: e.extra_files || [],
-              }));
-              if (JSON.stringify(normalized) !== JSON.stringify(this.mainGames)) {
-                this.mainGames = normalized;
-              }
-            }
-
-            // --- 2) games list ---
-            this.state.games = st.games;
-
-            const playerNameByInstanceId = Object.fromEntries(
-              Object.entries(st.players || {}).map(([name, p]) => [p.instance_id, name])
-            );
-
-            // --- 2b) game_instances (merge by id) ---
-            if (st.game_instances && Array.isArray(st.game_instances)) {
-              const newMap = Object.fromEntries(
-                st.game_instances.map((i) => [
-                  i.id,
-                  { id: i.id, game: i.game || "", file_state: i.file_state || "none", player: playerNameByInstanceId[i.id] || "", _saved: true },
-                ])
-              );
-
-              const oldMap = Object.fromEntries(
-                (this.gameInstances || []).map((i) => [i.id, i])
-              );
-
-              // merge server instances into oldMap
-              for (const [id, newInst] of Object.entries(newMap)) {
-                if (!oldMap[id]) {
-                  oldMap[id] = newInst;
-                } else {
-                  oldMap[id] = {
-                    ...oldMap[id],
-                    id: oldMap[id]._dirtyId ? oldMap[id].id : newInst.id,
-                    game: oldMap[id]._dirtyGame ? oldMap[id].game : newInst.game,
-                    file_state: newInst.file_state,
-                    player: playerNameByInstanceId[id] || "",
-                    _saved: true,
-                  };
+            // Populate player field on game instances based on player.instance_id
+            const playerMap = {};
+            if (this.state.players) {
+              for (const [name, player] of Object.entries(this.state.players)) {
+                if (player.instance_id) {
+                  playerMap[player.instance_id] = name;
                 }
               }
-
-              // keep unsaved instances (those with _saved === false) locally
-              // before potentially deleting stale saved ones from the server
-              for (const inst of this.gameInstances) {
-                if (!inst._saved) {
-                  oldMap[inst.id] = inst;
-                }
-              }
-
-              // remove stale instances (only for saved ones, since unsaved are handled above)
-              for (const id of Object.keys(oldMap)) {
-                if (oldMap[id]._saved && !newMap[id]) {
-                  delete oldMap[id];
-                }
-              }
-
-              this.gameInstances = Object.values(oldMap);
+            }
+            for (const inst of this.gameInstances) {
+              inst.player = playerMap[inst.id] || "";
             }
 
-            // --- 3) players (merge by name, preserve selectedGame) ---
-            if (st.players && typeof st.players === "object") {
-              const uiPlayers = {};
-              for (const [name, p] of Object.entries(st.players)) {
-
-                const newP = {
-                  name,
-                  instance_id: p.instance_id || "",
-                  connected: p.connected || false,
-                  has_files: p.has_files || p.hasFiles || false,
-                  ping_ms: p.ping_ms || p.pingMs || p.PingMs || 0,
-                  game: p.game || "",
-                };
-
-                // merge with old player if exists
-                if (this.state.players && this.state.players[name]) {
-                  uiPlayers[name] = {
-                    ...newP,
-                    selectedGame: this.state.players[name].selectedGame || "",
-                  };
-                } else {
-                  uiPlayers[name] = { ...newP, selectedGame: "" };
-                }
-              }
-
-              // remove stale players
-              if (this.state.players) {
-                for (const name of Object.keys(this.state.players)) {
-                  if (!uiPlayers[name]) delete this.state.players[name];
-                }
-              }
-
-              this.state.players = uiPlayers;
-            }
-
-            // --- 4) other top-level keys ---
-            for (const [k, v] of Object.entries(st)) {
-              if (["main_games", "games", "players", "game_instances"].includes(k))
-                continue;
-              if (JSON.stringify(this.state[k]) !== JSON.stringify(v)) {
-                this.state[k] = v;
-              }
-            }
-
-            // --- 5) intervals ---
-            const minSecs = st.min_interval_secs || 0;
-            const maxSecs = st.max_interval_secs || 0;
-            if (!this.interval._dirtyMin && this.interval.min !== minSecs) {
-              this.interval.min = minSecs;
-            }
-            if (!this.interval._dirtyMax && this.interval.max !== maxSecs) {
-              this.interval.max = maxSecs;
-            }
-
-            if (!this.state._dirtyMode && st.mode) this.state.mode = st.mode;
+            this.interval.min = st.min_interval_secs || 0;
+            this.interval.max = st.max_interval_secs || 0;
           } catch (e) {
             this.log("state fetch error: " + e.message);
           }
@@ -929,7 +819,6 @@
           try {
             const res = await fetch('/api/mode', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ mode }) });
             if (res.ok) {
-              this.state._dirtyMode = false;
               this.toast = 'Mode updated';
               setTimeout(() => this.toast = '', 1500);
             }
@@ -962,34 +851,41 @@
             if (r.ok) {
               const contentType = r.headers.get("content-type");
               if (contentType && contentType.includes("application/json")) {
-                // The server may return either a full state JSON (new state)
-                // or an action result like {status: "partial_failure", results: ..., download_results: ...}.
                 const body = await r.json();
-                // Heuristic: if body has players or updated_at, treat it as full state and replace.
+                // Replace state directly if it's a full state response
                 if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
                   this.state = body;
                   this.interval.min = this.state.min_interval_secs || 0;
                   this.interval.max = this.state.max_interval_secs || 0;
-                } else {
-                  // Action-style response. Keep the UI state intact and log results.
-                  // Backwards-compat: some endpoints return {status: 'partial_failure', results: [...], download_results: [...]}
-                  if (body.status) {
-                    if (body.status === 'partial_failure') {
-                      this.log(`${path} partial failure`);
-                      // Prefer the newer key swap_results but fall back to results
-                      const results = body.swap_results || body.results || [];
-                      const dl = body.download_results || [];
-                      this.log(`swap results: ${JSON.stringify(results)}`);
-                      if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
-                    } else if (body.status === 'ok') {
-                      this.log(`${path} OK`);
-                    } else {
-                      this.log(`${path} status: ${body.status}`);
+
+                  // Populate player field on game instances based on player.instance_id
+                  const playerMap = {};
+                  if (this.state.players) {
+                    for (const [name, player] of Object.entries(this.state.players)) {
+                      if (player.instance_id) {
+                        playerMap[player.instance_id] = name;
+                      }
                     }
-                  } else {
-                    // unknown action response; just log it
-                    this.log(`${path} response: ${JSON.stringify(body)}`);
                   }
+                  for (const inst of this.gameInstances) {
+                    inst.player = playerMap[inst.id] || "";
+                  }
+                }
+                // Log action results
+                if (body.status) {
+                  if (body.status === 'partial_failure') {
+                    this.log(`${path} partial failure`);
+                    const results = body.swap_results || body.results || [];
+                    const dl = body.download_results || [];
+                    this.log(`swap results: ${JSON.stringify(results)}`);
+                    if (dl && dl.length) this.log(`download results: ${JSON.stringify(dl)}`);
+                  } else if (body.status === 'ok') {
+                    this.log(`${path} OK`);
+                  } else {
+                    this.log(`${path} status: ${body.status}`);
+                  }
+                } else {
+                  this.log(`${path} response: ${JSON.stringify(body)}`);
                 }
               } else {
                 this.log(`${path} OK`);
@@ -1063,8 +959,6 @@
             const res = await fetch('/api/games', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (res.ok) {
               this.log('main games saved');
-              this.newMain._dirtyPrimary = false;
-              this.newMain._dirtyExtras = false;
             } else {
               this.log('save main games failed');
             }
@@ -1098,19 +992,10 @@
         },
         async saveInstances() {
           try {
-            // Ensure all instances are marked as saved when we attempt to save
-            this.gameInstances.forEach(i => {
-              if (!i._saved) i._saved = true;
-            });
             const payload = { main_games: this.mainGames, game_instances: this.gameInstances };
             const res = await fetch('/api/games', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
             if (res.ok) {
               this.log('instances saved');
-              // Clear dirty flags after successful save
-              this.gameInstances.forEach(i => {
-                i._dirtyId = false;
-                i._dirtyGame = false;
-              });
             } else {
               this.log('save instances failed');
             }
