@@ -130,11 +130,42 @@ local function get_save_path()
     return SAVE_DIR .. "/" .. name .. ".state"
 end
 
+local function is_valid_zip(path)
+    local f = io.open(path, "rb")
+    if not f then
+        return false
+    end
+    local size = f:seek("end")
+    if size < 22 then -- Minimum ZIP footer length
+        f:close()
+        return false
+    end
+    local chunk_size = math.min(65536, size)
+    f:seek("end", -chunk_size)
+    local tail = f:read(chunk_size)
+    f:close()
+    if not tail then
+        return false
+    end
+    return tail:find("PK\005\006", 1, true) ~= nil
+end
+
 local function load_state_if_exists()
     local path = get_save_path()
     if path and file_exists(path) then
         console.log("Loading state from: " .. tostring(path))
-        savestate.load(path)
+        if is_valid_zip(path) then
+            local ok, err = pcall(function()
+                savestate.load(path)
+            end)
+            if not ok then
+                console.log("Failed to load state from '" .. tostring(path) .. "': " .. tostring(err))
+                os.remove(path)
+            end
+        else
+            console.log("Invalid ZIP structure; deleting save: " .. tostring(path))
+            os.remove(path)
+        end
     end
 end
 
@@ -143,8 +174,11 @@ local function load_rom(game)
     client.closerom()
     if file_exists(path) then
         client.openrom(path)
-        local save_loaded = load_state_if_exists()
-        return save_loaded
+        local ok, err = pcall(load_state_if_exists)
+        if not ok then
+            console.log("Error loading state: " .. tostring(err))
+        end
+        return true
     else
         console.log("ROM not found: " .. path .. ", cannot load.")
         return false
