@@ -4,6 +4,7 @@ import (
 	"crypto/md5"
 	"encoding/hex"
 	"errors"
+	"log"
 	"math/rand"
 	"os"
 	"path/filepath"
@@ -215,7 +216,17 @@ func (h *SaveModeHandler) waitForFileCheck() bool {
 		}
 		<-ticker.C
 	}
-	return waitingForPendingFiles
+	if waitingForPendingFiles {
+		log.Printf("waiting for %d pending file checks to complete\n", h.server.pendingInstancecount)
+	}
+	if waitingForPendingCommands {
+		h.server.withRLock(func() {
+			for name, p := range h.server.pending {
+				log.Printf("waiting for pending command check: %s: %v\n", name, p)
+			}
+		})
+	}
+	return waitingForPendingFiles || waitingForPendingCommands
 }
 
 func (h *SaveModeHandler) HandleSwap() error {
