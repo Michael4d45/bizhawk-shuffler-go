@@ -212,22 +212,22 @@ Each plugin resides in its own directory under `plugins/`:
 ```
 plugins/my-plugin/
 ├── plugin.lua     # Main plugin code
-├── meta.json      # Plugin metadata
+├── meta.kv        # Plugin metadata (simple key=value format)
 └── README.md      # Plugin documentation
 ```
 
-### Plugin Metadata (meta.json)
+### Plugin Metadata (meta.kv)
 
-```json
-{
-  "name": "my-plugin",
-  "version": "1.0.0",
-  "description": "Example plugin",
-  "author": "Plugin Author",
-  "bizhawk_version": ">=2.8.0",
-  "enabled": true,
-  "entry_point": "plugin.lua"
-}
+Plugin metadata uses a tiny key=value format (no comments, single-line values). Example:
+
+```
+name = my-plugin
+version = 1.0.0
+description = Example plugin
+author = Plugin Author
+bizhawk_version = >=2.8.0
+entry_point = plugin.lua
+status = disabled
 ```
 
 ### Plugin Management

@@ -13,20 +13,18 @@ Each plugin should be in its own subdirectory:
 ```
 plugins/my-plugin/
 ├── plugin.lua     # Main plugin code
-├── meta.json      # Plugin metadata
+├── meta.kv        # Plugin metadata (simple key=value)
 └── README.md      # Plugin documentation
 ```
 
-### Example meta.json
+### Example meta.kv
 
-```json
-{
-  "name": "my-plugin",
-  "version": "1.0.0",
-  "description": "Example plugin",
-  "author": "Plugin Author",
-  "bizhawk_version": ">=2.8.0",
-  "enabled": true,
-  "entry_point": "plugin.lua"
-}
+```
+name = my-plugin
+version = 1.0.0
+description = Example plugin
+author = Plugin Author
+bizhawk_version = >=2.8.0
+entry_point = plugin.lua
+status = disabled
 ```

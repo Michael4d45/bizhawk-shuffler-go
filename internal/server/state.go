@@ -1,12 +1,14 @@
 package server
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"log"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -46,6 +48,90 @@ func (s *Server) saveJson(data any, filename string) error {
 		return err
 	}
 	return file.Sync()
+}
+
+// loadKV reads a minimal key=value metadata file into a Plugin struct.
+// Format: key = value (one per line). No comments supported. Keys are
+// lowercased when parsed. Whitespace around key and value is trimmed.
+func (s *Server) loadKV(filename string, out *types.Plugin) error {
+	file, err := os.Open(filename)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = file.Close() }()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx < 0 {
+			continue
+		}
+		key := strings.ToLower(strings.TrimSpace(line[:idx]))
+		val := strings.TrimSpace(line[idx+1:])
+		switch key {
+		case "name":
+			out.Name = val
+		case "version":
+			out.Version = val
+		case "description":
+			out.Description = val
+		case "author":
+			out.Author = val
+		case "bizhawk_version":
+			out.BizHawkVersion = val
+		case "entry_point":
+			out.EntryPoint = val
+		case "status":
+			out.Status = types.PluginStatus(val)
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return err
+	}
+	return nil
+}
+
+// saveKV writes the plugin metadata in simple key=value format. It writes
+// atomically by writing to a tmp file and renaming into place.
+func (s *Server) saveKV(data types.Plugin, filename string) error {
+	tmp := filename + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	// Write stable ordering
+	if _, err := fmt.Fprintln(f, "name = "+data.Name); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "version = "+data.Version); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "description = "+data.Description); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "author = "+data.Author); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "bizhawk_version = "+data.BizHawkVersion); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "entry_point = "+data.EntryPoint); err != nil {
+		return err
+	}
+	if _, err := fmt.Fprintln(f, "status = "+string(data.Status)); err != nil {
+		return err
+	}
+	if err := f.Sync(); err != nil {
+		return err
+	}
+	if err := f.Close(); err != nil {
+		return err
+	}
+	return os.Rename(tmp, filename)
 }
 
 // loadState loads persisted server state from disk if present.
@@ -165,24 +251,29 @@ func (s *Server) savePluginConfig(plugin types.Plugin) error {
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		return fmt.Errorf("failed to create plugin dir: %w", err)
 	}
-	metaPath := filepath.Join(pluginDir, "meta.json")
+	metaKV := filepath.Join(pluginDir, "meta.kv")
 
 	var existing types.Plugin
-	// load json, overwrite just the fields: [status].
-	if err := s.loadJson(metaPath, &existing); err != nil {
-		return fmt.Errorf("failed to load existing plugin metadata: %w", err)
+	// Only support KV format
+	if err := s.loadKV(metaKV, &existing); err != nil {
+		return fmt.Errorf("failed to load existing plugin metadata (kv): %w", err)
 	}
 	existing.Status = plugin.Status
 	s.state.Plugins[plugin.Name] = existing
-	return s.saveJson(existing, metaPath)
+	// Save KV
+	if err := s.saveKV(existing, metaKV); err != nil {
+		return fmt.Errorf("failed to save kv metadata: %w", err)
+	}
+	return nil
 }
 
 // loadPluginMetadata loads plugin metadata from disk
 func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
 	var plugin types.Plugin
 	pluginDir := filepath.Join("./plugins", pluginName)
-	metaPath := filepath.Join(pluginDir, "meta.json")
-	if err := s.loadJson(metaPath, &plugin); err != nil {
+	metaKV := filepath.Join(pluginDir, "meta.kv")
+	// Only KV supported
+	if err := s.loadKV(metaKV, &plugin); err != nil {
 		fmt.Printf("failed to load plugin metadata for %s: %v\n", pluginName, err)
 		return nil
 	}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -22,9 +23,7 @@ func (s *Server) handlePluginsList(w http.ResponseWriter, r *http.Request) {
 
 	plugins := make(map[string]types.Plugin)
 	s.withRLock(func() {
-		for name, plugin := range s.state.Plugins {
-			plugins[name] = plugin
-		}
+		maps.Copy(plugins, s.state.Plugins)
 	})
 
 	// Scan plugins directory for any new plugins not in state
@@ -106,18 +105,10 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		EntryPoint:  "plugin.lua",
 		Status:      types.PluginStatusDisabled,
 	}
-
-	metaPath := filepath.Join(pluginDir, "meta.json")
-	metaFile, err := os.Create(metaPath)
-	if err == nil {
-		defer func() {
-			if closeErr := metaFile.Close(); closeErr != nil {
-				log.Printf("close metaFile error: %v", closeErr)
-			}
-		}()
-		if encodeErr := json.NewEncoder(metaFile).Encode(metadata); encodeErr != nil {
-			log.Printf("encode metadata error: %v", encodeErr)
-		}
+	// Save KV only
+	metaKV := filepath.Join(pluginDir, "meta.kv")
+	if err := s.saveKV(metadata, metaKV); err != nil {
+		log.Printf("failed to write meta.kv: %v", err)
 	}
 
 	w.WriteHeader(http.StatusOK)

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"bufio"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -8,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -33,365 +35,231 @@ type PluginSyncResult struct {
 
 // NewPluginSyncManager creates a new plugin sync manager
 func NewPluginSyncManager(api *API, httpClient *http.Client, config Config) *PluginSyncManager {
-	return &PluginSyncManager{
-		api:        api,
-		httpClient: httpClient,
-		config:     config,
-	}
+	return &PluginSyncManager{api: api, httpClient: httpClient, config: config}
 }
 
-// SyncPlugins performs a complete plugin synchronization with the server
+// SyncPlugins orchestrates plugin synchronization.
 func (psm *PluginSyncManager) SyncPlugins() (*PluginSyncResult, error) {
 	log.Println("=== Starting Plugin Synchronization ===")
-	startTime := time.Now()
+	start := time.Now()
 
-	result := &PluginSyncResult{
-		StartTime: startTime,
-		Errors:    make([]string, 0),
-	}
+	res := &PluginSyncResult{StartTime: start, Errors: []string{}}
 
-	// Step 1: Fetch enabled plugins from server
-	log.Println("Step 1: Fetching plugin list from server...")
 	serverPlugins, err := psm.fetchServerPlugins()
 	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("Failed to fetch server plugins: %v", err))
-		log.Printf("ERROR: Failed to fetch server plugins: %v", err)
-		return result, err
+		res.Errors = append(res.Errors, fmt.Sprintf("fetch server plugins: %v", err))
+		return res, err
 	}
+	res.TotalPlugins = len(serverPlugins)
 
-	result.TotalPlugins = len(serverPlugins)
-	log.Printf("Found %d plugins on server", result.TotalPlugins)
-
-	// Step 2: Get local plugin state
-	log.Println("Step 2: Scanning local plugin directory...")
 	localPlugins, err := psm.scanLocalPlugins()
 	if err != nil {
-		result.Errors = append(result.Errors, fmt.Sprintf("Failed to scan local plugins: %v", err))
-		log.Printf("ERROR: Failed to scan local plugins: %v", err)
-		return result, err
+		res.Errors = append(res.Errors, fmt.Sprintf("scan local plugins: %v", err))
+		return res, err
 	}
 
-	log.Printf("Found %d local plugins", len(localPlugins))
+	toDownload, toRemove := psm.analyzeSyncRequirements(serverPlugins, localPlugins)
 
-	// Step 3: Determine what needs to be done
-	log.Println("Step 3: Analyzing sync requirements...")
-	toDownload, toUpdate, toRemove := psm.analyzeSyncRequirements(serverPlugins, localPlugins)
-
-	log.Printf("Analysis complete: %d to download, %d to update, %d to remove",
-		len(toDownload), len(toUpdate), len(toRemove))
-
-	// Step 4: Download new plugins
-	log.Println("Step 4: Downloading new plugins...")
-	for _, pluginName := range toDownload {
-		log.Printf("Downloading plugin: %s", pluginName)
-		if err := psm.downloadPlugin(pluginName); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("Failed to download %s: %v", pluginName, err))
-			log.Printf("ERROR: Failed to download %s: %v", pluginName, err)
+	// Download (always) - downloads overwrite existing files
+	for _, name := range toDownload {
+		if err := psm.downloadPlugin(name); err != nil {
+			log.Printf("ERROR: download %s: %v", name, err)
+			res.Errors = append(res.Errors, fmt.Sprintf("download %s: %v", name, err))
 		} else {
-			result.Downloaded++
-			log.Printf("SUCCESS: Downloaded %s", pluginName)
+			res.Downloaded++
 		}
 	}
 
-	// Step 5: Update existing plugins
-	log.Println("Step 5: Updating existing plugins...")
-	for _, pluginName := range toUpdate {
-		log.Printf("Updating plugin: %s", pluginName)
-		if err := psm.downloadPlugin(pluginName); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("Failed to update %s: %v", pluginName, err))
-			log.Printf("ERROR: Failed to update %s: %v", pluginName, err)
+	// Remove local plugins that are not enabled on server
+	for _, name := range toRemove {
+		if err := psm.removeLocalPlugin(name); err != nil {
+			log.Printf("ERROR: remove %s: %v", name, err)
+			res.Errors = append(res.Errors, fmt.Sprintf("remove %s: %v", name, err))
 		} else {
-			result.Updated++
-			log.Printf("SUCCESS: Updated %s", pluginName)
+			res.Removed++
 		}
 	}
 
-	// Step 6: Remove disabled plugins
-	log.Println("Step 6: Removing disabled plugins...")
-	for _, pluginName := range toRemove {
-		log.Printf("Removing plugin: %s", pluginName)
-		if err := psm.removeLocalPlugin(pluginName); err != nil {
-			result.Errors = append(result.Errors, fmt.Sprintf("Failed to remove %s: %v", pluginName, err))
-			log.Printf("ERROR: Failed to remove %s: %v", pluginName, err)
-		} else {
-			result.Removed++
-			log.Printf("SUCCESS: Removed %s", pluginName)
-		}
-	}
-
-	// Step 7: Final verification
-	log.Println("Step 7: Verifying sync completion...")
-	finalPlugins, err := psm.scanLocalPlugins()
-	if err != nil {
-		log.Printf("WARNING: Could not verify final state: %v", err)
-	} else {
-		log.Printf("Final state: %d plugins locally installed", len(finalPlugins))
-	}
-
-	result.Duration = time.Since(startTime)
-	log.Printf("=== Plugin Synchronization Complete ===")
-	log.Printf("Duration: %v", result.Duration)
-	log.Printf("Summary: %d total, %d downloaded, %d updated, %d removed",
-		result.TotalPlugins, result.Downloaded, result.Updated, result.Removed)
-
-	if len(result.Errors) > 0 {
-		log.Printf("Errors encountered: %d", len(result.Errors))
-		for _, err := range result.Errors {
-			log.Printf("  - %s", err)
-		}
-	}
-
-	return result, nil
+	res.Duration = time.Since(start)
+	log.Printf("=== Plugin Sync Complete: downloaded=%d removed=%d errors=%d duration=%v ===", res.Downloaded, res.Removed, len(res.Errors), res.Duration)
+	return res, nil
 }
 
-// fetchServerPlugins retrieves the list of enabled plugins from the server
+// fetchServerPlugins retrieves enabled plugins from the server API
 func (psm *PluginSyncManager) fetchServerPlugins() (map[string]types.Plugin, error) {
-	log.Println("Fetching plugin list from server API...")
-
-	resp, err := psm.httpClient.Get(psm.api.BaseURL + "/api/plugins")
+	url := psm.api.BaseURL + "/api/plugins"
+	resp, err := psm.httpClient.Get(url)
 	if err != nil {
-		return nil, fmt.Errorf("HTTP request failed: %w", err)
+		return nil, fmt.Errorf("http get %s: %w", url, err)
 	}
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("server returned status %d", resp.StatusCode)
+		return nil, fmt.Errorf("server returned %d", resp.StatusCode)
 	}
 
-	body, err := io.ReadAll(resp.Body)
-	if err != nil {
-		return nil, fmt.Errorf("failed to read response: %w", err)
-	}
-
-	log.Printf("Raw server response: %s", string(body))
-
-	var response struct {
+	var payload struct {
 		Plugins map[string]types.Plugin `json:"plugins"`
 	}
-
-	if err := json.Unmarshal(body, &response); err != nil {
-		return nil, fmt.Errorf("failed to parse JSON: %w", err)
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decoding plugins JSON: %w", err)
 	}
 
-	// Filter to only enabled plugins
-	enabledPlugins := make(map[string]types.Plugin)
-	for name, plugin := range response.Plugins {
-		if plugin.Status == types.PluginStatusEnabled {
-			enabledPlugins[name] = plugin
-			log.Printf("Server has enabled plugin: %s (v%s)", name, plugin.Version)
-		} else {
-			log.Printf("Server has disabled plugin: %s (skipping)", name)
-		}
+	enabled := make(map[string]types.Plugin)
+	for name, p := range payload.Plugins {
+		enabled[name] = p
 	}
-
-	log.Printf("Server reports %d enabled plugins", len(enabledPlugins))
-	return enabledPlugins, nil
+	return enabled, nil
 }
 
-// scanLocalPlugins scans the local plugin directory and returns plugin metadata
+// scanLocalPlugins reads the ./plugins directory and returns discovered metadata
 func (psm *PluginSyncManager) scanLocalPlugins() (map[string]types.Plugin, error) {
 	pluginDir := "./plugins"
-	log.Printf("Scanning local plugin directory: %s", pluginDir)
-
-	// Ensure directory exists
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create plugin directory: %w", err)
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		return nil, fmt.Errorf("ensure plugin dir: %w", err)
 	}
 
 	entries, err := os.ReadDir(pluginDir)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read plugin directory: %w", err)
+		return nil, fmt.Errorf("read plugin dir: %w", err)
 	}
 
-	localPlugins := make(map[string]types.Plugin)
-
-	for _, entry := range entries {
-		if !entry.IsDir() {
+	out := make(map[string]types.Plugin)
+	for _, e := range entries {
+		if !e.IsDir() {
 			continue
 		}
-
-		pluginName := entry.Name()
-		log.Printf("Found local plugin directory: %s", pluginName)
-
-		// Try to read plugin metadata
-		metaPath := filepath.Join(pluginDir, pluginName, "meta.json")
-		if _, err := os.Stat(metaPath); os.IsNotExist(err) {
-			log.Printf("WARNING: No meta.json found for plugin %s", pluginName)
-			// Create basic plugin info for plugins without metadata
-			localPlugins[pluginName] = types.Plugin{
-				Name:        pluginName,
-				Version:     "unknown",
-				Description: "Plugin without metadata",
-				Status:      types.PluginStatusDisabled,
+		name := e.Name()
+		// Only support meta.kv format
+		metaKV := filepath.Join(pluginDir, name, "meta.kv")
+		var p types.Plugin
+		if f, err := os.Open(metaKV); err == nil {
+			// parse simple kv file
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" {
+					continue
+				}
+				idx := strings.Index(line, "=")
+				if idx < 0 {
+					continue
+				}
+				key := strings.ToLower(strings.TrimSpace(line[:idx]))
+				val := strings.TrimSpace(line[idx+1:])
+				switch key {
+				case "name":
+					p.Name = val
+				case "version":
+					p.Version = val
+				case "description":
+					p.Description = val
+				case "author":
+					p.Author = val
+				case "bizhawk_version":
+					p.BizHawkVersion = val
+				case "entry_point":
+					p.EntryPoint = val
+				case "status":
+					p.Status = types.PluginStatus(val)
+				}
 			}
-			continue
-		}
-
-		metaFile, err := os.Open(metaPath)
-		if err != nil {
-			log.Printf("ERROR: Failed to open meta.json for %s: %v", pluginName, err)
-			continue
-		}
-
-		var plugin types.Plugin
-		if err := json.NewDecoder(metaFile).Decode(&plugin); err != nil {
-			log.Printf("ERROR: Failed to parse meta.json for %s: %v", pluginName, err)
-			if cerr := metaFile.Close(); cerr != nil {
-				log.Printf("WARNING: Failed to close meta.json for %s: %v", pluginName, cerr)
+			_ = f.Close()
+			if p.Name == "" {
+				p.Name = name
 			}
+			out[name] = p
+			continue
+		} else {
+			out[name] = types.Plugin{Name: name, Version: "unknown", Status: types.PluginStatusDisabled}
 			continue
 		}
-		if cerr := metaFile.Close(); cerr != nil {
-			log.Printf("WARNING: Failed to close meta.json for %s: %v", pluginName, cerr)
-		}
-
-		localPlugins[pluginName] = plugin
-		log.Printf("Loaded local plugin: %s (v%s)", pluginName, plugin.Version)
 	}
-
-	log.Printf("Local scan complete: found %d plugins", len(localPlugins))
-	return localPlugins, nil
+	return out, nil
 }
 
-// analyzeSyncRequirements compares server and local plugins to determine what needs to be done
-func (psm *PluginSyncManager) analyzeSyncRequirements(serverPlugins, localPlugins map[string]types.Plugin) (toDownload, toUpdate, toRemove []string) {
-	log.Println("Analyzing sync requirements...")
-
-	// Find plugins to download (on server but not local)
+// analyzeSyncRequirements determines downloads and removals. We intentionally always download enabled plugins.
+func (psm *PluginSyncManager) analyzeSyncRequirements(serverPlugins, localPlugins map[string]types.Plugin) (toDownload, toRemove []string) {
+	// All enabled plugins should be downloaded
 	for name := range serverPlugins {
-		if _, exists := localPlugins[name]; !exists {
-			toDownload = append(toDownload, name)
-			log.Printf("Plugin %s needs to be downloaded", name)
-		}
+		toDownload = append(toDownload, name)
 	}
-
-	// Find plugins to update (on both, but different versions)
-	for name, serverPlugin := range serverPlugins {
-		if localPlugin, exists := localPlugins[name]; exists {
-			if serverPlugin.Version != localPlugin.Version {
-				toUpdate = append(toUpdate, name)
-				log.Printf("Plugin %s needs update: local v%s -> server v%s",
-					name, localPlugin.Version, serverPlugin.Version)
-			} else {
-				log.Printf("Plugin %s is up to date (v%s)", name, serverPlugin.Version)
-			}
-		}
-	}
-
-	// Find plugins to remove (local but not enabled on server)
+	// Remove local plugins that are not enabled on server
 	for name := range localPlugins {
-		if _, exists := serverPlugins[name]; !exists {
+		if _, ok := serverPlugins[name]; !ok {
 			toRemove = append(toRemove, name)
-			log.Printf("Plugin %s needs to be removed", name)
 		}
 	}
-
-	return toDownload, toUpdate, toRemove
+	return toDownload, toRemove
 }
 
-// downloadPlugin downloads a plugin from the server
+// downloadPlugin fetches plugin.lua and meta.json (when available) and writes them to ./plugins/<name>/
 func (psm *PluginSyncManager) downloadPlugin(pluginName string) error {
-	log.Printf("Downloading plugin: %s", pluginName)
-
-	// Create local plugin directory
-	localPluginDir := filepath.Join("./plugins", pluginName)
-	if err := os.MkdirAll(localPluginDir, 0755); err != nil {
-		return fmt.Errorf("failed to create plugin directory: %w", err)
+	base := fmt.Sprintf("%s/files/plugins/%s", psm.api.BaseURL, pluginName)
+	localDir := filepath.Join("./plugins", pluginName)
+	if err := os.MkdirAll(localDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir %s: %w", localDir, err)
 	}
 
-	// Download plugin.lua
-	pluginURL := fmt.Sprintf("%s/files/plugins/%s/plugin.lua", psm.api.BaseURL, pluginName)
-	log.Printf("Downloading from: %s", pluginURL)
-
-	resp, err := psm.httpClient.Get(pluginURL)
-	if err != nil {
-		return fmt.Errorf("failed to download plugin.lua: %w", err)
-	}
-	defer func() { _ = resp.Body.Close() }()
-
-	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("server returned status %d for plugin.lua", resp.StatusCode)
-	}
-
-	pluginPath := filepath.Join(localPluginDir, "plugin.lua")
-	pluginFile, err := os.Create(pluginPath)
-	if err != nil {
-		return fmt.Errorf("failed to create plugin.lua: %w", err)
-	}
-	defer func() { _ = pluginFile.Close() }()
-
-	if _, err := io.Copy(pluginFile, resp.Body); err != nil {
-		return fmt.Errorf("failed to save plugin.lua: %w", err)
-	}
-
-	log.Printf("Downloaded plugin.lua to: %s", pluginPath)
-
-	// Download meta.json
-	metaURL := fmt.Sprintf("%s/files/plugins/%s/meta.json", psm.api.BaseURL, pluginName)
-	log.Printf("Downloading meta.json from: %s", metaURL)
-
-	resp, err = psm.httpClient.Get(metaURL)
-	if err != nil {
-		log.Printf("WARNING: Failed to download meta.json: %v", err)
-		// Don't fail the whole download if meta.json is missing
+	// helper to download a single file
+	downloadFile := func(url, dest string) error {
+		resp, err := psm.httpClient.Get(url)
+		if err != nil {
+			return fmt.Errorf("get %s: %w", url, err)
+		}
+		defer func() { _ = resp.Body.Close() }()
+		if resp.StatusCode != http.StatusOK {
+			return fmt.Errorf("server returned %d for %s", resp.StatusCode, url)
+		}
+		tmp := dest + ".tmp"
+		f, err := os.Create(tmp)
+		if err != nil {
+			return fmt.Errorf("create %s: %w", tmp, err)
+		}
+		if _, err := io.Copy(f, resp.Body); err != nil {
+			_ = f.Close()
+			return fmt.Errorf("write %s: %w", tmp, err)
+		}
+		if err := f.Close(); err != nil {
+			return fmt.Errorf("close %s: %w", tmp, err)
+		}
+		if err := os.Rename(tmp, dest); err != nil {
+			return fmt.Errorf("rename %s -> %s: %w", tmp, dest, err)
+		}
 		return nil
 	}
-	defer func() { _ = resp.Body.Close() }()
 
-	if resp.StatusCode == http.StatusOK {
-		metaPath := filepath.Join(localPluginDir, "meta.json")
-		metaFile, err := os.Create(metaPath)
-		if err != nil {
-			log.Printf("WARNING: Failed to create meta.json: %v", err)
-			return nil
-		}
-		defer func() { _ = metaFile.Close() }()
-
-		if _, err := io.Copy(metaFile, resp.Body); err != nil {
-			log.Printf("WARNING: Failed to save meta.json: %v", err)
-			return nil
-		}
-
-		log.Printf("Downloaded meta.json to: %s", metaPath)
-	} else {
-		log.Printf("WARNING: Server returned status %d for meta.json", resp.StatusCode)
+	// plugin.lua (required)
+	if err := downloadFile(base+"/plugin.lua", filepath.Join(localDir, "plugin.lua")); err != nil {
+		return fmt.Errorf("download plugin.lua: %w", err)
 	}
 
-	log.Printf("Successfully downloaded plugin: %s", pluginName)
+	// download meta.kv (required)
+	if err := downloadFile(base+"/meta.kv", filepath.Join(localDir, "meta.kv")); err != nil {
+		log.Printf("ERROR: meta.kv not available for %s: %v", pluginName, err)
+		return fmt.Errorf("meta.kv missing for %s: %w", pluginName, err)
+	}
+
 	return nil
 }
 
-// removeLocalPlugin removes a plugin from the local filesystem
+// removeLocalPlugin deletes the plugin directory
 func (psm *PluginSyncManager) removeLocalPlugin(pluginName string) error {
-	log.Printf("Removing local plugin: %s", pluginName)
-
-	pluginDir := filepath.Join("./plugins", pluginName)
-
-	if _, err := os.Stat(pluginDir); os.IsNotExist(err) {
-		log.Printf("Plugin directory doesn't exist: %s", pluginDir)
-		return nil // Already removed
+	dir := filepath.Join("./plugins", pluginName)
+	if _, err := os.Stat(dir); os.IsNotExist(err) {
+		return nil
 	}
-
-	if err := os.RemoveAll(pluginDir); err != nil {
-		return fmt.Errorf("failed to remove plugin directory: %w", err)
+	if err := os.RemoveAll(dir); err != nil {
+		return fmt.Errorf("remove %s: %w", dir, err)
 	}
-
-	log.Printf("Successfully removed plugin directory: %s", pluginDir)
 	return nil
 }
 
-// GetSyncStatus returns current sync status for monitoring
-func (psm *PluginSyncManager) GetSyncStatus() (map[string]interface{}, error) {
-	localPlugins, err := psm.scanLocalPlugins()
+// GetSyncStatus returns a simple status map for monitoring
+func (psm *PluginSyncManager) GetSyncStatus() (map[string]any, error) {
+	local, err := psm.scanLocalPlugins()
 	if err != nil {
 		return nil, err
 	}
-
-	status := map[string]interface{}{
-		"local_plugins_count": len(localPlugins),
-		"local_plugins":       localPlugins,
-		"last_sync_attempt":   time.Now().Format(time.RFC3339),
-	}
-
-	return status, nil
+	return map[string]interface{}{"local_plugins_count": len(local), "local_plugins": local, "last_sync_attempt": time.Now().Format(time.RFC3339)}, nil
 }

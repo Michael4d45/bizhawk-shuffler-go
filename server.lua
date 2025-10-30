@@ -445,13 +445,35 @@ local function load_plugins()
         local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
         local plugin_lua_path = plugin_path .. "/plugin.lua"
 
-        -- Check if meta.json exists
+        -- Check plugin.lua exists and read meta.kv if present. No comment support.
         if file_exists(plugin_lua_path) then
-            -- Read and parse meta.json (simple approach)
             console.log("Found plugin: " .. plugin_name)
 
+            -- Parse meta.kv if present
+            local meta = {}
+            local meta_path = plugin_path .. "/meta.kv"
+            local mf = io.open(meta_path, "r")
+            if mf then
+                for line in mf:lines() do
+                    local l = line:match("^%s*(.-)%s*$")
+                    if l ~= "" then
+                        local eq = l:find("=")
+                        if eq then
+                            local key = l:sub(1, eq-1):gsub("^%s*(.-)%s*$", "%1"):lower()
+                            local val = l:sub(eq+1):gsub("^%s*(.-)%s*$", "%1")
+                            meta[key] = val
+                        end
+                    end
+                end
+                mf:close()
+            end
+
+            -- Determine entry point (default plugin.lua)
+            local entry = meta["entry_point"] or "plugin.lua"
+            local plugin_file = plugin_path .. "/" .. entry
+
             -- Load the plugin Lua file
-            local plugin_ok, plugin_module = pcall(dofile, plugin_lua_path)
+            local plugin_ok, plugin_module = pcall(dofile, plugin_file)
 
             if plugin_ok and plugin_module then
                 local is_valid = true

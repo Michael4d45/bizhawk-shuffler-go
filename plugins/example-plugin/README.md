@@ -17,7 +17,7 @@ This is an example plugin for BizHawk Shuffler that demonstrates basic plugin fu
 ## Plugin Structure
 
 - `plugin.lua` - Main plugin code with hook functions
-- `meta.json` - Plugin metadata and configuration
+- `meta.kv` - Plugin metadata and configuration (key=value pairs)
 - `README.md` - This documentation file
 
 This plugin serves as a template for developing more complex plugins.

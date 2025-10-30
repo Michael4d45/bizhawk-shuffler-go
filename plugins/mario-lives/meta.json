@@ -1,9 +1,0 @@
-{
-  "name": "mario-lives",
-  "version": "1.0.0",
-  "description": "Tracks and displays Mario's lives in Super Mario Bros 3",
-  "author": "BizShuffle",
-  "bizhawk_version": ">=2.8.0",
-  "status": "enabled",
-  "entry_point": "plugin.lua"
-}
