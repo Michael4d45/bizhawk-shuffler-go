@@ -331,11 +331,11 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			if payload, ok := cmd.Payload.(map[string]any); ok {
 				if pluginName, ok := payload["plugin_name"].(string); ok {
 					log.Printf("Reloading plugin %s: syncing files and reloading in BizHawk", pluginName)
-					
+
 					// Create plugin sync manager
 					httpClient := &http.Client{Timeout: 0}
 					pluginSyncManager := NewPluginSyncManager(c.api, httpClient, c.cfg)
-					
+
 					// Sync the specific plugin (redownload files)
 					// Since SyncPlugins syncs all plugins, we'll use it and then reload just this one
 					if result, err := pluginSyncManager.SyncPlugins(); err != nil {
@@ -343,7 +343,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					} else {
 						log.Printf("plugin sync completed: %d total, %d downloaded, %d updated, %d removed in %v",
 							result.TotalPlugins, result.Downloaded, result.Updated, result.Removed, result.Duration)
-						
+
 						// Notify BizHawk Lua script to fully reload this plugin (reload plugin.lua file)
 						ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
 						defer cancel2()

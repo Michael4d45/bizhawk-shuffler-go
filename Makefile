@@ -29,5 +29,9 @@ installer:
 	@mkdir -p $(BIN_DIR)/installer
 	$(GO) build -o $(BIN_DIR)/installer/bizshuffle-installer$(EXT) ./cmd/installer
 
+lint:
+	$(GO) vet ./... && gofmt -d .
+	golangci-lint run ./...
+
 clean:
 	rm -rf $(BIN_DIR)
