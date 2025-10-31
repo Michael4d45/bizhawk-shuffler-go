@@ -14,6 +14,7 @@ import (
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/dialog"
 	"fyne.io/fyne/v2/widget"
+	"github.com/michael4d45/bizshuffle/internal/deps"
 	"github.com/michael4d45/bizshuffle/internal/installer"
 )
 
@@ -381,7 +382,6 @@ func runInstallation(installServer, installClient bool, serverDir, clientDir str
 	progress func(string), progressBar func(float64)) error {
 	ghClient := installer.NewGitHubClient()
 	downloader := installer.NewDownloader()
-	bizhawkInstaller := installer.NewBizHawkInstaller()
 
 	progress("Fetching latest release from GitHub...")
 	release, err := ghClient.GetLatestRelease()
@@ -414,26 +414,22 @@ func runInstallation(installServer, installClient bool, serverDir, clientDir str
 		}
 		progressBar(0.7)
 
-		// Install BizHawk for client
-		progress("Installing BizHawk emulator...")
+		// Install dependencies (BizHawk and VC++ redistributable) for client
+		progress("Installing dependencies...")
 		bizhawkDir := filepath.Join(clientDir, "BizHawk")
 		if err := os.MkdirAll(bizhawkDir, 0755); err != nil {
 			return fmt.Errorf("failed to create BizHawk directory: %w", err)
 		}
 
-		bizhawkURL := installer.GetBizHawkDownloadURL()
-		if err := bizhawkInstaller.InstallBizHawk(bizhawkURL, bizhawkDir, progress); err != nil {
-			return fmt.Errorf("BizHawk installation failed: %w", err)
+		// Use shared dependency manager
+		depMgr := deps.NewDependencyManager(bizhawkDir, progress)
+		bizhawkPath, err := depMgr.CheckAndInstallDependencies(nil) // No prompt needed in installer
+		if err != nil {
+			return fmt.Errorf("dependency installation failed: %w", err)
 		}
-
-		// Install VC++ redistributable on Windows
-		if runtime.GOOS == "windows" {
-			vcInstaller := installer.NewVCRedistInstaller()
-			if err := vcInstaller.CheckAndInstallVCRedist(progress); err != nil {
-				progress(fmt.Sprintf("Warning: VC++ redistributable installation failed: %v", err))
-				// Don't fail the whole installation for this
-			}
-		}
+		
+		// Update bizhawkDir to match actual installation location
+		bizhawkDir = filepath.Dir(bizhawkPath)
 
 		// Copy server.lua to client directory (from extracted zip or current dir)
 		serverLuaDest := filepath.Join(clientDir, "server.lua")

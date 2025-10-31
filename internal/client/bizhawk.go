@@ -1,8 +1,10 @@
 package client
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -384,4 +386,141 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 			}
 		}
 	}()
+}
+
+// EnsureBizhawkFiles downloads and extracts BizhawkFiles.zip if config.ini doesn't exist
+// in the BizHawk directory. Returns nil if files already exist or were successfully downloaded.
+func (c *BizHawkController) EnsureBizhawkFiles() error {
+	if c.api == nil {
+		return fmt.Errorf("API not available, cannot download BizhawkFiles")
+	}
+
+	bp := c.cfg["bizhawk_path"]
+	if strings.TrimSpace(bp) == "" {
+		return fmt.Errorf("bizhawk_path not configured")
+	}
+
+	// Resolve BizHawk path similar to LaunchBizHawk
+	// First, make sure it's absolute
+	if !filepath.IsAbs(bp) {
+		if abs, err := filepath.Abs(bp); err == nil {
+			bp = abs
+		}
+	}
+
+	// Get BizHawk directory (directory containing the executable)
+	bizhawkDir := filepath.Dir(bp)
+	if !filepath.IsAbs(bizhawkDir) {
+		var err error
+		bizhawkDir, err = filepath.Abs(bizhawkDir)
+		if err != nil {
+			return fmt.Errorf("failed to resolve BizHawk directory: %w", err)
+		}
+	}
+
+	// Check if config.ini exists
+	configIniPath := filepath.Join(bizhawkDir, "config.ini")
+	if _, err := os.Stat(configIniPath); err == nil {
+		log.Printf("BizhawkFiles already present (config.ini exists)")
+		return nil
+	}
+
+	log.Printf("config.ini not found in %s, downloading BizhawkFiles.zip...", bizhawkDir)
+
+	// Download BizhawkFiles.zip
+	bizFilesURL := c.api.BizhawkFilesURL()
+	tempZip := filepath.Join(os.TempDir(), "BizhawkFiles.zip")
+	defer func() { _ = os.Remove(tempZip) }()
+
+	// Download the file
+	log.Printf("Downloading BizhawkFiles.zip from %s...", bizFilesURL)
+	resp, err := c.httpClient.Get(bizFilesURL)
+	if err != nil {
+		return fmt.Errorf("failed to download BizhawkFiles.zip: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: status %s", resp.Status)
+	}
+
+	// Save to temporary file
+	out, err := os.Create(tempZip)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+
+	_, err = io.Copy(out, resp.Body)
+	if cerr := out.Close(); cerr != nil {
+		if err == nil {
+			err = cerr
+		}
+	}
+	if err != nil {
+		return fmt.Errorf("failed to save BizhawkFiles.zip: %w", err)
+	}
+
+	// Extract the zip file
+	log.Printf("Extracting BizhawkFiles.zip to %s...", bizhawkDir)
+	if err := c.extractZip(tempZip, bizhawkDir); err != nil {
+		return fmt.Errorf("failed to extract BizhawkFiles.zip: %w", err)
+	}
+
+	// Verify config.ini was extracted
+	if _, err := os.Stat(configIniPath); os.IsNotExist(err) {
+		return fmt.Errorf("config.ini not found after extraction, extraction may have failed")
+	}
+
+	log.Printf("BizhawkFiles.zip downloaded and extracted successfully")
+	return nil
+}
+
+// extractZip extracts a zip file to the destination directory
+func (c *BizHawkController) extractZip(zipPath, destDir string) error {
+	r, err := zip.OpenReader(zipPath)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = r.Close() }()
+
+	for _, f := range r.File {
+		fpath := filepath.Join(destDir, f.Name)
+		if !strings.HasPrefix(fpath, filepath.Clean(destDir)+string(os.PathSeparator)) {
+			return fmt.Errorf("illegal file path: %s", fpath)
+		}
+		if f.FileInfo().IsDir() {
+			if err := os.MkdirAll(fpath, f.Mode()); err != nil {
+				return err
+			}
+			continue
+		}
+		if err := os.MkdirAll(filepath.Dir(fpath), 0755); err != nil {
+			return err
+		}
+		outFile, err := os.OpenFile(fpath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, f.Mode())
+		if err != nil {
+			return err
+		}
+		rc, err := f.Open()
+		if err != nil {
+			_ = outFile.Close()
+			return err
+		}
+		_, err = io.Copy(outFile, rc)
+		if cerr := outFile.Close(); cerr != nil {
+			_ = rc.Close()
+			if err == nil {
+				err = cerr
+			}
+		}
+		if cerr := rc.Close(); cerr != nil {
+			if err == nil {
+				err = cerr
+			}
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }

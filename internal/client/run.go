@@ -13,11 +13,13 @@ import (
 	"os"
 	"os/exec"
 	"os/signal"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/michael4d45/bizshuffle/internal/deps"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
@@ -79,14 +81,55 @@ func New(args []string) (*Client, error) {
 
 	httpClient := &http.Client{Timeout: 0}
 
-	bhController := NewBizHawkController(nil, httpClient, cfg, nil, nil)
-	// Verify BizHawk is installed (no auto-installation)
-	if err := bhController.VerifyBizHawkPath(); err != nil {
+	// Check and install dependencies if needed
+	// Determine install directory - default to installing next to the client executable
+	bizhawkDir := ""
+	if exe, err := os.Executable(); err == nil {
+		bizhawkDir = filepath.Join(filepath.Dir(exe), "BizHawk")
+	} else if cwd, err := os.Getwd(); err == nil {
+		bizhawkDir = filepath.Join(cwd, "BizHawk")
+	}
+
+	configuredPath := cfg["bizhawk_path"]
+	// If bizhawk_path is configured, use its directory as the install directory
+	if configuredPath != "" {
+		bizhawkDir = filepath.Dir(configuredPath)
+	}
+
+	// Create dependency manager and check/install dependencies
+	progressCallback := func(msg string) {
+		fmt.Fprintf(os.Stderr, "%s\n", msg)
+		log.Printf("Dependency install: %s", msg)
+	}
+
+	promptCallback := func(dependencyName string) bool {
+		fmt.Fprintf(os.Stderr, "\n%s is not installed. Would you like to install it now? (y/n): ", dependencyName)
+		reader := bufio.NewReader(os.Stdin)
+		response, _ := reader.ReadString('\n')
+		response = strings.TrimSpace(strings.ToLower(response))
+		return response == "y" || response == "yes"
+	}
+
+	depMgr := deps.NewDependencyManagerWithPath(bizhawkDir, configuredPath, progressCallback)
+	resolvedBizhawkPath, err := depMgr.CheckAndInstallDependencies(promptCallback)
+	if err != nil {
 		_ = logFile.Close()
-		log.Printf("BizHawk verification failed: %v", err)
-		log.Printf("Please run the BizShuffle installer to install BizHawk")
+		fmt.Fprintf(os.Stderr, "ERROR: Dependency installation failed: %v\n", err)
+		log.Printf("Dependency installation failed: %v", err)
 		os.Exit(1)
 	}
+
+	// Update config with resolved BizHawk path if it changed
+	oldPath := cfg["bizhawk_path"]
+	if resolvedBizhawkPath != oldPath {
+		cfg["bizhawk_path"] = resolvedBizhawkPath
+		log.Printf("Updated bizhawk_path from %s to %s", oldPath, resolvedBizhawkPath)
+		if err := cfg.Save(); err != nil {
+			log.Printf("Warning: Failed to save updated bizhawk_path to config: %v", err)
+		}
+	}
+
+	bhController := NewBizHawkController(nil, httpClient, cfg, nil, nil)
 	bhController.initialized = true
 
 	reader := bufio.NewReader(os.Stdin)
@@ -194,6 +237,12 @@ func New(args []string) (*Client, error) {
 	bhController.api = api
 	bhController.bipc = bipc
 
+	// Ensure BizhawkFiles are downloaded if needed (check for config.ini)
+	if err := bhController.EnsureBizhawkFiles(); err != nil {
+		log.Printf("Warning: Failed to ensure BizhawkFiles: %v", err)
+		// Don't fail startup, just log a warning
+	}
+
 	_ = cfg.Save()
 
 	// Initialize plugin sync manager
@@ -218,8 +267,22 @@ func New(args []string) (*Client, error) {
 // Run starts the client's runtime: opens connections, starts goroutines and
 // blocks until shutdown completes.
 func (c *Client) Run() {
+	// Recover from panics to ensure we log something
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Client] PANIC in Run(): %v", r)
+			panic(r) // Re-panic so main() can catch it
+		}
+	}()
+
+	log.Printf("[Client] Run() starting")
+	fmt.Fprintf(os.Stderr, "[Client] Run() starting\n")
+
 	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	defer func() {
+		log.Printf("[Client] cancelling context and cleaning up")
+		cancel()
+	}()
 
 	// Set up signal handling as a backup to BizHawkController's signal handling
 	sigs := make(chan os.Signal, 1)
@@ -234,12 +297,14 @@ func (c *Client) Run() {
 		log.Printf("[Client] client starting")
 		if err := c.bhController.LaunchAndManage(ctx, cancel); err != nil {
 			log.Printf("LaunchAndManage error: %v", err)
+			cancel() // Ensure we exit if LaunchAndManage fails
 		}
 	}()
 
 	log.Printf("[Client] starting bizhawk ipc")
 	if err := c.bipc.Start(ctx); err != nil {
 		log.Printf("bizhawk ipc start error: %v", err)
+		log.Printf("[Client] bizhawk ipc failed to start, continuing anyway...")
 	} else {
 		log.Printf("bizhawk ipc started")
 	}
@@ -248,7 +313,7 @@ func (c *Client) Run() {
 		log.Printf("closing bizhawk ipc")
 	}()
 
-	log.Printf("[Client] starting bizhawk ipc")
+	log.Printf("[Client] starting bizhawk ipc goroutine")
 	c.bhController.StartIPCGoroutine(ctx)
 
 	log.Printf("[Client] starting websocket client")
@@ -270,8 +335,9 @@ func (c *Client) Run() {
 		}
 	}
 
+	log.Printf("[Client] entering main event loop, waiting for shutdown signal...")
 	<-ctx.Done()
-	log.Printf("[Client] shutdown complete")
+	log.Printf("[Client] context cancelled, shutdown complete")
 }
 
 // InitLogging sets up global logging and returns the opened log file which the
@@ -279,7 +345,8 @@ func (c *Client) Run() {
 func InitLogging(verbose bool) (*os.File, error) {
 	f, err := os.OpenFile("client.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
 	if err != nil {
-		return nil, err
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to open log file 'client.log': %v\n", err)
+		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
 	if verbose {
 		mw := io.MultiWriter(os.Stdout, f)
@@ -288,6 +355,7 @@ func InitLogging(verbose bool) (*os.File, error) {
 		log.SetOutput(f)
 	}
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
+	log.Printf("[InitLogging] Logging initialized (verbose=%v)", verbose)
 	return f, nil
 }
 
