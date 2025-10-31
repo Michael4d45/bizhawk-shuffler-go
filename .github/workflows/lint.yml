@@ -19,7 +19,7 @@ jobs:
       - name: Install Fyne dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libglfw3-dev pkg-config
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libglfw3-dev pkg-config
 
       - name: Run go vet
         run: go vet ./...
