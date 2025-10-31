@@ -23,7 +23,6 @@ client:
 	@mkdir -p $(BIN_DIR)/client
 	$(GO) build -o $(BIN_DIR)/client/bizshuffle-client$(EXT) ./cmd/client
 	@cp server.lua $(BIN_DIR)/client/server.lua 2> /dev/null || true
-	@cp bizshuffle-client.ico $(BIN_DIR)/client/bizshuffle-client.ico 2> /dev/null || true
 
 installer:
 	@mkdir -p $(BIN_DIR)/installer

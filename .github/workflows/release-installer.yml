@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: Build and Release Installer
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     env:
       DIST_DIR: dist/installer
@@ -23,16 +23,35 @@ jobs:
         with:
           go-version: "1.24.0"
 
+      - name: Install Fyne dependencies and cross-compiler
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libglfw3-dev pkg-config
+          sudo apt-get install -y gcc-mingw-w64-x86-64
+
       - name: Build installer
         run: |
-          mkdir -p $env:DIST_DIR
-          go build -o $env:DIST_DIR/bizshuffle-installer.exe ./cmd/installer
+          set -e
+          mkdir -p $DIST_DIR
+          
+          # Build Windows installer
+          CC=x86_64-w64-mingw32-gcc GOOS=windows GOARCH=amd64 CGO_ENABLED=1 go build -o $DIST_DIR/bizshuffle-installer.exe ./cmd/installer
+          
+          # Build Linux installer
+          CGO_ENABLED=1 go build -o $DIST_DIR/bizshuffle-installer ./cmd/installer
+          
+          # Create release archives
+          cd $DIST_DIR
+          zip bizshuffle-installer-windows-amd64.zip bizshuffle-installer.exe
+          zip bizshuffle-installer-linux-amd64.zip bizshuffle-installer
+          cd -
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.DIST_DIR }}/bizshuffle-installer.exe
+            ${{ env.DIST_DIR }}/bizshuffle-installer-windows-amd64.zip
+            ${{ env.DIST_DIR }}/bizshuffle-installer-linux-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 

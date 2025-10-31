@@ -11,7 +11,7 @@ permissions:
 jobs:
   build:
     name: Build and Release
-    runs-on: windows-latest
+    runs-on: ubuntu-latest
 
     env:
       DIST_DIR: dist/client
@@ -25,27 +25,23 @@ jobs:
 
       - name: Build binaries
         run: |
-          mkdir -p $env:DIST_DIR
+          set -e
+          mkdir -p $DIST_DIR
           
           # Build client binaries for different platforms
-          go install github.com/akavel/rsrc@latest
-          rsrc -ico bizshuffle-client.ico -o rsrc.syso
-          go build -o $env:DIST_DIR/bizshuffle-client.exe ./cmd/client
-          GOOS=linux GOARCH=amd64 go build -o $env:DIST_DIR/bizshuffle-client ./cmd/client
+          GOOS=windows GOARCH=amd64 go build -o $DIST_DIR/bizshuffle-client.exe ./cmd/client
+          GOOS=linux GOARCH=amd64 go build -o $DIST_DIR/bizshuffle-client ./cmd/client
           
           # Copy server.lua script if it exists
-          if (Test-Path server.lua) {
-            Copy-Item server.lua $env:DIST_DIR/
-          }
-
-          # Copy icon file if it exists
-          if (Test-Path bizshuffle-client.ico) {
-            Copy-Item bizshuffle-client.ico $env:DIST_DIR/
-          }
+          if [ -f server.lua ]; then
+            cp server.lua $DIST_DIR/
+          fi
 
           # Create release archives
-          Compress-Archive -Path "$env:DIST_DIR\bizshuffle-client.exe","$env:DIST_DIR\server.lua","$env:DIST_DIR\bizshuffle-client.ico" -DestinationPath "$env:DIST_DIR\bizshuffle-client-windows-amd64.zip"
-          Compress-Archive -Path "$env:DIST_DIR\bizshuffle-client","$env:DIST_DIR\server.lua" -DestinationPath "$env:DIST_DIR\bizshuffle-client-linux-amd64.zip"
+          cd $DIST_DIR
+          zip bizshuffle-client-windows-amd64.zip bizshuffle-client.exe server.lua 2>/dev/null || true
+          zip bizshuffle-client-linux-amd64.zip bizshuffle-client server.lua 2>/dev/null || true
+          cd -
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
