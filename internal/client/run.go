@@ -80,14 +80,14 @@ func New(args []string) (*Client, error) {
 	httpClient := &http.Client{Timeout: 0}
 
 	bhController := NewBizHawkController(nil, httpClient, cfg, nil, nil)
-	go func() {
-		if err := bhController.EnsureBizHawkInstalled(); err != nil {
-			_ = logFile.Close()
-			log.Printf("EnsureBizHawkInstalled: %v", err)
-			os.Exit(1)
-		}
-		bhController.initialized = true
-	}()
+	// Verify BizHawk is installed (no auto-installation)
+	if err := bhController.VerifyBizHawkPath(); err != nil {
+		_ = logFile.Close()
+		log.Printf("BizHawk verification failed: %v", err)
+		log.Printf("Please run the BizShuffle installer to install BizHawk")
+		os.Exit(1)
+	}
+	bhController.initialized = true
 
 	reader := bufio.NewReader(os.Stdin)
 	serverURL := serverFlag

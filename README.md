@@ -11,6 +11,76 @@ High-level goals (from user request)
 - No authentication required; clients identify by username.
 - Client is a simple one-click installer/CLI that asks for server URL and username once and saves it to a config file.
 
+## Quick Start Installation Guide
+
+Ready to play? Follow these simple steps to get BizShuffle up and running!
+
+### Installation
+
+1. **Download the Installer**
+   - Go to the [Releases page](https://github.com/Michael4d45/bizhawk-shuffler-go/releases)
+   - Download `bizshuffle-installer.exe`
+   - Run the installer executable
+
+2. **Run the Installer**
+   - The installer will open a window with options:
+     - Check "Install Server" to install the server component
+     - Check "Install Client" to install the client component
+     - Choose installation directories for each (they can be in different locations)
+     - Click "Install" to begin
+   - The installer will:
+     - Download the latest release from GitHub
+     - Extract files to your chosen directories
+     - For client installations: Download and install BizHawk emulator
+     - For client installations: Install Windows VC++ redistributables (if needed)
+     - Configure the client automatically
+
+3. **Start the Server** (if installed)
+   - Navigate to the server installation directory
+   - Run `bizshuffle-server.exe`
+   - The server will start on `http://localhost:8080` by default
+   - Open your web browser and go to `http://localhost:8080` to access the admin panel
+
+4. **Add Game Files** (Optional)
+   - Place ROM files in the server's `files/` directory
+   - Supported formats: NES, SNES, Game Boy, GBA, N64, PSX, and [more](https://github.com/TASEmulators/BizHawk?tab=readme-ov-file#cores)
+
+### For Players
+
+1. **Connect to the Server**
+   - Navigate to the client installation directory
+   - Run `bizshuffle-client.exe`
+   - **First time setup**: The client will automatically search for servers on your local network
+   - If a server is found, select it from the list
+   - If no server is found, you'll be prompted to enter the server address:
+     - **Same network**: Enter `http://SERVER_IP:8080` (ask the host for their IP address)
+     - **Different network**: Enter `http://SERVER_HOSTNAME:8080` or the full URL provided by the host
+   - Enter your username (this is how you'll appear to server)
+   - Your settings are saved automatically for future sessions
+
+### Playing Together
+
+1. **Host Starts the Session**
+   - Open the web admin panel at `http://localhost:8080` (if hosting) or ask the host for the admin URL
+   - Click **Start Session** to begin
+
+2. **Game Swapping**
+   - The host can configure automatic swaps with a timer
+   - Or manually trigger swaps from the admin panel
+   - Choose between **Sync Mode** (everyone plays the same game) or **Save Mode** (different games with save state sharing)
+
+3. **Enjoy!**
+   - Games will automatically load on all players' computers
+   - The host has full control via the web admin panel
+   - Players just need to launch the client and connect - everything else is automatic!
+
+### Troubleshooting
+
+- **Can't find server?** Make sure you're on the same network, or enter the server IP manually
+- **Connection issues?** Check Windows Firewall - port 8080 needs to be open on the server
+- **Games not loading?** Ensure the host has uploaded game files via the admin panel
+- **BizHawk not found?** Make sure you ran the installer and selected "Install Client" - BizHawk should be installed automatically
+
 Repository layout
 
 ```

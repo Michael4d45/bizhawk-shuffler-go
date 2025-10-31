@@ -7,9 +7,9 @@ else
 EXT :=
 endif
 
-.PHONY: all server client clean
+.PHONY: all server client installer clean
 
-all: server client
+all: server client installer
 
 server:
 	@mkdir -p $(BIN_DIR)/server
@@ -22,23 +22,13 @@ server:
 client:
 	@mkdir -p $(BIN_DIR)/client
 	# generate .syso for Windows only
-ifeq ($(GOOS),windows)
-	@rsrc -ico bizshuffle-client.ico -o cmd/client/bizshuffle-client.syso
-endif
 	$(GO) build -o $(BIN_DIR)/client/bizshuffle-client$(EXT) ./cmd/client
 	@cp server.lua $(BIN_DIR)/client/server.lua 2> /dev/null || true
 	@cp bizshuffle-client.ico $(BIN_DIR)/client/bizshuffle-client.ico 2> /dev/null || true
-ifeq ($(GOOS),windows)
-	# clean up .syso
-	@rm -f cmd/client/bizshuffle-client.syso
-endif
 
-msi: client
-	@mkdir -p $(BIN_DIR)/client
-	candle "-dVersion=1.0.0" -dDistDir=$(BIN_DIR)/client installer/client.wxs -out $(BIN_DIR)/client/client.wixobj
-	light $(BIN_DIR)/client/client.wixobj -out $(BIN_DIR)/client/bizshuffle-client.msi
+installer:
+	@mkdir -p $(BIN_DIR)/installer
+	$(GO) build -o $(BIN_DIR)/installer/bizshuffle-installer$(EXT) ./cmd/installer
 
 clean:
 	rm -rf $(BIN_DIR)
-
-msi:

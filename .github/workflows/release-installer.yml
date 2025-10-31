@@ -1,0 +1,38 @@
+name: Release Installer
+
+on:
+  push:
+    tags:
+      - "v*" # runs only when you push a tag like v1.0.0
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build and Release Installer
+    runs-on: windows-latest
+
+    env:
+      DIST_DIR: dist/installer
+
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.0"
+
+      - name: Build installer
+        run: |
+          mkdir -p $env:DIST_DIR
+          go build -o $env:DIST_DIR/bizshuffle-installer.exe ./cmd/installer
+
+      - name: Create GitHub Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ env.DIST_DIR }}/bizshuffle-installer.exe
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+

@@ -47,23 +47,11 @@ jobs:
           Compress-Archive -Path "$env:DIST_DIR\bizshuffle-client.exe","$env:DIST_DIR\server.lua","$env:DIST_DIR\bizshuffle-client.ico" -DestinationPath "$env:DIST_DIR\bizshuffle-client-windows-amd64.zip"
           Compress-Archive -Path "$env:DIST_DIR\bizshuffle-client","$env:DIST_DIR\server.lua" -DestinationPath "$env:DIST_DIR\bizshuffle-client-linux-amd64.zip"
 
-      - name: Install WiX Toolset
-        run: choco install wixtoolset --no-progress -y
-
-      - name: Build MSI
-        run: |
-          $version = ($env:GITHUB_REF_NAME -replace '^v', '')
-          Write-Host "Building MSI for version $version"
-
-          candle -dVersion=$version -dDistDir="$PWD\$env:DIST_DIR" installer\client.wxs -out $env:DIST_DIR\client.wixobj
-          light -ext WixUIExtension -out $env:DIST_DIR\bizshuffle-client.msi $env:DIST_DIR\client.wixobj
-
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
             ${{ env.DIST_DIR }}/bizshuffle-client-windows-amd64.zip
             ${{ env.DIST_DIR }}/bizshuffle-client-linux-amd64.zip
-            ${{ env.DIST_DIR }}/bizshuffle-client.msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
