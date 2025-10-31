@@ -427,7 +427,7 @@ func runInstallation(installServer, installClient bool, serverDir, clientDir str
 		if err != nil {
 			return fmt.Errorf("dependency installation failed: %w", err)
 		}
-		
+
 		// Update bizhawkDir to match actual installation location
 		bizhawkDir = filepath.Dir(bizhawkPath)
 

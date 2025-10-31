@@ -49,14 +49,15 @@ const (
 	CmdTypeLua        CommandName = "lua_command"
 
 	// From Server to Client
-	CmdPing        CommandName = "ping"
-	CmdResume      CommandName = "start"
-	CmdPause       CommandName = "pause"
-	CmdSwap        CommandName = "swap"
-	CmdMessage     CommandName = "message"
-	CmdGamesUpdate CommandName = "games_update"
-	CmdClearSaves  CommandName = "clear_saves"
-	CmdRequestSave CommandName = "request_save"
+	CmdPing         CommandName = "ping"
+	CmdResume       CommandName = "start"
+	CmdPause        CommandName = "pause"
+	CmdSwap         CommandName = "swap"
+	CmdMessage      CommandName = "message"
+	CmdGamesUpdate  CommandName = "games_update"
+	CmdClearSaves   CommandName = "clear_saves"
+	CmdRequestSave  CommandName = "request_save"
+	CmdPluginReload CommandName = "plugin_reload"
 
 	// From Admin to Server
 	CmdHelloAdmin CommandName = "hello_admin"
@@ -238,7 +239,6 @@ type Plugin struct {
 	BizHawkVersion string       `json:"bizhawk_version"`
 	Description    string       `json:"description"`
 	Author         string       `json:"author"`
-	EntryPoint     string       `json:"entry_point"`
 	Status         PluginStatus `json:"status"`
 }
 

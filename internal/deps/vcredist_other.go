@@ -15,4 +15,3 @@ func (v *VCRedistInstaller) CheckAndInstallVCRedist(progress func(msg string)) e
 	// VC++ redistributable is only needed on Windows
 	return nil
 }
-

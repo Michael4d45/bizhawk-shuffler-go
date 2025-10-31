@@ -93,7 +93,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	// Plugin management routes
 	mux.HandleFunc("/api/plugins", s.handlePluginsList)
 	mux.HandleFunc("/api/plugins/upload", s.handlePluginUpload)
-	// Plugin enable/disable routes - these need to handle the plugin name in the URL path
+	// Plugin management routes - handles settings and other plugin actions
 	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
 	mux.HandleFunc("/api/message_player", s.apiMessagePlayer)
 	mux.HandleFunc("/api/message_all", s.apiMessageAll)

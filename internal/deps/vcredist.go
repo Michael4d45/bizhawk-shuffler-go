@@ -22,4 +22,3 @@ func NewVCRedistInstaller() *VCRedistInstaller {
 func (v *VCRedistInstaller) CheckAndInstallVCRedist(progress func(msg string)) error {
 	return v.impl.CheckAndInstallVCRedist(progress)
 }
-

@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -82,8 +83,6 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 			out.Author = val
 		case "bizhawk_version":
 			out.BizHawkVersion = val
-		case "entry_point":
-			out.EntryPoint = val
 		case "status":
 			out.Status = types.PluginStatus(val)
 		}
@@ -96,6 +95,7 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 
 // saveKV writes the plugin metadata in simple key=value format. It writes
 // atomically by writing to a tmp file and renaming into place.
+// Note: status is NOT written here - it belongs in settings.kv
 func (s *Server) saveKV(data types.Plugin, filename string) error {
 	tmp := filename + ".tmp"
 	f, err := os.Create(tmp)
@@ -103,7 +103,7 @@ func (s *Server) saveKV(data types.Plugin, filename string) error {
 		return err
 	}
 	defer func() { _ = f.Close() }()
-	// Write stable ordering
+	// Write stable ordering (excluding status which is in settings.kv)
 	if _, err := fmt.Fprintln(f, "name = "+data.Name); err != nil {
 		return err
 	}
@@ -119,11 +119,85 @@ func (s *Server) saveKV(data types.Plugin, filename string) error {
 	if _, err := fmt.Fprintln(f, "bizhawk_version = "+data.BizHawkVersion); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(f, "entry_point = "+data.EntryPoint); err != nil {
+	// Status is now in settings.kv, not meta.kv
+	if err := f.Sync(); err != nil {
 		return err
 	}
-	if _, err := fmt.Fprintln(f, "status = "+string(data.Status)); err != nil {
+	if err := f.Close(); err != nil {
 		return err
+	}
+	return os.Rename(tmp, filename)
+}
+
+// loadSettingsKV reads a settings.kv file and returns all key-value pairs as a map.
+// Format: key = value (one per line). No comments supported. Keys are lowercased.
+// Whitespace around key and value is trimmed.
+func (s *Server) loadSettingsKV(filename string) (map[string]string, error) {
+	settings := make(map[string]string)
+	file, err := os.Open(filename)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Return empty map with default status if file doesn't exist
+			return map[string]string{"status": "disabled"}, nil
+		}
+		return nil, err
+	}
+	defer func() { _ = file.Close() }()
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" {
+			continue
+		}
+		idx := strings.Index(line, "=")
+		if idx < 0 {
+			continue
+		}
+		key := strings.TrimSpace(line[:idx])
+		val := strings.TrimSpace(line[idx+1:])
+		if key != "" {
+			settings[key] = val
+		}
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	// Ensure status always exists
+	if _, exists := settings["status"]; !exists {
+		settings["status"] = "disabled"
+	}
+	return settings, nil
+}
+
+// saveSettingsKV writes settings to a settings.kv file. It writes atomically
+// by writing to a tmp file and renaming into place. The status key must always exist.
+func (s *Server) saveSettingsKV(settings map[string]string, filename string) error {
+	// Ensure status always exists
+	if _, exists := settings["status"]; !exists {
+		settings["status"] = "disabled"
+	}
+	tmp := filename + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = f.Close() }()
+	// Write status first, then other keys in sorted order
+	if _, err := fmt.Fprintln(f, "status = "+settings["status"]); err != nil {
+		return err
+	}
+	// Write other keys in sorted order (excluding status)
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
+		if k != "status" {
+			keys = append(keys, k)
+		}
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		if _, err := fmt.Fprintf(f, "%s = %s\n", k, settings[k]); err != nil {
+			return err
+		}
 	}
 	if err := f.Sync(); err != nil {
 		return err
@@ -132,6 +206,69 @@ func (s *Server) saveKV(data types.Plugin, filename string) error {
 		return err
 	}
 	return os.Rename(tmp, filename)
+}
+
+// migratePluginStatus migrates the status field from meta.kv to settings.kv if needed.
+// This is a one-time migration for existing plugins.
+func (s *Server) migratePluginStatus(pluginName string) {
+	pluginDir := filepath.Join("./plugins", pluginName)
+	metaKV := filepath.Join(pluginDir, "meta.kv")
+	settingsKV := filepath.Join(pluginDir, "settings.kv")
+
+	// Check if settings.kv already exists - if so, migration is done
+	if _, err := os.Stat(settingsKV); err == nil {
+		return
+	}
+
+	// Check if meta.kv exists
+	if _, err := os.Stat(metaKV); os.IsNotExist(err) {
+		// No meta.kv, create default settings.kv
+		defaultSettings := map[string]string{"status": "disabled"}
+		if err := s.saveSettingsKV(defaultSettings, settingsKV); err != nil {
+			log.Printf("failed to create default settings.kv for %s: %v", pluginName, err)
+		}
+		return
+	}
+
+	// Load meta.kv to check for status field
+	var metaPlugin types.Plugin
+	if err := s.loadKV(metaKV, &metaPlugin); err != nil {
+		log.Printf("failed to load meta.kv for migration of %s: %v", pluginName, err)
+		// Create default settings.kv anyway
+		defaultSettings := map[string]string{"status": "disabled"}
+		if err := s.saveSettingsKV(defaultSettings, settingsKV); err != nil {
+			log.Printf("failed to create default settings.kv for %s: %v", pluginName, err)
+		}
+		return
+	}
+
+	// Extract status from meta.kv
+	status := string(metaPlugin.Status)
+	if status == "" {
+		status = "disabled"
+	}
+
+	// Create settings.kv with migrated status
+	settings := map[string]string{"status": status}
+	if err := s.saveSettingsKV(settings, settingsKV); err != nil {
+		log.Printf("failed to create settings.kv for %s: %v", pluginName, err)
+		return
+	}
+
+	// Remove status from meta.kv if it exists there
+	if status != "" {
+		// Reload meta.kv to get all fields
+		var existing types.Plugin
+		if err := s.loadKV(metaKV, &existing); err == nil {
+			// Save meta.kv without status field
+			existing.Status = "" // Clear status
+			if err := s.saveKV(existing, metaKV); err != nil {
+				log.Printf("failed to remove status from meta.kv for %s: %v", pluginName, err)
+			}
+		}
+	}
+
+	log.Printf("migrated status for plugin %s from meta.kv to settings.kv", pluginName)
 }
 
 // loadState loads persisted server state from disk if present.
@@ -188,6 +325,8 @@ func (s *Server) loadState() {
 		for _, entry := range entries {
 			if entry.IsDir() {
 				pluginName := entry.Name()
+				// Migrate status from meta.kv to settings.kv if needed
+				s.migratePluginStatus(pluginName)
 				if plugin := s.loadPluginMetadata(pluginName); plugin != nil {
 					tmp.Plugins[pluginName] = *plugin
 					fmt.Println("loaded plugin metadata for", pluginName)
@@ -251,31 +390,72 @@ func (s *Server) savePluginConfig(plugin types.Plugin) error {
 	if err := os.MkdirAll(pluginDir, 0755); err != nil {
 		return fmt.Errorf("failed to create plugin dir: %w", err)
 	}
-	metaKV := filepath.Join(pluginDir, "meta.kv")
+	settingsKV := filepath.Join(pluginDir, "settings.kv")
 
-	var existing types.Plugin
-	// Only support KV format
-	if err := s.loadKV(metaKV, &existing); err != nil {
-		return fmt.Errorf("failed to load existing plugin metadata (kv): %w", err)
+	// Load existing settings
+	settings, err := s.loadSettingsKV(settingsKV)
+	if err != nil {
+		// If we can't load, create new settings with just status
+		settings = make(map[string]string)
 	}
-	existing.Status = plugin.Status
-	s.state.Plugins[plugin.Name] = existing
-	// Save KV
-	if err := s.saveKV(existing, metaKV); err != nil {
-		return fmt.Errorf("failed to save kv metadata: %w", err)
+
+	// Update status in settings
+	settings["status"] = string(plugin.Status)
+
+	// Save settings to settings.kv
+	if err := s.saveSettingsKV(settings, settingsKV); err != nil {
+		return fmt.Errorf("failed to save settings.kv: %w", err)
 	}
+
+	// Load full plugin metadata from disk (outside lock to avoid deadlock)
+	fullPlugin := s.loadPluginMetadata(plugin.Name)
+	if fullPlugin == nil {
+		fullPlugin = &plugin
+	} else {
+		fullPlugin.Status = plugin.Status
+	}
+
+	// Update in-memory state
+	s.withLock(func() {
+		if s.state.Plugins == nil {
+			s.state.Plugins = make(map[string]types.Plugin)
+		}
+		s.state.Plugins[plugin.Name] = *fullPlugin
+	})
+
 	return nil
 }
 
-// loadPluginMetadata loads plugin metadata from disk
+// loadPluginMetadata loads plugin metadata from disk.
+// It loads read-only metadata from meta.kv and settings (including status) from settings.kv.
 func (s *Server) loadPluginMetadata(pluginName string) *types.Plugin {
 	var plugin types.Plugin
 	pluginDir := filepath.Join("./plugins", pluginName)
 	metaKV := filepath.Join(pluginDir, "meta.kv")
-	// Only KV supported
+	settingsKV := filepath.Join(pluginDir, "settings.kv")
+
+	// Load read-only metadata from meta.kv
 	if err := s.loadKV(metaKV, &plugin); err != nil {
 		fmt.Printf("failed to load plugin metadata for %s: %v\n", pluginName, err)
-		return nil
+		// If meta.kv doesn't exist, plugin.Name might be empty, so set it
+		if plugin.Name == "" {
+			plugin.Name = pluginName
+		}
+	}
+
+	// Load settings (including status) from settings.kv
+	settings, err := s.loadSettingsKV(settingsKV)
+	if err != nil {
+		fmt.Printf("failed to load plugin settings for %s: %v\n", pluginName, err)
+		// Default to disabled if we can't load settings
+		plugin.Status = types.PluginStatusDisabled
+	} else {
+		// Set status from settings
+		if statusStr, ok := settings["status"]; ok {
+			plugin.Status = types.PluginStatus(statusStr)
+		} else {
+			plugin.Status = types.PluginStatusDisabled
+		}
 	}
 
 	return &plugin

@@ -14,8 +14,15 @@ local function on_frame()
     -- For demo purposes, do nothing
 end
 
+-- Settings changed hook
+local function on_settings_changed(settings)
+    console.log("Settings changed!")
+    -- Update internal state based on new_settings
+end
+
 -- Export plugin hooks for the main server.lua to call
 return {
     on_init = on_init,
     on_frame = on_frame,
+    on_settings_changed = on_settings_changed,
 }

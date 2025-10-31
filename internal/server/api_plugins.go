@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
@@ -102,7 +103,6 @@ func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
 		Version:     "1.0.0",
 		Description: "Uploaded plugin",
 		Author:      "Unknown",
-		EntryPoint:  "plugin.lua",
 		Status:      types.PluginStatusDisabled,
 	}
 	// Save KV only
@@ -188,73 +188,115 @@ func (s *Server) handlePluginAction(w http.ResponseWriter, r *http.Request) {
 	action := parts[1]
 
 	switch action {
-	case "enable":
-		s.handlePluginEnableByName(w, r, pluginName)
-	case "disable":
-		s.handlePluginDisableByName(w, r, pluginName)
+	case "settings":
+		s.handlePluginSettings(w, r, pluginName)
+	case "reload":
+		s.handlePluginReload(w, r, pluginName)
 	default:
 		http.Error(w, "unknown action: "+action, http.StatusBadRequest)
 	}
 }
 
-// handlePluginEnableByName enables a plugin by name
-func (s *Server) handlePluginEnableByName(w http.ResponseWriter, r *http.Request, pluginName string) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	s.UpdateStateAndPersist(func(st *types.ServerState) {
-		// Load plugin metadata if not already loaded
-		plugin, exists := st.Plugins[pluginName]
-		if !exists {
-			if p := s.loadPluginMetadata(pluginName); p != nil {
-				plugin = *p
-			}
+// handlePluginSettings handles GET and POST requests for plugin settings
+func (s *Server) handlePluginSettings(w http.ResponseWriter, r *http.Request, pluginName string) {
+	switch r.Method {
+	case http.MethodGet:
+		// Return current settings
+		pluginDir := filepath.Join("./plugins", pluginName)
+		settingsKV := filepath.Join(pluginDir, "settings.kv")
+		settings, err := s.loadSettingsKV(settingsKV)
+		if err != nil {
+			http.Error(w, "failed to load settings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(settings); err != nil {
+			log.Printf("encode settings error: %v", err)
 		}
 
-		plugin.Status = types.PluginStatusEnabled
-		st.Plugins[pluginName] = plugin
-	})
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("ok")); err != nil {
-		log.Printf("write response error: %v", err)
+	case http.MethodPost:
+		// Update settings
+		var requestSettings map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&requestSettings); err != nil {
+			http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		// Validate that status is present
+		if _, ok := requestSettings["status"]; !ok {
+			http.Error(w, "status field is required", http.StatusBadRequest)
+			return
+		}
+
+		// Validate status value
+		status := requestSettings["status"]
+		if status != "enabled" && status != "disabled" {
+			http.Error(w, "status must be 'enabled' or 'disabled'", http.StatusBadRequest)
+			return
+		}
+
+		pluginDir := filepath.Join("./plugins", pluginName)
+		if err := os.MkdirAll(pluginDir, 0755); err != nil {
+			http.Error(w, "failed to create plugin dir: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		settingsKV := filepath.Join(pluginDir, "settings.kv")
+		if err := s.saveSettingsKV(requestSettings, settingsKV); err != nil {
+			http.Error(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+
+		// Update plugin status in state
+		pluginStatus := types.PluginStatus(status)
+		s.UpdateStateAndPersist(func(st *types.ServerState) {
+			if st.Plugins == nil {
+				st.Plugins = make(map[string]types.Plugin)
+			}
+			plugin, exists := st.Plugins[pluginName]
+			if !exists {
+				if p := s.loadPluginMetadata(pluginName); p != nil {
+					plugin = *p
+				} else {
+					plugin = types.Plugin{Name: pluginName}
+				}
+			}
+			plugin.Status = pluginStatus
+			st.Plugins[pluginName] = plugin
+		})
+
+		// Broadcast settings update to connected clients
+		s.broadcastPluginSettingsUpdate(pluginName, requestSettings)
+
+		w.Header().Set("Content-Type", "application/json")
+		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+			log.Printf("encode response error: %v", err)
+		}
+
+	default:
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 	}
 }
 
-// handlePluginDisableByName disables a plugin by name
-func (s *Server) handlePluginDisableByName(w http.ResponseWriter, r *http.Request, pluginName string) {
+// handlePluginReload broadcasts a reload command to all clients for the specified plugin
+func (s *Server) handlePluginReload(w http.ResponseWriter, r *http.Request, pluginName string) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	var exists bool
-	s.UpdateStateAndPersist(func(st *types.ServerState) {
-		// Avoid shadowing the outer 'exists' variable. Use a local ok and set
-		// the outer flag so it is visible after the closure.
-		plugin, ok := st.Plugins[pluginName]
-		if ok {
-			exists = true
-		} else {
-			if p := s.loadPluginMetadata(pluginName); p != nil {
-				plugin = *p
-				exists = true
-			}
-		}
-		if !exists {
-			return
-		}
-		// Update status to disabled
-		plugin.Status = types.PluginStatusDisabled
-		st.Plugins[pluginName] = plugin
-	})
-	if !exists {
-		http.Error(w, "plugin not found", http.StatusNotFound)
-		return
+	// Broadcast reload command to all connected clients
+	cmd := types.Command{
+		Cmd: types.CmdPluginReload,
+		Payload: map[string]any{
+			"plugin_name": pluginName,
+		},
+		ID: fmt.Sprintf("plugin-reload-%d-%s", time.Now().UnixNano(), pluginName),
 	}
-	w.WriteHeader(http.StatusOK)
-	if _, err := w.Write([]byte("ok")); err != nil {
-		log.Printf("write response error: %v", err)
+	s.broadcastToPlayers(cmd)
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Printf("encode response error: %v", err)
 	}
 }

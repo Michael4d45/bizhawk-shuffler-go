@@ -401,8 +401,10 @@
                   :class="plugin.status === 'enabled' ? 'bg-orange-500 hover:bg-orange-400 text-black' : 'bg-green-500 hover:bg-green-400 text-black'"
                   x-text="plugin.status === 'enabled' ? 'Disable' : 'Enable'">
                 </button>
+                <button @click="reloadPlugin(name)"
+                  class="text-xs px-2 py-1 rounded bg-blue-600 hover:bg-blue-500">Reload</button>
                 <button @click="showPluginDetails(name)"
-                  class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">Details</button>
+                  class="text-xs px-2 py-1 rounded bg-slate-700 hover:bg-slate-600">Edit</button>
                 <button @click="deletePlugin(name)"
                   class="text-xs px-2 py-1 rounded bg-red-600 hover:bg-red-500">Delete</button>
               </div>
@@ -426,31 +428,75 @@
         </div>
       </section>
 
-      <!-- Plugin Details Modal -->
+      <!-- Plugin Edit Settings Modal -->
       <div x-show="pluginDetailsVisible" x-transition
         class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
-        <div class="bg-card rounded-lg w-11/12 max-w-2xl p-4">
+        <div class="bg-card rounded-lg w-11/12 max-w-2xl p-4 max-h-[90vh] overflow-y-auto">
           <div class="flex justify-between items-center mb-3">
-            <h3 class="text-lg font-bold">Plugin: <span x-text="pluginDetails.name"></span></h3>
+            <h3 class="text-lg font-bold">Edit Settings: <span x-text="pluginDetails.name"></span></h3>
             <div class="flex gap-2">
               <button @click="pluginDetailsVisible = false"
                 class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">Close</button>
             </div>
           </div>
-          <div class="text-sm text-gray-400 mb-2" x-text="pluginDetails.description"></div>
-          <div class="grid grid-cols-2 gap-4">
-            <div>
-              <div class="text-xs text-gray-400">Version</div>
-              <div class="text-sm" x-text="pluginDetails.version || '1.0.0'"></div>
-            </div>
-            <div>
-              <div class="text-xs text-gray-400">Author</div>
-              <div class="text-sm" x-text="pluginDetails.author || 'Unknown'"></div>
+
+          <!-- Read-only metadata section -->
+          <div class="mb-4 p-3 bg-slate-800/40 rounded">
+            <div class="text-sm text-gray-400 mb-1" x-text="pluginDetails.description || 'No description'"></div>
+            <div class="grid grid-cols-2 gap-4 text-sm">
+              <div>
+                <span class="text-gray-500">Version:</span>
+                <span class="ml-2" x-text="pluginDetails.version || '1.0.0'"></span>
+              </div>
+              <div>
+                <span class="text-gray-500">Author:</span>
+                <span class="ml-2" x-text="pluginDetails.author || 'Unknown'"></span>
+              </div>
             </div>
           </div>
-          <div class="mt-3">
-            <div class="text-xs text-gray-400">Meta JSON</div>
-            <pre class="text-xs bg-[#02101a] p-2 rounded mt-1 overflow-auto" x-text="pluginDetails.metaRaw"></pre>
+
+          <!-- Settings section -->
+          <div class="mb-4">
+            <div class="text-sm font-semibold mb-2">Settings</div>
+
+            <!-- Status field (always shown) -->
+            <div class="mb-3">
+              <label class="block text-xs text-gray-400 mb-1">Status *</label>
+              <select x-model="pluginSettings.status" class="w-full px-2 py-1 rounded bg-slate-700 text-white">
+                <option value="enabled">Enabled</option>
+                <option value="disabled">Disabled</option>
+              </select>
+            </div>
+
+            <!-- Dynamic settings fields -->
+            <template x-for="(value, key) in pluginSettings" :key="key">
+              <div class="mb-3" x-show="key !== 'status'">
+                <label class="block text-xs text-gray-400 mb-1" x-text="key"></label>
+                <input type="text" x-model="pluginSettings[key]"
+                  class="w-full px-2 py-1 rounded bg-slate-700 text-white" :placeholder="'Enter value for ' + key" />
+              </div>
+            </template>
+
+            <!-- Add new setting -->
+            <div class="mt-4 p-2 bg-slate-800/40 rounded">
+              <div class="text-xs text-gray-400 mb-2">Add New Setting</div>
+              <div class="flex gap-2">
+                <input type="text" x-model="newSettingKey" placeholder="Setting key"
+                  class="flex-1 px-2 py-1 rounded bg-slate-700 text-white text-sm" />
+                <input type="text" x-model="newSettingValue" placeholder="Setting value"
+                  class="flex-1 px-2 py-1 rounded bg-slate-700 text-white text-sm" />
+                <button @click="addSetting()"
+                  class="px-3 py-1 rounded bg-green-600 hover:bg-green-500 text-sm">Add</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Action buttons -->
+          <div class="flex justify-end gap-2">
+            <button @click="pluginDetailsVisible = false"
+              class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">Cancel</button>
+            <button @click="savePluginSettings()" class="px-4 py-2 rounded bg-blue-600 hover:bg-blue-500">Save
+              Settings</button>
           </div>
         </div>
       </div>
@@ -619,9 +665,12 @@
         mainGames: [],
         files: [],
         plugins: {},
-        // Plugin details modal state
+        // Plugin edit settings modal state
         pluginDetailsVisible: false,
         pluginDetails: {},
+        pluginSettings: {},
+        newSettingKey: "",
+        newSettingValue: "",
         newMain: { primary: "", extras: [] },
         saves: {},
         logs: [],
@@ -1202,21 +1251,77 @@
         },
         async showPluginDetails(name) {
           try {
-            const res = await fetch(`/api/plugins/${encodeURIComponent(name)}`);
-            if (res.ok) {
-              const body = await res.json();
-              this.pluginDetails = body || { name };
-              // pretty-print meta if available
-              this.pluginDetails.metaRaw = JSON.stringify(body.meta || body, null, 2);
+            // Load plugin metadata
+            const metaRes = await fetch(`/api/plugins/${encodeURIComponent(name)}`);
+            if (metaRes.ok) {
+              this.pluginDetails = await metaRes.json() || { name };
             } else {
               this.pluginDetails = { name, description: 'Failed to fetch plugin details' };
-              this.pluginDetails.metaRaw = '';
             }
+
+            // Load plugin settings
+            const settingsRes = await fetch(`/api/plugins/${encodeURIComponent(name)}/settings`);
+            if (settingsRes.ok) {
+              this.pluginSettings = await settingsRes.json() || { status: 'disabled' };
+            } else {
+              this.pluginSettings = { status: 'disabled' };
+            }
+
+            // Reset new setting fields
+            this.newSettingKey = "";
+            this.newSettingValue = "";
           } catch (e) {
+            this.log('show plugin edit err: ' + e.message);
             this.pluginDetails = { name, description: 'Error: ' + e.message };
-            this.pluginDetails.metaRaw = '';
+            this.pluginSettings = { status: 'disabled' };
           }
           this.pluginDetailsVisible = true;
+        },
+        addSetting() {
+          if (!this.newSettingKey || this.newSettingKey.trim() === '') {
+            this.log('Setting key cannot be empty');
+            return;
+          }
+          if (this.newSettingKey === 'status') {
+            this.log('Cannot add status setting (already exists)');
+            return;
+          }
+          // Initialize pluginSettings if needed
+          if (!this.pluginSettings || typeof this.pluginSettings !== 'object') {
+            this.pluginSettings = { status: 'disabled' };
+          }
+          this.pluginSettings[this.newSettingKey.trim()] = this.newSettingValue || '';
+          this.newSettingKey = "";
+          this.newSettingValue = "";
+        },
+        async savePluginSettings() {
+          if (!this.pluginDetails || !this.pluginDetails.name) {
+            this.log('No plugin selected');
+            return;
+          }
+          try {
+            const res = await fetch(`/api/plugins/${encodeURIComponent(this.pluginDetails.name)}/settings`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(this.pluginSettings)
+            });
+            if (res.ok) {
+              this.log(`Settings saved for plugin ${this.pluginDetails.name}`);
+              this.toast = 'Settings saved';
+              setTimeout(() => this.toast = '', 2000);
+              await this.refreshPlugins();
+              this.pluginDetailsVisible = false;
+            } else {
+              const error = await res.text().catch(() => 'save failed');
+              this.log(`Failed to save settings: ${error}`);
+              this.toast = 'Failed to save settings';
+              setTimeout(() => this.toast = '', 2000);
+            }
+          } catch (e) {
+            this.log('save settings err: ' + e.message);
+            this.toast = 'Error saving settings';
+            setTimeout(() => this.toast = '', 2000);
+          }
         },
         async deletePlugin(name) {
           if (!confirm(`Delete plugin '${name}' from server? This cannot be undone.`)) return;
@@ -1234,17 +1339,52 @@
           }
         },
         async togglePlugin(name, enable) {
-          const action = enable ? 'enable' : 'disable';
           try {
-            const res = await fetch(`/api/plugins/${name}/${action}`, { method: 'POST' });
+            // Fetch current settings
+            const getRes = await fetch(`/api/plugins/${encodeURIComponent(name)}/settings`);
+            if (!getRes.ok) {
+              this.log(`Failed to fetch settings for plugin ${name}`);
+              return;
+            }
+
+            const currentSettings = await getRes.json() || { status: 'disabled' };
+
+            // Toggle the status
+            const newSettings = { ...currentSettings };
+            newSettings.status = enable ? 'enabled' : 'disabled';
+
+            // Update settings using the settings API
+            const res = await fetch(`/api/plugins/${encodeURIComponent(name)}/settings`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify(newSettings)
+            });
+
             if (res.ok) {
-              this.log(`Plugin ${name} ${action}d`);
+              const action = enable ? 'enabled' : 'disabled';
+              this.log(`Plugin ${name} ${action}`);
               await this.refreshPlugins();
             } else {
-              this.log(`Failed to ${action} plugin ${name}`);
+              const error = await res.text().catch(() => 'update failed');
+              this.log(`Failed to update plugin ${name}: ${error}`);
             }
           } catch (e) {
-            this.log(`Plugin ${action} err: ` + e.message);
+            this.log(`Plugin toggle err: ` + e.message);
+          }
+        },
+        async reloadPlugin(name) {
+          try {
+            const res = await fetch(`/api/plugins/${encodeURIComponent(name)}/reload`, {
+              method: 'POST'
+            });
+            if (res.ok) {
+              this.log(`Plugin ${name} reload requested`);
+            } else {
+              const error = await res.text().catch(() => 'reload failed');
+              this.log(`Failed to reload plugin ${name}: ${error}`);
+            }
+          } catch (e) {
+            this.log(`Plugin reload err: ` + e.message);
           }
         },
         async uploadPlugin(event) {

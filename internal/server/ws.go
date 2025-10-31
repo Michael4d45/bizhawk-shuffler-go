@@ -422,6 +422,20 @@ func (s *Server) sendPing(player types.Player) error {
 	return nil
 }
 
+// broadcastPluginSettingsUpdate broadcasts plugin settings changes to all connected clients
+func (s *Server) broadcastPluginSettingsUpdate(pluginName string, settings map[string]string) {
+	payload := map[string]any{
+		"plugin_name": pluginName,
+		"settings":    settings,
+	}
+	cmd := types.Command{
+		Cmd:     types.CmdStateUpdate,
+		Payload: payload,
+		ID:      fmt.Sprintf("%d", time.Now().UnixNano()),
+	}
+	s.broadcastToPlayers(cmd)
+}
+
 // sendAndWait convenience wrapper that registers pending and waits for ack/nack.
 func (s *Server) sendAndWait(player types.Player, cmd types.Command, timeout time.Duration) (string, error) {
 	ch := make(chan string, 1)

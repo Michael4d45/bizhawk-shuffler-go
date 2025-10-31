@@ -25,4 +25,3 @@ func (b *BizHawkInstaller) InstallBizHawk(downloadURL, installDir string, progre
 func GetBizHawkDownloadURL() string {
 	return installer.GetBizHawkDownloadURL()
 }
-

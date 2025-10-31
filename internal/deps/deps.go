@@ -37,7 +37,7 @@ func NewDependencyManagerWithPath(bizhawkInstallDir, configuredPath string, prog
 		progressCallback:  progressCallback,
 		bizhawkInstallDir: bizhawkInstallDir,
 	}
-	
+
 	// Use configured path as default if provided
 	if configuredPath != "" {
 		dm.defaultBizhawkPath = configuredPath
@@ -49,12 +49,12 @@ func NewDependencyManagerWithPath(bizhawkInstallDir, configuredPath string, prog
 			dm.defaultBizhawkPath = filepath.Join(bizhawkInstallDir, "EmuHawkMono.sh")
 		}
 	}
-	
+
 	dm.bizhawkInstaller = NewBizHawkInstaller()
 	if runtime.GOOS == "windows" {
 		dm.vcRedistInstaller = NewVCRedistInstaller()
 	}
-	
+
 	return dm
 }
 
@@ -76,44 +76,44 @@ func (dm *DependencyManager) CheckAndInstallDependencies(promptCallback InstallP
 			log.Printf("VC++ redistributable check failed: %v", err)
 		}
 	}
-	
+
 	// Check if BizHawk is installed
 	// First check if default path exists
 	bizhawkPath := ""
 	if dm.defaultBizhawkPath != "" && dm.isBizHawkInstalled(dm.defaultBizhawkPath) {
 		bizhawkPath = dm.defaultBizhawkPath
 	}
-	
+
 	// If not found at default location, try to find BizHawk in common locations
 	if bizhawkPath == "" {
 		if found := dm.findBizHawk(); found != "" {
 			bizhawkPath = found
 		}
 	}
-	
+
 	// If still not found, need to install it
 	if bizhawkPath == "" {
 		if dm.bizhawkInstallDir == "" {
 			return "", fmt.Errorf("BizHawk not found and no install directory specified")
 		}
-		
+
 		// Prompt user if callback provided
 		if promptCallback != nil {
 			if !promptCallback("BizHawk") {
 				return "", fmt.Errorf("BizHawk installation cancelled by user")
 			}
 		}
-		
+
 		if dm.progressCallback != nil {
 			dm.progressCallback("BizHawk not found, installing...")
 		}
-		
+
 		// Install BizHawk
 		bizhawkURL := GetBizHawkDownloadURL()
 		if err := dm.bizhawkInstaller.InstallBizHawk(bizhawkURL, dm.bizhawkInstallDir, dm.progressCallback); err != nil {
 			return "", fmt.Errorf("failed to install BizHawk: %w", err)
 		}
-		
+
 		// Update path after installation
 		if runtime.GOOS == "windows" {
 			bizhawkPath = filepath.Join(dm.bizhawkInstallDir, "EmuHawk.exe")
@@ -121,12 +121,12 @@ func (dm *DependencyManager) CheckAndInstallDependencies(promptCallback InstallP
 			bizhawkPath = filepath.Join(dm.bizhawkInstallDir, "EmuHawkMono.sh")
 		}
 	}
-	
+
 	// Verify BizHawk exists at the resolved path
 	if !dm.isBizHawkInstalled(bizhawkPath) {
 		return "", fmt.Errorf("BizHawk not found at %s", bizhawkPath)
 	}
-	
+
 	return bizhawkPath, nil
 }
 
@@ -158,7 +158,7 @@ func (dm *DependencyManager) findBizHawk() string {
 			return candidate
 		}
 	}
-	
+
 	// Try current working directory
 	if cwd, err := os.Getwd(); err == nil {
 		var candidate string
@@ -171,7 +171,6 @@ func (dm *DependencyManager) findBizHawk() string {
 			return candidate
 		}
 	}
-	
+
 	return ""
 }
-

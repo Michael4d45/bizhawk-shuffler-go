@@ -69,12 +69,12 @@ func main() {
 	if err := s.StartBroadcaster(context.Background()); err != nil {
 		log.Printf("Failed to start discovery broadcaster: %v", err)
 	}
-	
+
 	// Open browser after a short delay to ensure server is ready
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		openBrowser(url)
 	}()
-	
+
 	log.Fatal(http.ListenAndServe(addr, mux))
 }

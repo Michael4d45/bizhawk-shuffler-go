@@ -130,7 +130,7 @@ func (psm *PluginSyncManager) scanLocalPlugins() (map[string]types.Plugin, error
 			continue
 		}
 		name := e.Name()
-		// Only support meta.kv format
+		// Read metadata from meta.kv (excluding status)
 		metaKV := filepath.Join(pluginDir, name, "meta.kv")
 		var p types.Plugin
 		if f, err := os.Open(metaKV); err == nil {
@@ -158,24 +158,102 @@ func (psm *PluginSyncManager) scanLocalPlugins() (map[string]types.Plugin, error
 					p.Author = val
 				case "bizhawk_version":
 					p.BizHawkVersion = val
-				case "entry_point":
-					p.EntryPoint = val
-				case "status":
-					p.Status = types.PluginStatus(val)
+					// Status is now in settings.kv, not meta.kv
 				}
 			}
 			_ = f.Close()
-			if p.Name == "" {
-				p.Name = name
-			}
-			out[name] = p
-			continue
-		} else {
-			out[name] = types.Plugin{Name: name, Version: "unknown", Status: types.PluginStatusDisabled}
-			continue
 		}
+
+		// Read status from settings.kv
+		settingsKV := filepath.Join(pluginDir, name, "settings.kv")
+		p.Status = types.PluginStatusDisabled // default
+		if f, err := os.Open(settingsKV); err == nil {
+			scanner := bufio.NewScanner(f)
+			for scanner.Scan() {
+				line := strings.TrimSpace(scanner.Text())
+				if line == "" {
+					continue
+				}
+				idx := strings.Index(line, "=")
+				if idx < 0 {
+					continue
+				}
+				key := strings.TrimSpace(line[:idx])
+				val := strings.TrimSpace(line[idx+1:])
+				if strings.ToLower(key) == "status" {
+					p.Status = types.PluginStatus(val)
+					break
+				}
+			}
+			_ = f.Close()
+		}
+
+		if p.Name == "" {
+			p.Name = name
+		}
+		out[name] = p
 	}
 	return out, nil
+}
+
+// SavePluginSettings saves plugin settings to settings.kv file
+func (psm *PluginSyncManager) SavePluginSettings(pluginName string, settings map[string]string) error {
+	pluginDir := filepath.Join("./plugins", pluginName)
+	if err := os.MkdirAll(pluginDir, 0o755); err != nil {
+		return fmt.Errorf("failed to create plugin dir: %w", err)
+	}
+
+	settingsKV := filepath.Join(pluginDir, "settings.kv")
+	tmp := settingsKV + ".tmp"
+	f, err := os.Create(tmp)
+	if err != nil {
+		return fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer func() { _ = f.Close() }()
+
+	// Ensure status exists
+	if _, exists := settings["status"]; !exists {
+		settings["status"] = "disabled"
+	}
+
+	// Write status first
+	if _, err := fmt.Fprintf(f, "status = %s\n", settings["status"]); err != nil {
+		return fmt.Errorf("failed to write status: %w", err)
+	}
+
+	// Write other keys in sorted order
+	keys := make([]string, 0, len(settings))
+	for k := range settings {
+		if k != "status" {
+			keys = append(keys, k)
+		}
+	}
+	for i := 0; i < len(keys)-1; i++ {
+		for j := i + 1; j < len(keys); j++ {
+			if keys[i] > keys[j] {
+				keys[i], keys[j] = keys[j], keys[i]
+			}
+		}
+	}
+	for _, k := range keys {
+		if _, err := fmt.Fprintf(f, "%s = %s\n", k, settings[k]); err != nil {
+			return fmt.Errorf("failed to write setting %s: %w", k, err)
+		}
+	}
+
+	if err := f.Sync(); err != nil {
+		return fmt.Errorf("failed to sync file: %w", err)
+	}
+	if err := f.Close(); err != nil {
+		return fmt.Errorf("failed to close file: %w", err)
+	}
+
+	if err := os.Rename(tmp, settingsKV); err != nil {
+		return fmt.Errorf("failed to rename file: %w", err)
+	}
+
+	log.Printf("saved plugin settings for %s", pluginName)
+	return nil
 }
 
 // analyzeSyncRequirements determines downloads and removals. We intentionally always download enabled plugins.
@@ -193,7 +271,7 @@ func (psm *PluginSyncManager) analyzeSyncRequirements(serverPlugins, localPlugin
 	return toDownload, toRemove
 }
 
-// downloadPlugin fetches plugin.lua and meta.json (when available) and writes them to ./plugins/<name>/
+// downloadPlugin fetches plugin.lua, meta.kv, and settings.kv and writes them to ./plugins/<name>/
 func (psm *PluginSyncManager) downloadPlugin(pluginName string) error {
 	base := fmt.Sprintf("%s/files/plugins/%s", psm.api.BaseURL, pluginName)
 	localDir := filepath.Join("./plugins", pluginName)
@@ -238,6 +316,12 @@ func (psm *PluginSyncManager) downloadPlugin(pluginName string) error {
 	if err := downloadFile(base+"/meta.kv", filepath.Join(localDir, "meta.kv")); err != nil {
 		log.Printf("ERROR: meta.kv not available for %s: %v", pluginName, err)
 		return fmt.Errorf("meta.kv missing for %s: %w", pluginName, err)
+	}
+
+	// download settings.kv (optional, but preferred - defaults to disabled if missing)
+	if err := downloadFile(base+"/settings.kv", filepath.Join(localDir, "settings.kv")); err != nil {
+		log.Printf("WARNING: settings.kv not available for %s (will default to disabled): %v", pluginName, err)
+		// Don't fail the download if settings.kv is missing - server.lua will handle it
 	}
 
 	return nil

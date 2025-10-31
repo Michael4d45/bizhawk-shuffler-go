@@ -296,7 +296,6 @@ version = 1.0.0
 description = Example plugin
 author = Plugin Author
 bizhawk_version = >=2.8.0
-entry_point = plugin.lua
 status = disabled
 ```
 

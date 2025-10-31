@@ -36,7 +36,7 @@ local function file_exists(name)
     end
 end
 
-local available_hooks = {"on_init", "on_frame"}
+local available_hooks = {"on_init", "on_frame", "on_settings_changed"}
 
 -- Plugin hook functions
 local function call_plugin_hook(hook_name, ...)
@@ -47,6 +47,275 @@ local function call_plugin_hook(hook_name, ...)
             if not ok then
                 console.log("Plugin " .. plugin_name .. " " .. hook_name .. " error: " .. tostring(err))
             end
+        end
+    end
+end
+
+-- Load a single plugin by name (used by load_plugins and reload_plugin_settings)
+local function load_single_plugin(plugin_name, settings)
+    local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
+    local plugin_lua_path = plugin_path .. "/plugin.lua"
+
+    if not file_exists(plugin_lua_path) then
+        console.log("Plugin " .. plugin_name .. " missing required files")
+        return false
+    end
+
+    console.log("Found plugin: " .. plugin_name)
+
+    -- Parse meta.kv if present (read-only metadata)
+    local meta = {}
+    local meta_path = plugin_path .. "/meta.kv"
+    local mf = io.open(meta_path, "r")
+    if mf then
+        for line in mf:lines() do
+            local l = line:match("^%s*(.-)%s*$")
+            if l ~= "" then
+                local eq = l:find("=")
+                if eq then
+                    local key = l:sub(1, eq - 1):gsub("^%s*(.-)%s*$", "%1"):lower()
+                    local val = l:sub(eq + 1):gsub("^%s*(.-)%s*$", "%1")
+                    meta[key] = val
+                end
+            end
+        end
+        mf:close()
+    end
+
+    -- Load the plugin Lua file
+    local plugin_file = plugin_path .. "/plugin.lua"
+    local plugin_ok, plugin_module = pcall(dofile, plugin_file)
+
+    if plugin_ok and plugin_module then
+        local is_valid = true
+        for _, hook in ipairs(available_hooks) do
+            if plugin_module[hook] and type(plugin_module[hook]) ~= "function" then
+                console.log("Plugin " .. plugin_name .. " has invalid hook '" .. hook .. "'; must be a function")
+                is_valid = false
+            end
+        end
+        for k, v in pairs(plugin_module) do
+            if type(v) == "function" then
+                local is_hook = false
+                for _, hook in ipairs(available_hooks) do
+                    if k == hook then
+                        is_hook = true
+                        break
+                    end
+                end
+                if not is_hook then
+                    console.log("Plugin " .. plugin_name .. " has unknown function '" .. k .. "'; ignoring")
+                end
+            end
+        end
+
+        if not is_valid then
+            console.log("Plugin " .. plugin_name .. " is invalid and will not be loaded")
+            return false
+        else
+            -- Store settings with the plugin module so plugins can access them
+            plugin_module._settings = settings
+            plugin_module._meta = meta
+            plugin_module._initialized = false -- Track initialization state
+            loaded_plugins[plugin_name] = plugin_module
+
+            -- Call on_init hook if available (only once per enablement)
+            if plugin_module.on_init and not plugin_module._initialized then
+                local init_ok, init_err = pcall(plugin_module.on_init)
+                if init_ok then
+                    plugin_module._initialized = true
+                    console.log("Plugin " .. plugin_name .. " initialized successfully")
+                else
+                    console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
+                end
+            end
+            console.log("Plugin " .. plugin_name .. " loaded successfully")
+            return true
+        end
+    else
+        console.log("Failed to load plugin " .. plugin_name .. ": " .. tostring(plugin_module))
+        return false
+    end
+end
+
+-- Fully reload a plugin: reload plugin.lua file and settings
+local function reload_plugin_file(plugin_name)
+    console.log("Fully reloading plugin: " .. plugin_name)
+
+    local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
+    local settings_path = plugin_path .. "/settings.kv"
+
+    -- Load current settings first
+    local settings = {}
+    local sf = io.open(settings_path, "r")
+    if sf then
+        for line in sf:lines() do
+            local l = line:match("^%s*(.-)%s*$")
+            if l ~= "" then
+                local eq = l:find("=")
+                if eq then
+                    local key = l:sub(1, eq - 1):gsub("^%s*(.-)%s*$", "%1")
+                    local val = l:sub(eq + 1):gsub("^%s*(.-)%s*$", "%1")
+                    settings[key] = val
+                end
+            end
+        end
+        sf:close()
+    else
+        console.log("Settings file not found for plugin: " .. plugin_name .. ", defaulting to disabled")
+        settings["status"] = "disabled"
+    end
+
+    local plugin_status = (settings["status"] or "disabled"):lower()
+
+    -- Only reload if plugin is enabled
+    if plugin_status ~= "enabled" then
+        console.log("Plugin " .. plugin_name .. " is disabled, skipping file reload")
+        return
+    end
+
+    -- Get old plugin data if it exists
+    local old_plugin_data = loaded_plugins[plugin_name]
+    local was_initialized = false
+    if old_plugin_data then
+        was_initialized = old_plugin_data._initialized or false
+        -- Remove old plugin to force reload
+        loaded_plugins[plugin_name] = nil
+    end
+
+    -- Reload the plugin file
+    if load_single_plugin(plugin_name, settings) then
+        local plugin_data = loaded_plugins[plugin_name]
+        if plugin_data then
+            -- If it was previously initialized, call on_init again (reload means full restart)
+            if plugin_data.on_init then
+                local init_ok, init_err = pcall(plugin_data.on_init)
+                if init_ok then
+                    plugin_data._initialized = true
+                    console.log("Plugin " .. plugin_name .. " re-initialized successfully")
+                else
+                    console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
+                end
+            end
+
+            -- Call on_settings_changed hook if available
+            if plugin_data.on_settings_changed then
+                local ok, err = pcall(plugin_data.on_settings_changed, settings)
+                if not ok then
+                    console.log("Plugin " .. plugin_name .. " on_settings_changed error: " .. tostring(err))
+                else
+                    console.log("Plugin " .. plugin_name .. " reloaded completely")
+                end
+            else
+                console.log("Plugin " .. plugin_name .. " reloaded completely")
+            end
+        end
+    else
+        console.log("Failed to reload plugin " .. plugin_name)
+    end
+end
+
+-- Reload plugin settings from settings.kv and notify plugin via hook
+local function reload_plugin_settings(plugin_name)
+    console.log("Reloading settings for plugin: " .. plugin_name)
+    local plugin_data = loaded_plugins[plugin_name]
+
+    local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
+    local settings_path = plugin_path .. "/settings.kv"
+    console.log("Reading settings from: " .. settings_path)
+    local settings = {}
+
+    local sf = io.open(settings_path, "r")
+    if sf then
+        console.log("Settings file found for plugin: " .. plugin_name)
+        local setting_count = 0
+        for line in sf:lines() do
+            local l = line:match("^%s*(.-)%s*$")
+            if l ~= "" then
+                local eq = l:find("=")
+                if eq then
+                    local key = l:sub(1, eq - 1):gsub("^%s*(.-)%s*$", "%1")
+                    local val = l:sub(eq + 1):gsub("^%s*(.-)%s*$", "%1")
+                    settings[key] = val
+                    setting_count = setting_count + 1
+                    console.log("  Setting: " .. key .. " = " .. val)
+                end
+            end
+        end
+        sf:close()
+        console.log("Loaded " .. tostring(setting_count) .. " settings for plugin: " .. plugin_name)
+    else
+        console.log("Settings file not found for plugin: " .. plugin_name .. ", defaulting to disabled")
+        settings["status"] = "disabled"
+    end
+
+    local old_status = "disabled"
+    if plugin_data then
+        old_status = (plugin_data._settings["status"] or "disabled"):lower()
+    end
+    local new_status = (settings["status"] or "disabled"):lower()
+
+    -- If plugin is not loaded and status is enabled, load it now
+    if not plugin_data and new_status == "enabled" then
+        console.log("Plugin " .. plugin_name .. " transitioning from disabled to enabled, loading plugin")
+        if load_single_plugin(plugin_name, settings) then
+            plugin_data = loaded_plugins[plugin_name]
+            -- on_init already called in load_single_plugin, so we're done
+            -- But still call on_settings_changed if available
+            if plugin_data and plugin_data.on_settings_changed then
+                local ok, err = pcall(plugin_data.on_settings_changed, settings)
+                if not ok then
+                    console.log("Plugin " .. plugin_name .. " on_settings_changed error: " .. tostring(err))
+                else
+                    console.log("Plugin " .. plugin_name .. " settings reloaded and hook called")
+                end
+            end
+        end
+        return
+    end
+
+    -- If plugin is not loaded and still disabled, nothing to do
+    if not plugin_data then
+        console.log("Plugin " .. plugin_name .. " not loaded and disabled, nothing to do")
+        return
+    end
+
+    -- If status changed from enabled to disabled, unload the plugin
+    if old_status == "enabled" and new_status ~= "enabled" then
+        console.log("Plugin " .. plugin_name .. " disabled, removing from loaded plugins")
+        plugin_data._initialized = false -- Reset initialization flag
+        loaded_plugins[plugin_name] = nil
+        return
+    end
+
+    -- If status changed from disabled to enabled and plugin was already loaded, ensure it's initialized
+    if old_status ~= "enabled" and new_status == "enabled" then
+        console.log("Plugin " .. plugin_name .. " enabled, checking initialization")
+        if plugin_data.on_init and not plugin_data._initialized then
+            local init_ok, init_err = pcall(plugin_data.on_init)
+            if init_ok then
+                plugin_data._initialized = true
+                console.log("Plugin " .. plugin_name .. " initialized successfully")
+            else
+                console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
+            end
+        end
+    end
+
+    -- Update stored settings
+    plugin_data._settings = settings
+
+    -- Call on_settings_changed hook if available (only if still enabled)
+    if new_status == "enabled" then
+        if plugin_data.on_settings_changed then
+            local ok, err = pcall(plugin_data.on_settings_changed, settings)
+            if not ok then
+                console.log("Plugin " .. plugin_name .. " on_settings_changed error: " .. tostring(err))
+            else
+                console.log("Plugin " .. plugin_name .. " settings reloaded and hook called")
+            end
+        else
+            console.log("Plugin " .. plugin_name .. " settings reloaded (no on_settings_changed hook)")
         end
     end
 end
@@ -412,6 +681,24 @@ local function handle_line(line)
                 show_message(parts[4], tonumber(parts[5]), tonumber(parts[6]), tonumber(parts[7]), tonumber(parts[8]),
                     parts[9], parts[10])
             end)
+        elseif cmd == "PLUGIN_SETTINGS" then
+            safe_exec_and_ack(id, function()
+                local plugin_name = parts[4]
+                if plugin_name and plugin_name ~= "" then
+                    reload_plugin_settings(plugin_name)
+                else
+                    console.log("PLUGIN_SETTINGS command missing plugin name")
+                end
+            end)
+        elseif cmd == "PLUGIN_RELOAD" then
+            safe_exec_and_ack(id, function()
+                local plugin_name = parts[4]
+                if plugin_name and plugin_name ~= "" then
+                    reload_plugin_file(plugin_name)
+                else
+                    console.log("PLUGIN_RELOAD command missing plugin name")
+                end
+            end)
         else
             send_line("NACK|" .. id .. "|Unknown command: " .. tostring(cmd))
         end
@@ -443,80 +730,44 @@ local function load_plugins()
     -- Load each plugin
     for _, plugin_name in ipairs(plugin_dirs) do
         local plugin_path = PLUGIN_DIR .. "/" .. plugin_name
-        local plugin_lua_path = plugin_path .. "/plugin.lua"
+        local settings_path = plugin_path .. "/settings.kv"
 
-        -- Check plugin.lua exists and read meta.kv if present. No comment support.
-        if file_exists(plugin_lua_path) then
-            console.log("Found plugin: " .. plugin_name)
-
-            -- Parse meta.kv if present
-            local meta = {}
-            local meta_path = plugin_path .. "/meta.kv"
-            local mf = io.open(meta_path, "r")
-            if mf then
-                for line in mf:lines() do
-                    local l = line:match("^%s*(.-)%s*$")
-                    if l ~= "" then
-                        local eq = l:find("=")
-                        if eq then
-                            local key = l:sub(1, eq-1):gsub("^%s*(.-)%s*$", "%1"):lower()
-                            local val = l:sub(eq+1):gsub("^%s*(.-)%s*$", "%1")
-                            meta[key] = val
-                        end
+        -- Parse settings.kv to get status and other settings
+        console.log("Loading settings for plugin: " .. plugin_name)
+        local settings = {}
+        console.log("Reading settings from: " .. settings_path)
+        local sf = io.open(settings_path, "r")
+        if sf then
+            console.log("Settings file found for plugin: " .. plugin_name)
+            local setting_count = 0
+            for line in sf:lines() do
+                local l = line:match("^%s*(.-)%s*$")
+                if l ~= "" then
+                    local eq = l:find("=")
+                    if eq then
+                        local key = l:sub(1, eq - 1):gsub("^%s*(.-)%s*$", "%1")
+                        local val = l:sub(eq + 1):gsub("^%s*(.-)%s*$", "%1")
+                        settings[key] = val
+                        setting_count = setting_count + 1
+                        console.log("  Setting: " .. key .. " = " .. val)
                     end
                 end
-                mf:close()
             end
-
-            -- Determine entry point (default plugin.lua)
-            local entry = meta["entry_point"] or "plugin.lua"
-            local plugin_file = plugin_path .. "/" .. entry
-
-            -- Load the plugin Lua file
-            local plugin_ok, plugin_module = pcall(dofile, plugin_file)
-
-            if plugin_ok and plugin_module then
-                local is_valid = true
-                for _, hook in ipairs(available_hooks) do
-                    if plugin_module[hook] and type(plugin_module[hook]) ~= "function" then
-                        console.log("Plugin " .. plugin_name .. " has invalid hook '" .. hook .. "'; must be a function")
-                        is_valid = false
-                    end
-                end
-                for k, v in pairs(plugin_module) do
-                    if type(v) == "function" then
-                        local is_hook = false
-                        for _, hook in ipairs(available_hooks) do
-                            if k == hook then
-                                is_hook = true
-                                break
-                            end
-                        end
-                        if not is_hook then
-                            console.log("Plugin " .. plugin_name .. " has unknown function '" .. k .. "'; ignoring")
-                        end
-                    end
-                end
-
-                if not is_valid then
-                    console.log("Plugin " .. plugin_name .. " is invalid and will not be loaded")
-                else
-                    loaded_plugins[plugin_name] = plugin_module
-
-                    -- Call on_init hook if available
-                    if plugin_module.on_init then
-                        local init_ok, init_err = pcall(plugin_module.on_init)
-                        if not init_ok then
-                            console.log("Plugin " .. plugin_name .. " init error: " .. tostring(init_err))
-                        end
-                    end
-                    console.log("Plugin " .. plugin_name .. " loaded successfully")
-                end
-            else
-                console.log("Failed to load plugin " .. plugin_name .. ": " .. tostring(plugin_module))
-            end
+            sf:close()
+            console.log("Loaded " .. tostring(setting_count) .. " settings for plugin: " .. plugin_name)
         else
-            console.log("Plugin " .. plugin_name .. " missing required files")
+            -- Default to disabled if settings.kv doesn't exist
+            console.log("Settings file not found for plugin: " .. plugin_name .. ", defaulting to disabled")
+            settings["status"] = "disabled"
+        end
+
+        -- Check if plugin is enabled
+        local plugin_status = (settings["status"] or "disabled"):lower()
+        if plugin_status ~= "enabled" then
+            console.log("Plugin " .. plugin_name .. " is disabled (status=" .. plugin_status .. "), skipping")
+        else
+            -- Load the plugin using the shared function
+            load_single_plugin(plugin_name, settings)
         end
     end
 
