@@ -31,7 +31,7 @@ func (d *Downloader) DownloadFile(url, dest string, progress func(current, total
 	if err != nil {
 		return fmt.Errorf("failed to download: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("download failed: status %s", resp.Status)
@@ -42,7 +42,7 @@ func (d *Downloader) DownloadFile(url, dest string, progress func(current, total
 	if err != nil {
 		return fmt.Errorf("failed to create file: %w", err)
 	}
-	defer out.Close()
+	defer func() { _ = out.Close() }()
 
 	var current int64
 	buf := make([]byte, 32*1024) // 32KB buffer
@@ -77,4 +77,3 @@ func GetAssetNameForPlatform(component string) string {
 	// Assets are named like: bizshuffle-server-windows-amd64.zip or bizshuffle-client-windows-amd64.zip
 	return fmt.Sprintf("bizshuffle-%s-%s-%s.zip", component, runtime.GOOS, runtime.GOARCH)
 }
-

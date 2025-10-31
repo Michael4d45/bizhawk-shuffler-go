@@ -55,7 +55,7 @@ func (v *VCRedistInstaller) InstallVCRedist(progress func(msg string)) error {
 	if err := v.downloader.DownloadFile(url, vcPath, nil); err != nil {
 		return fmt.Errorf("failed to download VC++ redistributable: %w", err)
 	}
-	defer os.Remove(vcPath)
+	defer func() { _ = os.Remove(vcPath) }()
 
 	if progress != nil {
 		progress("Installing VC++ redistributable (this may take a moment)...")
@@ -63,7 +63,7 @@ func (v *VCRedistInstaller) InstallVCRedist(progress func(msg string)) error {
 
 	logPath := filepath.Join(os.TempDir(), "vc_redist_install.log")
 	cmd := exec.Command(vcPath, "/quiet", "/norestart", "/log", logPath)
-	
+
 	if err := cmd.Run(); err != nil {
 		code := -1
 		if ps := cmd.ProcessState; ps != nil {
@@ -123,13 +123,13 @@ func (v *VCRedistInstaller) isVCRedistPresentRegistry() bool {
 		if err != nil {
 			continue
 		}
-		defer key.Close()
 
 		installed, _, err := key.GetIntegerValue("Installed")
+		// explicitly close and ignore Close error
+		_ = key.Close()
 		if err == nil && installed == 1 {
 			return true
 		}
 	}
 	return false
 }
-

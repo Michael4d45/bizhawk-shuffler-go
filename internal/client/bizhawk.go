@@ -36,7 +36,6 @@ func NewBizHawkController(api *API, httpClient *http.Client, cfg Config, bipc *B
 	return &BizHawkController{httpClient: httpClient, cfg: cfg, api: api, bipc: bipc, wsClient: ws}
 }
 
-
 // VerifyBizHawkPath verifies that BizHawk is available at the configured path.
 // Returns an error if bizhawk_path is not set or the file doesn't exist.
 func (c *BizHawkController) VerifyBizHawkPath() error {
@@ -49,7 +48,6 @@ func (c *BizHawkController) VerifyBizHawkPath() error {
 	}
 	return nil
 }
-
 
 // LaunchBizHawk starts the BizHawk executable with environment variables and returns the *exec.Cmd.
 func (c *BizHawkController) LaunchBizHawk(ctx context.Context) (*exec.Cmd, error) {

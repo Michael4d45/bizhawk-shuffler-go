@@ -35,7 +35,7 @@ func (b *BizHawkInstaller) InstallBizHawk(downloadURL, installDir string, progre
 	if err := b.downloader.DownloadFile(downloadURL, archivePath, nil); err != nil {
 		return fmt.Errorf("failed to download BizHawk: %w", err)
 	}
-	defer os.Remove(archivePath)
+	defer func() { _ = os.Remove(archivePath) }()
 
 	if progress != nil {
 		progress("Extracting BizHawk...")
@@ -73,7 +73,7 @@ func (b *BizHawkInstaller) extractZip(zipPath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer r.Close()
+	defer func() { _ = r.Close() }()
 
 	for _, f := range r.File {
 		fpath := filepath.Join(destDir, f.Name)
@@ -95,12 +95,17 @@ func (b *BizHawkInstaller) extractZip(zipPath, destDir string) error {
 		}
 		rc, err := f.Open()
 		if err != nil {
-			outFile.Close()
+			_ = outFile.Close()
 			return err
 		}
 		_, err = io.Copy(outFile, rc)
-		outFile.Close()
-		rc.Close()
+		if cerr := outFile.Close(); cerr != nil {
+			_ = rc.Close()
+			return cerr
+		}
+		if cerr := rc.Close(); cerr != nil {
+			return cerr
+		}
 		if err != nil {
 			return err
 		}
@@ -113,13 +118,13 @@ func (b *BizHawkInstaller) extractTarGz(tarPath, destDir string) error {
 	if err != nil {
 		return err
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	gz, err := gzip.NewReader(f)
 	if err != nil {
 		return err
 	}
-	defer gz.Close()
+	defer func() { _ = gz.Close() }()
 
 	tr := tar.NewReader(gz)
 	for {
@@ -148,7 +153,7 @@ func (b *BizHawkInstaller) extractTarGz(tarPath, destDir string) error {
 				return err
 			}
 			if _, err := io.Copy(outFile, tr); err != nil {
-				outFile.Close()
+				_ = outFile.Close()
 				return err
 			}
 			if err := outFile.Close(); err != nil {
@@ -166,4 +171,3 @@ func GetBizHawkDownloadURL() string {
 	// Using the same URL as in client config.go
 	return "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-win-x64.zip"
 }
-

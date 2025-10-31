@@ -478,7 +478,7 @@ func installComponent(component, installDir string, release *installer.Release, 
 	if err := downloader.DownloadFile(asset.DownloadURL, tempZip, nil); err != nil {
 		return fmt.Errorf("failed to download %s: %w", assetName, err)
 	}
-	defer os.Remove(tempZip)
+	defer func() { _ = os.Remove(tempZip) }()
 
 	progress(fmt.Sprintf("Extracting %s...", assetName))
 	extractor := installer.NewBizHawkInstaller()
@@ -495,7 +495,10 @@ func configureServer(serverDir, host, port string) error {
 
 	settings := make(map[string]string)
 	if data, err := os.ReadFile(settingsPath); err == nil {
-		json.Unmarshal(data, &settings)
+		if err := json.Unmarshal(data, &settings); err != nil {
+			// ignore invalid or missing settings file
+			_ = err
+		}
 	}
 
 	// Set host and port if provided
@@ -532,7 +535,10 @@ func configureClient(clientDir, bizhawkDir, serverURL, playerName string) error 
 	// Read existing config or create new
 	cfg := make(map[string]string)
 	if data, err := os.ReadFile(configPath); err == nil {
-		json.Unmarshal(data, &cfg)
+		if err := json.Unmarshal(data, &cfg); err != nil {
+			// ignore invalid or missing config
+			_ = err
+		}
 	}
 
 	// Set bizhawk_path

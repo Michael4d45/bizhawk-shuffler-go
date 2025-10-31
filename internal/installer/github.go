@@ -16,7 +16,7 @@ const (
 
 // Release represents a GitHub release
 type Release struct {
-	TagName string `json:"tag_name"`
+	TagName string  `json:"tag_name"`
 	Assets  []Asset `json:"assets"`
 }
 
@@ -46,7 +46,7 @@ func NewGitHubClient() *GitHubClient {
 // GetLatestRelease fetches the latest release from GitHub
 func (g *GitHubClient) GetLatestRelease() (*Release, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", g.baseURL, githubRepoOwner, githubRepoName)
-	
+
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create request: %w", err)
@@ -57,7 +57,7 @@ func (g *GitHubClient) GetLatestRelease() (*Release, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -81,4 +81,3 @@ func (r *Release) FindAssetByName(name string) *Asset {
 	}
 	return nil
 }
-
