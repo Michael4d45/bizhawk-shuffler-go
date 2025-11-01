@@ -108,6 +108,12 @@
                     :class="state.prevent_same_game_swap ? 'bg-white/90 text-black' : 'bg-slate-800 text-gray-300'"
                     x-text="state.prevent_same_game_swap ? 'On' : 'Off'"></span>
                 </template>
+                <!-- small On/Off badge for the Countdown button -->
+                <template x-if="btn.path === '/api/toggle_countdown'">
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold"
+                    :class="state.countdown_enabled ? 'bg-white/90 text-black' : 'bg-slate-800 text-gray-300'"
+                    x-text="state.countdown_enabled ? 'On' : 'Off'"></span>
+                </template>
               </span>
             </button>
           </template>
@@ -732,6 +738,7 @@
           { label: "Do Swap", path: "/api/do_swap", class: "bg-slate-700" },
           { label: "Auto Swaps", path: "/api/toggle_swaps", class: "bg-slate-700" },
           { label: "Better Random", path: "/api/toggle_prevent_same_game", class: "bg-slate-700" },
+          { label: "Countdown", path: "/api/toggle_countdown", class: "bg-slate-700" },
           { label: "Clear Saves", path: "/api/clear_saves", class: "bg-orange-500 text-black" },
         ],
         get lastUpdated() {

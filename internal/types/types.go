@@ -204,6 +204,8 @@ type ServerState struct {
 	GameSwapInstances []GameSwapInstance `json:"game_instances,omitempty"`
 	// PreventSameGameSwap prevents players from being swapped to the same game they're currently playing
 	PreventSameGameSwap bool `json:"prevent_same_game_swap"`
+	// CountdownEnabled enables a 3-2-1 countdown before auto swaps
+	CountdownEnabled bool `json:"countdown_enabled"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
