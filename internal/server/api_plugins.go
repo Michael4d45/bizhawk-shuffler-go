@@ -3,7 +3,6 @@ package server
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"maps"
 	"net/http"
@@ -46,74 +45,6 @@ func (s *Server) handlePluginsList(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]any{"plugins": plugins}); err != nil {
 		log.Printf("encode plugins list error: %v", err)
-	}
-}
-
-// handlePluginUpload handles plugin file uploads
-func (s *Server) handlePluginUpload(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	err := r.ParseMultipartForm(32 << 20) // 32MB max
-	if err != nil {
-		http.Error(w, "parse multipart: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-
-	file, header, err := r.FormFile("plugin")
-	if err != nil {
-		http.Error(w, "plugin file missing: "+err.Error(), http.StatusBadRequest)
-		return
-	}
-	defer func() { _ = file.Close() }()
-
-	// For now, just save as a simple .lua file in the plugins directory
-	// TODO: Support proper plugin packages with metadata
-	if !strings.HasSuffix(header.Filename, ".lua") {
-		http.Error(w, "only .lua files supported currently", http.StatusBadRequest)
-		return
-	}
-
-	pluginName := strings.TrimSuffix(header.Filename, ".lua")
-	pluginDir := filepath.Join("./plugins", pluginName)
-
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		http.Error(w, "failed to create plugin dir: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	dstPath := filepath.Join(pluginDir, "plugin.lua")
-	out, err := os.Create(dstPath)
-	if err != nil {
-		http.Error(w, "failed to create plugin file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = out.Close() }()
-
-	if _, err := io.Copy(out, file); err != nil {
-		http.Error(w, "failed to save plugin: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-
-	// Create basic metadata file
-	metadata := types.Plugin{
-		Name:        pluginName,
-		Version:     "1.0.0",
-		Description: "Uploaded plugin",
-		Author:      "Unknown",
-		Status:      types.PluginStatusDisabled,
-	}
-	// Save KV only
-	metaKV := filepath.Join(pluginDir, "meta.kv")
-	if err := s.saveKV(metadata, metaKV); err != nil {
-		log.Printf("failed to write meta.kv: %v", err)
-	}
-
-	w.WriteHeader(http.StatusOK)
-	if _, err := fmt.Fprintf(w, "Plugin %s uploaded successfully", pluginName); err != nil {
-		log.Printf("write response error: %v", err)
 	}
 }
 

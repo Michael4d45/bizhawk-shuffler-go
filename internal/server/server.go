@@ -58,7 +58,7 @@ func New() *Server {
 		saveChan:      make(chan struct{}, 1),
 	}
 	s.loadState()
-	_ = os.MkdirAll("./files", 0755)
+	_ = os.MkdirAll("./roms", 0755)
 	_ = os.MkdirAll("./saves", 0755)
 	go s.schedulerLoop()
 	go s.startSaver()
@@ -92,9 +92,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
 	// Plugin management routes
 	mux.HandleFunc("/api/plugins", s.handlePluginsList)
-	mux.HandleFunc("/api/plugins/upload", s.handlePluginUpload)
 	// Plugin management routes - handles settings and other plugin actions
 	mux.HandleFunc("/api/plugins/", s.handlePluginAction)
+	mux.HandleFunc("/api/open_roms_folder", s.handleOpenRomsFolder)
+	mux.HandleFunc("/api/open_plugins_folder", s.handleOpenPluginsFolder)
 	mux.HandleFunc("/api/message_player", s.apiMessagePlayer)
 	mux.HandleFunc("/api/message_all", s.apiMessageAll)
 	// Save state management endpoints

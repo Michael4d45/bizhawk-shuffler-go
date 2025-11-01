@@ -8,7 +8,9 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"runtime"
 	"time"
 )
 
@@ -17,9 +19,9 @@ func (s *Server) handleAdmin(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, "./web/index.html")
 }
 
-// handleFiles serves files under ./files
+// handleFiles serves files under ./roms
 func (s *Server) handleFiles(w http.ResponseWriter, r *http.Request) {
-	http.StripPrefix("/files/", http.FileServer(http.Dir("./files"))).ServeHTTP(w, r)
+	http.StripPrefix("/files/", http.FileServer(http.Dir("./roms"))).ServeHTTP(w, r)
 }
 
 // handlePluginFiles serves plugin files under ./plugins
@@ -27,7 +29,7 @@ func (s *Server) handlePluginFiles(w http.ResponseWriter, r *http.Request) {
 	http.StripPrefix("/files/plugins/", http.FileServer(http.Dir("./plugins"))).ServeHTTP(w, r)
 }
 
-// handleUpload receives multipart file upload and writes to ./files directory
+// handleUpload receives multipart file upload and writes to ./roms directory
 func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
@@ -44,9 +46,9 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	defer func() { _ = file.Close() }()
-	dstDir := "./files"
+	dstDir := "./roms"
 	if err := os.MkdirAll(dstDir, 0755); err != nil {
-		http.Error(w, "failed to create files dir: "+err.Error(), http.StatusInternalServerError)
+		http.Error(w, "failed to create roms dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	dstPath := filepath.Join(dstDir, filepath.Base(header.Filename))
@@ -65,7 +67,7 @@ func (s *Server) handleUpload(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// handleFilesList returns a JSON list of files under ./files
+// handleFilesList returns a JSON list of files under ./roms
 func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 	files, err := s.getFilesList()
 	if err != nil {
@@ -81,14 +83,14 @@ func (s *Server) handleFilesList(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) getFilesList() ([]string, error) {
 	files := []string{}
-	if err := filepath.Walk("./files", func(p string, info os.FileInfo, err error) error {
+	if err := filepath.Walk("./roms", func(p string, info os.FileInfo, err error) error {
 		if err != nil {
 			return nil
 		}
 		if info.IsDir() {
 			return nil
 		}
-		rel, _ := filepath.Rel("./files", p)
+		rel, _ := filepath.Rel("./roms", p)
 		files = append(files, rel)
 		return nil
 	}); err != nil {
@@ -210,4 +212,92 @@ func zipDir(srcDir string, w io.Writer) error {
 		_, err = io.Copy(wtr, f)
 		return err
 	})
+}
+
+// handleOpenRomsFolder opens the roms folder in the system file manager
+func (s *Server) handleOpenRomsFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	romsDir, err := filepath.Abs("./roms")
+	if err != nil {
+		http.Error(w, "failed to resolve roms directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(romsDir, 0755); err != nil {
+		http.Error(w, "failed to create roms directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var err2 error
+	switch runtime.GOOS {
+	case "windows":
+		err2 = exec.Command("explorer", romsDir).Start()
+	case "darwin":
+		err2 = exec.Command("open", romsDir).Start()
+	case "linux":
+		err2 = exec.Command("xdg-open", romsDir).Start()
+	default:
+		http.Error(w, "unsupported platform: "+runtime.GOOS, http.StatusNotImplemented)
+		return
+	}
+
+	if err2 != nil {
+		log.Printf("Failed to open roms folder: %v", err2)
+		http.Error(w, "failed to open folder: "+err2.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Printf("encode response error: %v", err)
+	}
+}
+
+// handleOpenPluginsFolder opens the plugins folder in the system file manager
+func (s *Server) handleOpenPluginsFolder(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	pluginsDir, err := filepath.Abs("./plugins")
+	if err != nil {
+		http.Error(w, "failed to resolve plugins directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	// Ensure directory exists
+	if err := os.MkdirAll(pluginsDir, 0755); err != nil {
+		http.Error(w, "failed to create plugins directory: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	var err2 error
+	switch runtime.GOOS {
+	case "windows":
+		err2 = exec.Command("explorer", pluginsDir).Start()
+	case "darwin":
+		err2 = exec.Command("open", pluginsDir).Start()
+	case "linux":
+		err2 = exec.Command("xdg-open", pluginsDir).Start()
+	default:
+		http.Error(w, "unsupported platform: "+runtime.GOOS, http.StatusNotImplemented)
+		return
+	}
+
+	if err2 != nil {
+		log.Printf("Failed to open plugins folder: %v", err2)
+		http.Error(w, "failed to open folder: "+err2.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {
+		log.Printf("encode response error: %v", err)
+	}
 }
