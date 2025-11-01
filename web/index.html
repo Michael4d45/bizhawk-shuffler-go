@@ -153,6 +153,18 @@
             </button>
           </div>
         </div>
+        <!-- Add new player form -->
+        <div class="mb-3 p-3 bg-slate-800/40 rounded">
+          <div class="flex items-center gap-2">
+            <input type="text" x-model="newPlayerName" placeholder="Player name"
+              class="flex-1 bg-slate-700 rounded px-2 py-1 text-sm text-white" @keyup.enter="addPlayer()" />
+            <button @click="addPlayer()" :disabled="!newPlayerName || !newPlayerName.trim()"
+              class="px-3 py-1 rounded text-sm font-semibold transition"
+              :class="newPlayerName && newPlayerName.trim() ? 'bg-green-600 hover:bg-green-500' : 'bg-slate-800 text-gray-500 cursor-not-allowed'">
+              Add Player
+            </button>
+          </div>
+        </div>
         <ul class="space-y-2">
           <template x-for="(p, name) in state.players" :key="name">
             <li
@@ -680,6 +692,7 @@
         // UI-managed list of game instances for CRUD
         gameInstances: [],
         newInstance: { id: "", game: "" },
+        newPlayerName: "",
         showCatalog: false,
         // main catalog and available files under /files
         mainGames: [],
@@ -1154,6 +1167,34 @@
             });
           } catch (e) {
             this.log("swap_all err " + e.message);
+          }
+        },
+        async addPlayer() {
+          if (!this.newPlayerName || !this.newPlayerName.trim()) return;
+          const playerName = this.newPlayerName.trim();
+          try {
+            const res = await fetch('/api/add_player', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ player: playerName })
+            });
+            if (res.ok) {
+              const body = await res.json().catch(() => null);
+              this.log(`Added player: ${playerName}`);
+              this.toast = `Player ${playerName} added`;
+              setTimeout(() => this.toast = '', 2000);
+              this.newPlayerName = ""; // Clear the input
+              await this.refreshState(); // Refresh to show the new player
+            } else {
+              const errorText = await res.text().catch(() => 'unknown error');
+              this.log(`/api/add_player failed for ${playerName}: ${errorText}`);
+              this.toast = `Failed to add player: ${errorText}`;
+              setTimeout(() => this.toast = '', 2000);
+            }
+          } catch (e) {
+            this.log('add_player err ' + e.message);
+            this.toast = 'Error adding player';
+            setTimeout(() => this.toast = '', 2000);
           }
         },
         async removePlayer(player) {

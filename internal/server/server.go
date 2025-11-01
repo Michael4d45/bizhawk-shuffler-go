@@ -89,6 +89,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/interval", s.apiInterval)
 	mux.HandleFunc("/api/swap_player", s.apiSwapPlayer)
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
+	mux.HandleFunc("/api/add_player", s.apiAddPlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
 	// Plugin management routes
 	mux.HandleFunc("/api/plugins", s.handlePluginsList)

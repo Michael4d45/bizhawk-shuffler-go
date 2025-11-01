@@ -136,3 +136,44 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 		fmt.Printf("encode response error: %v\n", err)
 	}
 }
+
+// apiAddPlayer: POST {player:...}
+// Creates a new player that hasn't connected yet (connected=false)
+func (s *Server) apiAddPlayer(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var b struct {
+		Player string `json:"player"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if b.Player == "" {
+		http.Error(w, "missing player", http.StatusBadRequest)
+		return
+	}
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
+		// Initialize Players map if nil
+		if st.Players == nil {
+			st.Players = make(map[string]types.Player)
+		}
+		// Check if player already exists
+		if _, ok := st.Players[b.Player]; ok {
+			// Player already exists, return success (idempotent)
+			return
+		}
+		// Create new player with connected=false
+		st.Players[b.Player] = types.Player{
+			Name:      b.Player,
+			Connected: false,
+			HasFiles:  false,
+		}
+	})
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
+}

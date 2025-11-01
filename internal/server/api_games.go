@@ -47,12 +47,44 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 				b, _ := json.Marshal(gi)
 				var instances []types.GameSwapInstance
 				if err := json.Unmarshal(b, &instances); err == nil {
+					// Build a set of old instance IDs before updating
+					oldInstanceIDs := make(map[string]bool)
+					for _, oldInst := range st.GameSwapInstances {
+						oldInstanceIDs[oldInst.ID] = true
+					}
+					
 					// Initialize FileState for new instances
 					for i := range instances {
 						if instances[i].FileState == "" {
 							instances[i].FileState = types.FileStateNone
 						}
 					}
+					
+					// Build a set of new instance IDs
+					newInstanceIDs := make(map[string]bool)
+					for _, newInst := range instances {
+						newInstanceIDs[newInst.ID] = true
+					}
+					
+					// Find removed instance IDs (in old but not in new)
+					removedInstanceIDs := make(map[string]bool)
+					for oldID := range oldInstanceIDs {
+						if !newInstanceIDs[oldID] {
+							removedInstanceIDs[oldID] = true
+						}
+					}
+					
+					// Unassign players from removed instances
+					if len(removedInstanceIDs) > 0 {
+						for playerName, player := range st.Players {
+							if player.InstanceID != "" && removedInstanceIDs[player.InstanceID] {
+								player.InstanceID = ""
+								player.Game = ""
+								st.Players[playerName] = player
+							}
+						}
+					}
+					
 					st.GameSwapInstances = instances
 				}
 			}
