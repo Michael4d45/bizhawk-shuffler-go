@@ -1,6 +1,6 @@
 # BizHawk Shuffler Go
 
-BizHawk Shuffler is a Go-based client/server application that coordinates multiple BizHawk emulator clients for synchronized game swapping. The server provides an HTMX-powered web UI for administration and uses websockets for real-time client communication.
+BizHawk Shuffler is a Go-based client/server application that coordinates multiple BizHawk emulator clients for synchronized game swapping. The server provides an Alpine.js-powered web UI for administration and uses websockets for real-time client communication.
 
 Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.
 
@@ -30,9 +30,9 @@ Always reference these instructions first and fallback to search or bash command
 
 ### Validation and Testing
 - **ALWAYS run validation** after making changes:
-  - `golangci-lint run --timeout 2m` -- takes ~2 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
+  - `go vet ./...` -- takes ~2 seconds. NEVER CANCEL. Set timeout to 30+ seconds.
   - `gofmt -d .` -- takes <1 second. Set timeout to 10+ seconds.
-  - `make build <server|client>` -- takes <5 seconds. Set timeout to 30+ seconds.
+  - `make all` -- takes <5 seconds incremental. Set timeout to 30+ seconds.
   - if you want to test the code, cd ./dist/<server|client> ; ./bizshuffle-<server|client>(.exe)
 - **Manual functional testing**:
   - Start server and access web UI at http://127.0.0.1:8080/
@@ -82,13 +82,16 @@ After making changes, ALWAYS run through these complete scenarios:
 ├── server.lua             # BizHawk Lua script for client
 ├── cmd/
 │   ├── server/main.go     # Server executable
-│   └── client/main.go     # Client executable
+│   ├── client/main.go     # Client executable
+│   └── installer/main.go  # Installer executable
 ├── internal/
 │   ├── server/            # Server HTTP/WS handlers and logic
 │   ├── client/            # Client logic and BizHawk integration
-│   └── types/             # Shared types and message structures
+│   ├── types/             # Shared types and message structures
+│   ├── deps/               # Dependency management
+│   └── installer/          # Installer logic
 ├── web/
-│   └── index.html         # HTMX admin UI
+│   └── index.html         # Admin UI (Alpine.js)
 ├── plugins/               # Lua plugins directory
 │   ├── README.md
 │   ├── example-plugin/
@@ -123,10 +126,29 @@ After making changes, ALWAYS run through these complete scenarios:
 - **Client main logic**: `internal/client/run.go`
 - **API handlers**: `internal/server/api_*.go`
 - **Message types**: `internal/types/types.go`
-- **Web admin UI**: `web/index.html`
+- **Web admin UI**: `dist/server/web/index.html` (copied from `web/index.html`)
 - **Build artifacts**: `dist/server/` and `dist/client/`
+- **Plugin system**: `internal/server/api_plugins.go`, `internal/client/plugin_sync.go`, `server.lua`
 
-### Development Workflow
+## Plugin System
+
+### Plugin Structure
+- **meta.kv**: Read-only metadata (name, version, description, author, bizhawk_version)
+- **settings.kv**: User-configurable settings (status=enabled/disabled, plus plugin-specific settings)
+- **plugin.lua**: Main plugin code with hooks
+
+### Plugin Hooks
+- `on_init()`: Called when plugin is loaded
+- `on_frame()`: Called every frame during emulation
+- `on_settings_changed(settings)`: Called when settings are updated
+
+### Plugin Management
+- Plugins are stored in `plugins/` directory
+- Server loads plugins from `plugins/` and serves them to clients
+- Clients sync plugins via websocket and store in local `plugins/` directory
+- Settings can be edited via web UI at `/api/plugins/{name}/settings`
+
+## Development Workflow
 1. **Make code changes**
 2. **Build affected components**: `make server` or `make client`
 3. **Run validation**: `go vet ./... && gofmt -d .`

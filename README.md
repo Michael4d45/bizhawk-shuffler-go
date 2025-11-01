@@ -1,8 +1,8 @@
-BizShuffle - Go + HTMX + Websockets
+BizShuffle - Go + Alpine.js + Websockets
 
 Overview
 
-This repo is a migration target from a Laravel/Filament/Go/Lua stack to a pure Go server + Go client stack with an HTMX-powered admin UI. The goal is a single server that coordinates multiple BizHawk emulator clients across LAN/Internet. The server controls when games swap, pushes commands to clients via websockets, and serves required ROM/assets via HTTP.
+This repo is a migration target from a Laravel/Filament/Go/Lua stack to a pure Go server + Go client stack with an Alpine.js-powered admin UI. The goal is a single server that coordinates multiple BizHawk emulator clients across LAN/Internet. The server controls when games swap, pushes commands to clients via websockets, and serves required ROM/assets via HTTP.
 
 High-level goals (from user request)
 - Single server handles one session (no multi-session complexity).
@@ -97,7 +97,7 @@ Repository layout
 │   ├── client/            # Client logic and BizHawk integration
 │   └── types/             # Shared types and message structures
 ├── web/
-│   └── index.html         # HTMX admin UI
+│   └── index.html         # Admin UI (Alpine.js)
 ├── plugins/               # Lua plugins directory
 │   ├── README.md
 │   ├── example-plugin/
@@ -121,6 +121,8 @@ Repository layout
 ```
 
 Build & run
+
+**Prerequisites**: Go 1.24 or later is required (see `go.mod`).
 
 1) Build server and client
 
@@ -440,7 +442,7 @@ File operations:
 
 ## Web Admin Interface
 
-The server provides a modern HTMX-powered web interface at the root URL:
+The server provides a modern Alpine.js-powered web interface at the root URL:
 
 Features:
 - Real-time session status and controls
@@ -452,10 +454,9 @@ Features:
 - Live websocket connection status
 
 The interface uses:
-- **HTMX** for dynamic interactions without JavaScript
 - **Alpine.js** for lightweight reactive components
 - **Tailwind CSS** for styling
-- **Server-sent events** for real-time updates
+- **WebSockets** for real-time updates
 
 Notes
 

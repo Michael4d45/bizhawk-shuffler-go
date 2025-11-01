@@ -1,6 +1,6 @@
 # BizHawk Shuffler Go
 
-BizHawk Shuffler is a Go-based client/server application that coordinates multiple BizHawk emulator clients for synchronized game swapping. The server provides an HTMX-powered web UI for administration and uses websockets for real-time client communication.
+BizHawk Shuffler is a Go-based client/server application that coordinates multiple BizHawk emulator clients for synchronized game swapping. The server provides an Alpine.js-powered web UI for administration and uses websockets for real-time client communication.
 
 Always reference these instructions first and fallback to search or bash commands only when you encounter unexpected information that does not match the info here.
 
