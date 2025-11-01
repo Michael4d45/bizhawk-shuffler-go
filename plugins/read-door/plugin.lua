@@ -369,12 +369,16 @@ local function guard_allows(cfg)
 end
 
 local function do_send(last, val, cfg)
-console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
+    console.log(("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
                     tostring(last), tostring(val), tostring(cfg.desc or "")))
-                SendCommand("swap_me", {
-                    ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
-                        tostring(last), tostring(val), tostring(cfg.desc or ""))
-                })
+    
+    -- Get command type from settings, default to "swap_me" for backward compatibility
+    local command_type = _settings and _settings["command_type"] or "swap_me"
+    
+    SendCommand(command_type, {
+        ["message"] = ("Read Door: %s room value changed: %s -> %s (%s)"):format(tostring(currentGame),
+            tostring(last), tostring(val), tostring(cfg.desc or ""))
+    })
 end
 
 -- === core polling ===

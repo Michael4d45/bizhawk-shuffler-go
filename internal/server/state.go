@@ -54,6 +54,7 @@ func (s *Server) saveJson(data any, filename string) error {
 // loadKV reads a minimal key=value metadata file into a Plugin struct.
 // Format: key = value (one per line). No comments supported. Keys are
 // lowercased when parsed. Whitespace around key and value is trimmed.
+// Also parses setting metadata in format: setting.{key}.type and setting.{key}.options
 func (s *Server) loadKV(filename string, out *types.Plugin) error {
 	file, err := os.Open(filename)
 	if err != nil {
@@ -61,6 +62,12 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 	}
 	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
+	
+	// Initialize SettingsMeta map if needed
+	if out.SettingsMeta == nil {
+		out.SettingsMeta = make(map[string]types.SettingMeta)
+	}
+	
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -72,6 +79,40 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 		}
 		key := strings.ToLower(strings.TrimSpace(line[:idx]))
 		val := strings.TrimSpace(line[idx+1:])
+		
+		// Parse setting metadata: setting.{key}.type or setting.{key}.options
+		if strings.HasPrefix(key, "setting.") {
+			parts := strings.SplitN(key, ".", 3)
+			if len(parts) == 3 {
+				settingKey := parts[1]
+				metaField := parts[2]
+				
+				// Initialize SettingMeta for this setting if not exists
+				if _, exists := out.SettingsMeta[settingKey]; !exists {
+					out.SettingsMeta[settingKey] = types.SettingMeta{}
+				}
+				meta := out.SettingsMeta[settingKey]
+				
+				switch metaField {
+				case "type":
+					meta.Type = val
+				case "options":
+					// Split comma-separated options
+					options := strings.Split(val, ",")
+					meta.Options = make([]string, 0, len(options))
+					for _, opt := range options {
+						opt = strings.TrimSpace(opt)
+						if opt != "" {
+							meta.Options = append(meta.Options, opt)
+						}
+					}
+				}
+				out.SettingsMeta[settingKey] = meta
+			}
+			continue
+		}
+		
+		// Parse standard plugin metadata fields
 		switch key {
 		case "name":
 			out.Name = val
