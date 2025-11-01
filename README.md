@@ -42,7 +42,7 @@ Ready to play? Follow these simple steps to get BizShuffle up and running!
    - Open your web browser and go to `http://localhost:8080` to access the admin panel
 
 4. **Add Game Files** (Optional)
-   - Place ROM files in the server's `files/` directory
+   - Place ROM files in the server's `roms/` directory
    - Supported formats: NES, SNES, Game Boy, GBA, N64, PSX, and [more](https://github.com/TASEmulators/BizHawk?tab=readme-ov-file#cores)
 
 ### For Players
@@ -106,7 +106,7 @@ Repository layout
 │   ├── server/
 │   │   ├── bizshuffle-server
 │   │   ├── state.json      # Server state persistence
-│   │   ├── files/          # Game files directory
+│   │   ├── roms/           # Game ROM files directory
 │   │   ├── saves/          # Save states directory
 │   │   ├── plugins/        # Copied plugins
 │   │   └── web/            # Copied web UI
@@ -115,7 +115,7 @@ Repository layout
 │       ├── config.json     # Client configuration
 │       ├── server.lua      # Copied Lua script
 │       └── BizHawk-*/      # Auto-downloaded BizHawk
-├── files/                 # ROM/asset storage (created as needed)
+├── roms/                  # ROM/asset storage (created as needed)
 ├── saves/                 # Save states directory
 └── state.json             # Server state persistence (auto-created)
 ```
@@ -215,7 +215,7 @@ Every command SHOULD be acknowledged by the recipient by sending an `ack` messag
 
 File transfer
 
-- Server serves files from `./files` at `/files/`.
+- Server serves ROM files from `./roms` directory at `/files/` (HTTP endpoint remains `/files/` for compatibility).
 - Clients download via HTTP GET to `/files/<path>`.
 - Clients may upload save state via POST `/save/upload`.
 
@@ -337,7 +337,7 @@ BizShuffle includes automatic LAN discovery for easy server setup:
 
 ### Game File Distribution
 
-- Server serves game files from `./files/` directory at `/files/*`
+- Server serves game files from `./roms/` directory at `/files/*` (HTTP endpoint remains `/files/` for compatibility)
 - Clients download games via HTTP GET requests
 - Support for primary game files and extra files (assets, patches)
 - Thread-safe concurrent downloads with progress tracking

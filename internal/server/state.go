@@ -62,12 +62,12 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 	}
 	defer func() { _ = file.Close() }()
 	scanner := bufio.NewScanner(file)
-	
+
 	// Initialize SettingsMeta map if needed
 	if out.SettingsMeta == nil {
 		out.SettingsMeta = make(map[string]types.SettingMeta)
 	}
-	
+
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
 		if line == "" {
@@ -79,20 +79,20 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 		}
 		key := strings.ToLower(strings.TrimSpace(line[:idx]))
 		val := strings.TrimSpace(line[idx+1:])
-		
+
 		// Parse setting metadata: setting.{key}.type or setting.{key}.options
 		if strings.HasPrefix(key, "setting.") {
 			parts := strings.SplitN(key, ".", 3)
 			if len(parts) == 3 {
 				settingKey := parts[1]
 				metaField := parts[2]
-				
+
 				// Initialize SettingMeta for this setting if not exists
 				if _, exists := out.SettingsMeta[settingKey]; !exists {
 					out.SettingsMeta[settingKey] = types.SettingMeta{}
 				}
 				meta := out.SettingsMeta[settingKey]
-				
+
 				switch metaField {
 				case "type":
 					meta.Type = val
@@ -111,7 +111,7 @@ func (s *Server) loadKV(filename string, out *types.Plugin) error {
 			}
 			continue
 		}
-		
+
 		// Parse standard plugin metadata fields
 		switch key {
 		case "name":

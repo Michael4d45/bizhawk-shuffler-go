@@ -22,7 +22,7 @@ Always reference these instructions first and fallback to search or bash command
 - **Run server**: `./dist/server/bizshuffle-server --host 127.0.0.1 --port 8080`
   - Server serves admin web UI at http://127.0.0.1:8080/
   - API endpoints available at `/api/*` and `/state.json`
-  - File serving from `./files/` directory at `/files/*`
+  - File serving from `./roms/` directory at `/files/*` (HTTP endpoint remains `/files/` for compatibility)
 - **Run client**: `./dist/client/bizshuffle-client`
   - **First run**: Will prompt for server websocket URL (e.g., `ws://127.0.0.1:8080/ws`) and username
   - **Subsequent runs**: Reads configuration from `config.json`
@@ -39,7 +39,7 @@ Always reference these instructions first and fallback to search or bash command
   - Test API endpoint: `curl http://127.0.0.1:8080/api/games` should return valid JSON with games list
   - Test state endpoint: `curl http://127.0.0.1:8080/state.json` should return server state
   - Test plugin API: `curl http://127.0.0.1:8080/api/plugins` should return plugin list
-  - Create test file: `mkdir -p files && echo "test" > files/test.txt`
+  - Create test file: `mkdir -p roms && echo "test" > roms/test.txt`
   - Test file serving: `curl http://127.0.0.1:8080/files/test.txt` should return file content
 
 ## Validation Scenarios
@@ -65,7 +65,7 @@ After making changes, ALWAYS run through these complete scenarios:
 
 ### Full Integration Validation
 1. **Start server** with file serving enabled
-2. **Create test ROM files** in `./files/` directory
+2. **Create test ROM files** in `./roms/` directory
 3. **Access admin UI** and verify file list updates
 4. **Test websocket connectivity** via browser dev tools
 5. **Test plugin functionality** through admin interface
@@ -97,7 +97,7 @@ After making changes, ALWAYS run through these complete scenarios:
 │   ├── server/
 │   │   ├── bizshuffle-server
 │   │   ├── state.json      # Server state persistence
-│   │   ├── files/          # Game files directory
+│   │   ├── roms/           # Game ROM files directory
 │   │   ├── saves/          # Save states directory
 │   │   ├── plugins/        # Copied plugins
 │   │   └── web/            # Copied web UI
@@ -106,7 +106,7 @@ After making changes, ALWAYS run through these complete scenarios:
 │       ├── config.json     # Client configuration
 │       ├── server.lua      # Copied Lua script
 │       └── BizHawk-*/      # Auto-downloaded BizHawk
-├── files/                 # ROM/asset storage (created as needed)
+├── roms/                  # ROM/asset storage (created as needed)
 ├── saves/                 # Save states directory
 └── state.json             # Server state persistence (auto-created)
 ```

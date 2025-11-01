@@ -1,8 +1,6 @@
 package server
 
 import (
-	"crypto/md5"
-	"encoding/hex"
 	"errors"
 	"log"
 	"math/rand"
@@ -381,13 +379,22 @@ func (h *SaveModeHandler) SetupState() error {
 		for _, inst := range st.GameSwapInstances {
 			existing[inst.Game] = true
 		}
+
+		// Build a map of existing instance IDs for counter-based naming
+		existingIDs := make(map[string]bool)
+		for _, inst := range st.GameSwapInstances {
+			existingIDs[inst.ID] = true
+		}
+
 		for _, entry := range st.MainGames {
 			if !existing[entry.File] {
 				newInst := types.GameSwapInstance{
-					ID:        generateInstanceID(entry.File),
+					ID:        generateInstanceID(entry.File, existingIDs),
 					Game:      entry.File,
 					FileState: types.FileStateNone,
 				}
+				// Track the new ID so subsequent instances of the same game can increment
+				existingIDs[newInst.ID] = true
 				st.GameSwapInstances = append(st.GameSwapInstances, newInst)
 				existing[entry.File] = true
 			}
@@ -602,8 +609,8 @@ func (s *Server) GetGameModeHandler() GameModeHandler {
 	}
 }
 
-// generateInstanceID creates a unique instance ID for a game file
-func generateInstanceID(gameFile string) string {
+// generateInstanceID creates a unique instance ID for a game file using counter-based naming
+func generateInstanceID(gameFile string, existingIDs map[string]bool) string {
 	// Extract a portion of the game file name (remove extension and take first part)
 	nameWithoutExt := strings.TrimSuffix(gameFile, filepath.Ext(gameFile))
 
@@ -620,10 +627,21 @@ func generateInstanceID(gameFile string) string {
 		cleanName = cleanName[:20]
 	}
 
-	// Add timestamp hash for uniqueness
-	timestamp := strconv.FormatInt(time.Now().UnixNano(), 5)
-	hash := md5.Sum([]byte(gameFile + timestamp))
-	shortHash := hex.EncodeToString(hash[:2]) // 4 characters
+	// Convert to lowercase for consistency
+	cleanName = strings.ToLower(cleanName)
 
-	return cleanName + "-" + shortHash
+	// Check if base name exists, if not use it directly
+	if existingIDs == nil || !existingIDs[cleanName] {
+		return cleanName
+	}
+
+	// Increment counter until we find a free name
+	counter := 1
+	for {
+		candidate := cleanName + "-" + strconv.Itoa(counter)
+		if existingIDs == nil || !existingIDs[candidate] {
+			return candidate
+		}
+		counter++
+	}
 }
