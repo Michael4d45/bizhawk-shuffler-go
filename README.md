@@ -158,7 +158,7 @@ Run the client binary once. On first run it will:
 
 1. **Attempt LAN discovery**: Automatically search for BizShuffle servers on the local network
 2. **Fallback to manual entry**: If no servers are found, prompt for server websocket URL (e.g. `ws://host:8080/ws`) and username
-3. **Save configuration**: Store settings in `client_config.json` in the working directory
+3. **Save configuration**: Store settings in `config.json` in the working directory
 
 Subsequent runs read the saved configuration and will not prompt again unless the config file is missing.
 
@@ -298,14 +298,15 @@ version = 1.0.0
 description = Example plugin
 author = Plugin Author
 bizhawk_version = >=2.8.0
-status = disabled
 ```
+
+**Note:** The `status` field has been moved to `settings.kv` and should not be in `meta.kv`.
 
 ### Plugin Management
 
 Plugins can be managed through:
 - The web admin UI plugin section
-- API endpoints: `GET /api/plugins`, `POST /api/plugins/upload`, `POST /api/plugins/{name}/enable`, `POST /api/plugins/{name}/disable`
+- API endpoints: `GET /api/plugins`, `GET /api/plugins/{name}`, `POST /api/plugins/{name}/settings`, `POST /api/plugins/{name}/reload`, `DELETE /api/plugins/{name}`
 - Plugins are automatically synchronized to clients on connection
 
 ## Network Discovery
@@ -430,9 +431,11 @@ Player management:
 
 Plugin management:
 - `GET /api/plugins` - List available plugins
-- `POST /api/plugins/upload` - Upload new plugin
-- `POST /api/plugins/{name}/enable` - Enable plugin
-- `POST /api/plugins/{name}/disable` - Disable plugin
+- `GET /api/plugins/{name}` - Get plugin details
+- `GET /api/plugins/{name}/settings` - Get plugin settings
+- `POST /api/plugins/{name}/settings` - Update plugin settings (JSON body with `status: "enabled"` or `status: "disabled"`)
+- `POST /api/plugins/{name}/reload` - Reload plugin on all clients
+- `DELETE /api/plugins/{name}` - Delete plugin
 
 File operations:
 - `GET /files/*` - Download game files
