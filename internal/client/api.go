@@ -37,7 +37,7 @@ func NewAPIWithContext(base string, httpClient *http.Client, cfg Config, ctx con
 }
 
 // GetState fetches /state.json and decodes the envelope into the provided dest.
-func (a *API) GetState(dest interface{}) error {
+func (a *API) GetState(dest any) error {
 	if a.BaseURL == "" {
 		return fmt.Errorf("no server configured")
 	}

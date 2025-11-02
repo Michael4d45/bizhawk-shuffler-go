@@ -345,5 +345,5 @@ func (psm *PluginSyncManager) GetSyncStatus() (map[string]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	return map[string]interface{}{"local_plugins_count": len(local), "local_plugins": local, "last_sync_attempt": time.Now().Format(time.RFC3339)}, nil
+	return map[string]any{"local_plugins_count": len(local), "local_plugins": local, "last_sync_attempt": time.Now().Format(time.RFC3339)}, nil
 }

@@ -59,7 +59,7 @@ func (s *Server) apiMessagePlayer(w http.ResponseWriter, r *http.Request) {
 	// Send message command to the specific player
 	cmd := types.Command{
 		Cmd: types.CmdMessage,
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"message":  b.Message,
 			"duration": b.Duration,
 			"x":        b.X,
@@ -137,7 +137,7 @@ func (s *Server) apiMessageAll(w http.ResponseWriter, r *http.Request) {
 	// Send message command to all connected players
 	cmd := types.Command{
 		Cmd: types.CmdMessage,
-		Payload: map[string]interface{}{
+		Payload: map[string]any{
 			"message":  b.Message,
 			"duration": b.Duration,
 			"x":        b.X,
@@ -151,9 +151,56 @@ func (s *Server) apiMessageAll(w http.ResponseWriter, r *http.Request) {
 	s.broadcastToPlayers(cmd)
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]interface{}{
+	if err := json.NewEncoder(w).Encode(map[string]any{
 		"result": "ok",
 	}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
+}
+
+// apiFullscreenToggle: POST {player: ...}
+func (s *Server) apiFullscreenToggle(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var b struct {
+		Player string `json:"player"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&b); err != nil {
+		http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if b.Player == "" {
+		http.Error(w, "missing player", http.StatusBadRequest)
+		return
+	}
+
+	var player types.Player
+	var ok bool
+	s.withRLock(func() {
+		player, ok = s.state.Players[b.Player]
+	})
+	if !ok {
+		http.Error(w, "player not found", http.StatusNotFound)
+		return
+	}
+
+	// Send fullscreen toggle command to the specific player
+	cmd := types.Command{
+		Cmd:     types.CmdFullscreenToggle,
+		Payload: map[string]any{},
+		ID:      fmt.Sprintf("fullscreen-toggle-%d-%s", time.Now().UnixNano(), b.Player),
+	}
+
+	err := s.sendToPlayer(player, cmd)
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		http.Error(w, fmt.Sprintf("failed to send fullscreen toggle: %v", err), http.StatusInternalServerError)
+		return
+	}
+
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}
 }

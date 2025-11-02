@@ -12,6 +12,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/go-vgo/robotgo"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
@@ -357,6 +358,18 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 		}()
 		sendAck(cmd.ID)
+	case types.CmdFullscreenToggle:
+		go func(id string) {
+			log.Printf("handling fullscreen toggle command")
+			// Execute robotgo.KeyTap("enter", "alt") to toggle fullscreen
+			if err := robotgo.KeyTap("enter", "alt"); err != nil {
+				log.Printf("failed to toggle fullscreen: %v", err)
+				sendNack(id, "failed to toggle fullscreen: "+err.Error())
+				return
+			}
+			log.Printf("fullscreen toggle executed (Alt+Enter)")
+			sendAck(id)
+		}(cmd.ID)
 	default:
 		sendAck(cmd.ID)
 	}

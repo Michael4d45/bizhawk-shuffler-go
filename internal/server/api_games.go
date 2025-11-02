@@ -52,20 +52,20 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 					for _, oldInst := range st.GameSwapInstances {
 						oldInstanceIDs[oldInst.ID] = true
 					}
-					
+
 					// Initialize FileState for new instances
 					for i := range instances {
 						if instances[i].FileState == "" {
 							instances[i].FileState = types.FileStateNone
 						}
 					}
-					
+
 					// Build a set of new instance IDs
 					newInstanceIDs := make(map[string]bool)
 					for _, newInst := range instances {
 						newInstanceIDs[newInst.ID] = true
 					}
-					
+
 					// Find removed instance IDs (in old but not in new)
 					removedInstanceIDs := make(map[string]bool)
 					for oldID := range oldInstanceIDs {
@@ -73,7 +73,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 							removedInstanceIDs[oldID] = true
 						}
 					}
-					
+
 					// Unassign players from removed instances
 					if len(removedInstanceIDs) > 0 {
 						for playerName, player := range st.Players {
@@ -84,7 +84,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 							}
 						}
 					}
-					
+
 					st.GameSwapInstances = instances
 				}
 			}
