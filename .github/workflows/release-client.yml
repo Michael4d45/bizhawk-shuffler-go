@@ -29,8 +29,10 @@ jobs:
           mkdir -p $DIST_DIR
           
           # Build client binaries for different platforms
-          GOOS=windows GOARCH=amd64 go build -o $DIST_DIR/bizshuffle-client.exe ./cmd/client
-          GOOS=linux GOARCH=amd64 go build -o $DIST_DIR/bizshuffle-client ./cmd/client
+          # Disable CGO for cross-compilation (robotgo requires CGO but only works on Windows natively)
+          # Windows build will work without CGO since robotgo is conditionally compiled via build tags
+          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o $DIST_DIR/bizshuffle-client.exe ./cmd/client
+          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $DIST_DIR/bizshuffle-client ./cmd/client
           
           # Copy server.lua script if it exists
           if [ -f server.lua ]; then

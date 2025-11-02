@@ -2,9 +2,9 @@ name: Lint
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
   pull_request:
-    branches: [ main ]
+    branches: [main]
 
 jobs:
   lint:
@@ -21,8 +21,15 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libglfw3-dev pkg-config
 
+      - name: Install X11 dependencies for robotgo
+        run: |
+          sudo apt-get install -y libxtst-dev
+
       - name: Run go vet
-        run: go vet ./...
+        # Enable CGO since all dependencies are installed
+        run: CGO_ENABLED=1 go vet ./...
 
       - name: golangci-lint
         uses: golangci/golangci-lint-action@v8
+        env:
+          CGO_ENABLED: 1

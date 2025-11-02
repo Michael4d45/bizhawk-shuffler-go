@@ -29,8 +29,8 @@ installer:
 	$(GO) build -o $(BIN_DIR)/installer/bizshuffle-installer$(EXT) ./cmd/installer
 
 lint:
-	$(GO) vet ./... && gofmt -d .
-	golangci-lint run ./...
+	CGO_ENABLED=1 $(GO) vet ./... && gofmt -d .
+	CGO_ENABLED=1 golangci-lint run ./...
 
 clean:
 	rm -rf $(BIN_DIR)
