@@ -31,6 +31,8 @@ local games = {
         size = 1,
         desc = "world/level"
     },
+
+    -- health 11A601
     ["legend of zelda, the - ocarina of time (usa)"] = {
         -- 81 - Hyrule Field, 52 - Link's House, 85 - Kokiri Forest
         addr = 0x1C8544,
