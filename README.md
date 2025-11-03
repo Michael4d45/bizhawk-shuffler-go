@@ -101,7 +101,7 @@ Repository layout
 ├── plugins/               # Lua plugins directory
 │   ├── README.md
 │   ├── example-plugin/
-│   └── read-door/
+│   └── memory-tracker/
 ├── dist/                   # Build artifacts (created by make)
 │   ├── server/
 │   │   ├── bizshuffle-server
