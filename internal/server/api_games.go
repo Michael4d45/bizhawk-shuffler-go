@@ -29,6 +29,16 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		// Mutate state and persist via helper to centralize UpdatedAt + save
+		// First, capture old state to detect removals
+		var oldMainGames []types.GameEntry
+		var oldInstances []types.GameSwapInstance
+		s.withRLock(func() {
+			oldMainGames = make([]types.GameEntry, len(s.state.MainGames))
+			copy(oldMainGames, s.state.MainGames)
+			oldInstances = make([]types.GameSwapInstance, len(s.state.GameSwapInstances))
+			copy(oldInstances, s.state.GameSwapInstances)
+		})
+
 		s.UpdateStateAndPersist(func(st *types.ServerState) {
 			if gms, ok := raw["games"]; ok {
 				b, _ := json.Marshal(gms)
@@ -50,7 +60,7 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 				if err := json.Unmarshal(b, &instances); err == nil {
 					// Build a set of old instance IDs before updating
 					oldInstanceIDs := make(map[string]bool)
-					for _, oldInst := range st.GameSwapInstances {
+					for _, oldInst := range oldInstances {
 						oldInstanceIDs[oldInst.ID] = true
 					}
 
@@ -75,14 +85,59 @@ func (s *Server) apiGames(w http.ResponseWriter, r *http.Request) {
 						}
 					}
 
-					// Unassign players from removed instances
-					if len(removedInstanceIDs) > 0 {
+					// Build a set of removed game files (from removed instances)
+					removedGames := make(map[string]bool)
+					for _, oldInst := range oldInstances {
+						if removedInstanceIDs[oldInst.ID] {
+							removedGames[oldInst.Game] = true
+						}
+					}
+
+					// Check for removed games from MainGames
+					oldGameFiles := make(map[string]bool)
+					for _, entry := range oldMainGames {
+						oldGameFiles[entry.File] = true
+					}
+					newGameFiles := make(map[string]bool)
+					for _, entry := range st.MainGames {
+						newGameFiles[entry.File] = true
+					}
+					// Find removed game files from MainGames
+					for oldGame := range oldGameFiles {
+						if !newGameFiles[oldGame] {
+							removedGames[oldGame] = true
+						}
+					}
+
+					// Unassign players from removed instances and remove completions
+					if len(removedInstanceIDs) > 0 || len(removedGames) > 0 {
 						for playerName, player := range st.Players {
+							// Unassign from removed instances
 							if player.InstanceID != "" && removedInstanceIDs[player.InstanceID] {
 								player.InstanceID = ""
 								player.Game = ""
-								st.Players[playerName] = player
 							}
+							// Remove completed instances that no longer exist
+							if len(player.CompletedInstances) > 0 {
+								var newCompletedInstances []string
+								for _, ci := range player.CompletedInstances {
+									if !removedInstanceIDs[ci] {
+										newCompletedInstances = append(newCompletedInstances, ci)
+									}
+								}
+								player.CompletedInstances = newCompletedInstances
+							}
+							// Remove completed games that no longer exist
+							if len(player.CompletedGames) > 0 {
+								var newCompletedGames []string
+								for _, cg := range player.CompletedGames {
+									if !removedGames[cg] {
+										newCompletedGames = append(newCompletedGames, cg)
+									}
+								}
+								player.CompletedGames = newCompletedGames
+							}
+							st.Players[playerName] = player
 						}
 					}
 

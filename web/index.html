@@ -154,6 +154,9 @@
             <button @click="messageAll()" class="px-3 py-1 rounded bg-blue-600 hover:bg-blue-500">
               Message All
             </button>
+            <button @click="removeAllCompletions()" class="px-3 py-1 rounded bg-red-600 hover:bg-red-500">
+              Remove All Completions
+            </button>
             <button @click="refreshState()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">
               Refresh
             </button>
@@ -199,6 +202,8 @@
                     x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
                   <span class="text-xs text-gray-400"
                     x-text="p.ping_ms ? ('ping: ' + p.ping_ms + 'ms') : 'No ping'"></span>
+                  <span class="text-xs px-2 py-0.5 rounded-full bg-orange-600/20 text-orange-300"
+                    x-show="getPlayerCompletionCount(p) > 0" x-text="getPlayerCompletionCount(p) + ' completed'"></span>
                   <button @click="p.showCompleted = !p.showCompleted"
                     class="text-xs px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600">
                     <span x-text="p.showCompleted ? 'Hide Completed' : 'Completed'"></span>
@@ -347,6 +352,9 @@
                   <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-500 text-white"
                     x-show="countPlayersOnGame(g) > 0"
                     x-text="countPlayersOnGame(g) + ' player' + (countPlayersOnGame(g) > 1 ? 's' : '')"></span>
+                  <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-orange-600/20 text-orange-300"
+                    x-show="countPlayersCompletedGame(g) > 0"
+                    x-text="countPlayersCompletedGame(g) + ' completed'"></span>
                 </div>
                 <div class="flex gap-2">
                   <button @click="swapAll(g)"
@@ -398,6 +406,9 @@
                       x-text="(inst.file_state || 'none') + (inst.pending_player ? ': ' + inst.pending_player : '')">
                     </span>
                     <span class="text-xs text-gray-500" x-text="inst.player ? 'assigned:' : 'unassigned'"></span>
+                    <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-orange-600/20 text-orange-300"
+                      x-show="countPlayersCompletedInstance(inst.id) > 0"
+                      x-text="countPlayersCompletedInstance(inst.id) + ' completed'"></span>
                   </div>
                   <template x-if="inst.player">
                     <span
@@ -898,6 +909,24 @@
         },
         countPlayersOnGame(game) {
           return Object.values(this.state.players || {}).filter(p => p.game === game).length;
+        },
+        getPlayerCompletionCount(player) {
+          if (!player) return 0;
+          const gamesCount = (player.completed_games || []).length;
+          const instancesCount = (player.completed_instances || []).length;
+          return gamesCount + instancesCount;
+        },
+        countPlayersCompletedGame(game) {
+          if (!game || !this.state.players) return 0;
+          return Object.values(this.state.players).filter(p => {
+            return (p.completed_games || []).includes(game);
+          }).length;
+        },
+        countPlayersCompletedInstance(instanceId) {
+          if (!instanceId || !this.state.players) return 0;
+          return Object.values(this.state.players).filter(p => {
+            return (p.completed_instances || []).includes(instanceId);
+          }).length;
         },
         getButtonClass(btn) {
           if (btn.path === '/api/toggle_swaps') {
@@ -1948,6 +1977,22 @@
             }
           } catch (e) {
             this.log('markInstanceCompletedForAll err: ' + e.message);
+          }
+        },
+        async removeAllCompletions() {
+          if (!confirm('Remove all completed games and instances for all players? This cannot be undone.')) return;
+          try {
+            const res = await fetch('/api/players/remove_all_completions', {
+              method: 'POST'
+            });
+            if (res.ok) {
+              this.log('Removed all completions for all players');
+              await this.refreshState();
+            } else {
+              this.log(`Failed to remove all completions: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('removeAllCompletions err: ' + e.message);
           }
         },
       };

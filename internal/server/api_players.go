@@ -353,6 +353,30 @@ func (s *Server) apiRemoveCompletedInstance(w http.ResponseWriter, r *http.Reque
 	}
 }
 
+// apiRemoveAllCompletions: POST /api/players/remove_all_completions
+// Removes all completed games and instances for all players
+func (s *Server) apiRemoveAllCompletions(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
+		if st.Players == nil {
+			return
+		}
+		for playerName, player := range st.Players {
+			player.CompletedGames = []string{}
+			player.CompletedInstances = []string{}
+			st.Players[playerName] = player
+		}
+	})
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
+}
+
 // handlePlayerCompletedRoutes routes player completed games/instances actions
 func (s *Server) handlePlayerCompletedRoutes(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/players/")

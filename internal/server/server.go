@@ -93,6 +93,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/add_player", s.apiAddPlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
 	// Completed games/instances routes
+	mux.HandleFunc("/api/players/remove_all_completions", s.apiRemoveAllCompletions)
 	mux.HandleFunc("/api/players/", s.handlePlayerCompletedRoutes)
 	mux.HandleFunc("/api/games/", s.handleGameCompletedRoutes)
 	mux.HandleFunc("/api/instances/", s.handleInstanceCompletedRoutes)
