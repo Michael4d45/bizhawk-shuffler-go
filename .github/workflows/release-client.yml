@@ -11,10 +11,22 @@ permissions:
 jobs:
   build:
     name: Build and Release
-    runs-on: ubuntu-latest
-
-    env:
-      DIST_DIR: dist/client
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            goos: linux
+            goarch: amd64
+            binary: bizshuffle-client
+            zip: bizshuffle-client-linux-amd64.zip
+            cgo: "0"
+          - os: windows-latest
+            goos: windows
+            goarch: amd64
+            binary: bizshuffle-client.exe
+            zip: bizshuffle-client-windows-amd64.zip
+            cgo: "1"
+    runs-on: ${{ matrix.os }}
 
     steps:
       - uses: actions/checkout@v5
@@ -23,33 +35,48 @@ jobs:
         with:
           go-version: "1.24.0"
 
-      - name: Build binaries
+      - name: Build binary
+        shell: bash
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: ${{ matrix.cgo }}
         run: |
-          set -e
-          mkdir -p $DIST_DIR
-          
-          # Build client binaries for different platforms
-          # Disable CGO for cross-compilation (robotgo requires CGO but only works on Windows natively)
-          # Windows build will work without CGO since robotgo is conditionally compiled via build tags
-          GOOS=windows GOARCH=amd64 CGO_ENABLED=0 go build -o $DIST_DIR/bizshuffle-client.exe ./cmd/client
-          GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o $DIST_DIR/bizshuffle-client ./cmd/client
+          mkdir -p dist/client
+          go build -o dist/client/${{ matrix.binary }} ./cmd/client
           
           # Copy server.lua script if it exists
           if [ -f server.lua ]; then
-            cp server.lua $DIST_DIR/
+            cp server.lua dist/client/
           fi
 
-          # Create release archives
-          cd $DIST_DIR
-          zip bizshuffle-client-windows-amd64.zip bizshuffle-client.exe server.lua 2>/dev/null || true
-          zip bizshuffle-client-linux-amd64.zip bizshuffle-client server.lua 2>/dev/null || true
-          cd -
+      - name: Create release archive
+        shell: bash
+        run: |
+          cd dist/client
+          zip ${{ matrix.zip }} ${{ matrix.binary }} server.lua 2>/dev/null || true
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.zip }}
+          path: dist/client/${{ matrix.zip }}
+          retention-days: 1
+
+  release:
+    name: Create Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist/client
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            ${{ env.DIST_DIR }}/bizshuffle-client-windows-amd64.zip
-            ${{ env.DIST_DIR }}/bizshuffle-client-linux-amd64.zip
+            dist/client/bizshuffle-client-windows-amd64.zip
+            dist/client/bizshuffle-client-linux-amd64.zip
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
