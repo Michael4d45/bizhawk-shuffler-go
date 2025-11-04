@@ -2,9 +2,9 @@ BizShuffle - Go + Alpine.js + Websockets
 
 Overview
 
-This repo is a migration target from a Laravel/Filament/Go/Lua stack to a pure Go server + Go client stack with an Alpine.js-powered admin UI. The goal is a single server that coordinates multiple BizHawk emulator clients across LAN/Internet. The server controls when games swap, pushes commands to clients via websockets, and serves required ROM/assets via HTTP.
+This is a Go server + client stack with an Alpine.js-powered admin UI. The goal is a single server that coordinates multiple BizHawk emulator clients across LAN/Internet. The server controls when games swap, pushes commands to clients via websockets, and serves required ROM/assets via HTTP.
 
-High-level goals (from user request)
+High-level goals
 - Single server handles one session (no multi-session complexity).
 - Websockets for commands; HTTP for file downloads/uploads.
 - Minimal persistence: human-editable JSON state files saved on update and loaded at start.
@@ -12,8 +12,6 @@ High-level goals (from user request)
 - Client is a simple one-click installer/CLI that asks for server URL and username once and saves it to a config file.
 
 ## Quick Start Installation Guide
-
-Ready to play? Follow these simple steps to get BizShuffle up and running!
 
 ### Installation
 
