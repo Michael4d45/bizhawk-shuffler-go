@@ -346,7 +346,8 @@
             <template x-for="(g, idx) in mainGamesList" :key="g">
               <div class="flex justify-between items-center bg-slate-800/40 p-2 rounded">
                 <div class="flex items-center gap-3">
-                  <input type="checkbox" :id="'sync-game-'+idx" :value="g" x-bind:checked="state.games.includes(g)"
+                  <input type="checkbox" :id="'sync-game-'+idx" :value="g"
+                    x-bind:checked="selectedGames && selectedGames.includes(g)"
                     @change="toggleSyncGame(g, $event.target.checked)" class="w-4 h-4" />
                   <label :for="'sync-game-'+idx" class="text-sm font-mono text-gray-200 truncate" x-text="g"></label>
                   <span class="text-xs px-2 py-0.5 rounded-full font-semibold bg-blue-500 text-white"
@@ -994,6 +995,12 @@
 
             // Replace all values directly
             this.state = st || {};
+            // Ensure games is always an array
+            if (!this.state.games || !Array.isArray(this.state.games)) {
+              this.state.games = [];
+            }
+            // Sync selectedGames from state.games
+            this.selectedGames = Array.isArray(this.state.games) ? [...this.state.games] : [];
             this.mainGames = (st.main_games || []).map((e) => ({
               file: e.file,
               extra_files: e.extra_files || [],
@@ -1059,6 +1066,12 @@
                 // Replace state directly if it's a full state response
                 if (body && (body.players || body.updated_at || Array.isArray(body.games))) {
                   this.state = body;
+                  // Ensure games is always an array
+                  if (!this.state.games || !Array.isArray(this.state.games)) {
+                    this.state.games = [];
+                  }
+                  // Sync selectedGames from state.games
+                  this.selectedGames = Array.isArray(this.state.games) ? [...this.state.games] : [];
                   this.interval.min = this.state.min_interval_secs || 0;
                   this.interval.max = this.state.max_interval_secs || 0;
 
