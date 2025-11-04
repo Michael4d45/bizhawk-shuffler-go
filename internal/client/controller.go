@@ -78,6 +78,18 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 					instanceID = iid
 				}
 			}
+			
+			// Disable auto-save during swap to prevent race conditions
+			if err := c.bipc.SendAutoSaveDisable(ctx); err != nil {
+				log.Printf("Failed to disable auto-save: %v", err)
+			}
+			// Re-enable auto-save when done (success or failure)
+			defer func() {
+				if err := c.bipc.SendAutoSaveEnable(ctx); err != nil {
+					log.Printf("Failed to re-enable auto-save: %v", err)
+				}
+			}()
+			
 			if game != "" {
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 				log.Printf("ensuring ROM present for game=%s", game)

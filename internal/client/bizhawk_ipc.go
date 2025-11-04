@@ -462,6 +462,14 @@ func (b *BizhawkIPC) SendPluginReload(ctx context.Context, pluginName string) er
 	return b.SendCommand(ctx, "PLUGIN_RELOAD", pluginName)
 }
 
+func (b *BizhawkIPC) SendAutoSaveEnable(ctx context.Context) error {
+	return b.SendCommand(ctx, "AUTOSAVE", "true")
+}
+
+func (b *BizhawkIPC) SendAutoSaveDisable(ctx context.Context) error {
+	return b.SendCommand(ctx, "AUTOSAVE", "false")
+}
+
 // SetReady sets the internal ready flag. Callers should use this to mark
 // the IPC as ready/unready when a HELLO handshake is observed or when
 // the connection is lost.

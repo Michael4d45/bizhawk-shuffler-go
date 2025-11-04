@@ -94,9 +94,75 @@ func (a *API) FetchServerState(player string) (bool, string, string, error) {
 	return running, playerGame, instanceID, nil
 }
 
+// waitForFileStable waits for a file to be stable (no size/modification time changes)
+// It checks the file every 50ms for up to 2 seconds
+func waitForFileStable(filePath string, timeout time.Duration) error {
+	if timeout == 0 {
+		timeout = 2 * time.Second
+	}
+	checkInterval := 50 * time.Millisecond
+	maxChecks := int(timeout / checkInterval)
+	
+	var lastSize int64
+	var lastModTime time.Time
+	
+	for i := 0; i < maxChecks; i++ {
+		info, err := os.Stat(filePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				// File doesn't exist yet, wait a bit more
+				time.Sleep(checkInterval)
+				continue
+			}
+			return err
+		}
+		
+		currentSize := info.Size()
+		currentModTime := info.ModTime()
+		
+		// First check - establish baseline
+		if i == 0 {
+			lastSize = currentSize
+			lastModTime = currentModTime
+			time.Sleep(checkInterval)
+			continue
+		}
+		
+		// Check if file is stable (size and mod time unchanged)
+		if currentSize == lastSize && currentModTime.Equal(lastModTime) {
+			// File appears stable, wait one more check to be sure
+			time.Sleep(checkInterval)
+			info2, err := os.Stat(filePath)
+			if err != nil {
+				return err
+			}
+			if info2.Size() == currentSize && info2.ModTime().Equal(currentModTime) {
+				return nil // File is stable
+			}
+		}
+		
+		lastSize = currentSize
+		lastModTime = currentModTime
+		time.Sleep(checkInterval)
+	}
+	
+	// Timeout - file may still be changing, but proceed anyway
+	return nil
+}
+
 // UploadSave uploads a local save file to the server.
 func (a *API) UploadSaveState(instanceID string) error {
 	localPath := "./saves/" + instanceID + ".state"
+	
+	// Wait for file to be stable before uploading
+	if err := waitForFileStable(localPath, 2*time.Second); err != nil {
+		// If file doesn't exist, inform server
+		if os.IsNotExist(err) {
+			return a.UploadNoSaveState(instanceID)
+		}
+		// Log warning but continue - file might be stable enough
+	}
+	
 	f, err := os.Open(localPath)
 	if err != nil {
 		// If the file doesn't exist, just return nil (no save to upload)
