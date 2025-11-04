@@ -78,7 +78,14 @@ jobs:
     steps:
       - uses: actions/download-artifact@v4
         with:
-          path: dist/client
+          pattern: bizshuffle-client-*.zip
+          path: artifacts
+          merge-multiple: true
+
+      - name: Prepare release files
+        run: |
+          mkdir -p dist/client
+          find artifacts -name "*.zip" -type f -exec cp {} dist/client/ \;
 
       - name: Create GitHub Release and Upload Assets
         uses: softprops/action-gh-release@v2
