@@ -199,6 +199,69 @@
                     x-text="p.has_files ? 'Has files' : 'Missing files'"></span>
                   <span class="text-xs text-gray-400"
                     x-text="p.ping_ms ? ('ping: ' + p.ping_ms + 'ms') : 'No ping'"></span>
+                  <button @click="p.showCompleted = !p.showCompleted"
+                    class="text-xs px-2 py-0.5 rounded bg-slate-700 hover:bg-slate-600">
+                    <span x-text="p.showCompleted ? 'Hide Completed' : 'Completed'"></span>
+                  </button>
+                </div>
+                <!-- Completed Games/Instances Section -->
+                <div x-show="p.showCompleted" class="mt-2 p-2 bg-slate-900/40 rounded text-xs">
+                  <div class="mb-2">
+                    <div class="text-gray-300 mb-1">Completed Games (Sync Mode):</div>
+                    <div class="flex flex-wrap gap-1 mb-2">
+                      <template x-for="cg in (p.completed_games || [])" :key="cg">
+                        <span class="px-2 py-0.5 bg-red-600/20 text-red-300 rounded flex items-center gap-1">
+                          <span x-text="cg"></span>
+                          <button @click="removeCompletedGame(name, cg)"
+                            class="text-red-400 hover:text-red-200">×</button>
+                        </span>
+                      </template>
+                      <template x-if="!p.completed_games || p.completed_games.length === 0">
+                        <span class="text-gray-500">None</span>
+                      </template>
+                    </div>
+                    <div class="flex gap-1">
+                      <select x-model="p.newCompletedGame" class="bg-slate-700 rounded text-xs flex-1">
+                        <option value="">-- select game --</option>
+                        <template x-for="g in state.games" :key="g">
+                          <option :value="g" x-text="g"></option>
+                        </template>
+                      </select>
+                      <button @click="addCompletedGame(name, p.newCompletedGame); p.newCompletedGame = ''"
+                        :disabled="!p.newCompletedGame"
+                        class="px-2 py-1 rounded text-xs bg-green-600 hover:bg-green-500 disabled:bg-slate-800 disabled:text-gray-500">
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                  <div>
+                    <div class="text-gray-300 mb-1">Completed Instances (Save Mode):</div>
+                    <div class="flex flex-wrap gap-1 mb-2">
+                      <template x-for="ci in (p.completed_instances || [])" :key="ci">
+                        <span class="px-2 py-0.5 bg-red-600/20 text-red-300 rounded flex items-center gap-1">
+                          <span x-text="ci"></span>
+                          <button @click="removeCompletedInstance(name, ci)"
+                            class="text-red-400 hover:text-red-200">×</button>
+                        </span>
+                      </template>
+                      <template x-if="!p.completed_instances || p.completed_instances.length === 0">
+                        <span class="text-gray-500">None</span>
+                      </template>
+                    </div>
+                    <div class="flex gap-1">
+                      <select x-model="p.newCompletedInstance" class="bg-slate-700 rounded text-xs flex-1">
+                        <option value="">-- select instance --</option>
+                        <template x-for="inst in gameInstances" :key="inst.id">
+                          <option :value="inst.id" x-text="inst.id + ' — ' + inst.game"></option>
+                        </template>
+                      </select>
+                      <button @click="addCompletedInstance(name, p.newCompletedInstance); p.newCompletedInstance = ''"
+                        :disabled="!p.newCompletedInstance"
+                        class="px-2 py-1 rounded text-xs bg-green-600 hover:bg-green-500 disabled:bg-slate-800 disabled:text-gray-500">
+                        Add
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </div>
 
@@ -288,6 +351,8 @@
                 <div class="flex gap-2">
                   <button @click="swapAll(g)"
                     class="text-xs px-2 py-1 rounded bg-emerald-500 hover:bg-emerald-400 text-black">Swap All</button>
+                  <button @click="markGameCompletedForAll(g)"
+                    class="text-xs px-2 py-1 rounded bg-red-600 hover:bg-red-500">Mark Completed (All)</button>
                 </div>
               </div>
             </template>
@@ -347,7 +412,9 @@
                     </span>
                   </template>
                 </div>
-                <div>
+                <div class="flex gap-2">
+                  <button @click="markInstanceCompletedForAll(inst.id)"
+                    class="text-xs px-2 py-1 rounded bg-red-600 hover:bg-red-500">Mark Completed (All)</button>
                   <button @click="() => { gameInstances.splice(idx,1); saveInstances(); }"
                     class="text-xs px-2 py-1 rounded bg-red-600 hover:bg-red-500">Remove</button>
                 </div>
@@ -501,6 +568,21 @@
             <template x-for="(value, key) in pluginSettings" :key="key">
               <div class="mb-3" x-show="key !== 'status'">
                 <label class="block text-xs text-gray-400 mb-1" x-text="key"></label>
+                <!-- Multiselect checkboxes for settings with metadata type=multiselect -->
+                <template
+                  x-if="pluginDetails.settings_meta && pluginDetails.settings_meta[key] && pluginDetails.settings_meta[key].type === 'multiselect'">
+                  <div class="space-y-2">
+                    <template x-for="option in pluginDetails.settings_meta[key].options" :key="option">
+                      <label class="flex items-center gap-2 cursor-pointer">
+                        <input type="checkbox" :value="option"
+                          @change="updateMultiselectSetting(key, option, $event.target.checked)"
+                          :checked="isMultiselectOptionSelected(key, option)"
+                          class="w-4 h-4 rounded bg-slate-700 border-slate-600 text-blue-600 focus:ring-blue-500" />
+                        <span class="text-sm text-gray-300" x-text="option"></span>
+                      </label>
+                    </template>
+                  </div>
+                </template>
                 <!-- Dropdown for settings with metadata type=dropdown -->
                 <template
                   x-if="pluginDetails.settings_meta && pluginDetails.settings_meta[key] && pluginDetails.settings_meta[key].type === 'dropdown'">
@@ -510,9 +592,9 @@
                     </template>
                   </select>
                 </template>
-                <!-- Text input for settings without dropdown metadata -->
+                <!-- Text input for settings without dropdown/multiselect metadata -->
                 <template
-                  x-if="!pluginDetails.settings_meta || !pluginDetails.settings_meta[key] || pluginDetails.settings_meta[key].type !== 'dropdown'">
+                  x-if="!pluginDetails.settings_meta || !pluginDetails.settings_meta[key] || (pluginDetails.settings_meta[key].type !== 'dropdown' && pluginDetails.settings_meta[key].type !== 'multiselect')">
                   <input type="text" x-model="pluginSettings[key]"
                     class="w-full px-2 py-1 rounded bg-slate-700 text-white" :placeholder="'Enter value for ' + key" />
                 </template>
@@ -1412,6 +1494,42 @@
           this.newSettingKey = "";
           this.newSettingValue = "";
         },
+        // Helper functions for multiselect settings
+        isMultiselectOptionSelected(settingKey, option) {
+          if (!this.pluginSettings || !this.pluginSettings[settingKey]) {
+            return false;
+          }
+          const currentValue = this.pluginSettings[settingKey];
+          if (!currentValue || typeof currentValue !== 'string') {
+            return false;
+          }
+          // Split comma-separated values and check if option is included
+          const selectedValues = currentValue.split(',').map(v => v.trim()).filter(v => v);
+          return selectedValues.includes(option);
+        },
+        updateMultiselectSetting(settingKey, option, checked) {
+          if (!this.pluginSettings) {
+            this.pluginSettings = { status: 'disabled' };
+          }
+          const currentValue = this.pluginSettings[settingKey] || '';
+          const selectedValues = currentValue.split(',').map(v => v.trim()).filter(v => v);
+
+          if (checked) {
+            // Add option if not already present
+            if (!selectedValues.includes(option)) {
+              selectedValues.push(option);
+            }
+          } else {
+            // Remove option
+            const index = selectedValues.indexOf(option);
+            if (index > -1) {
+              selectedValues.splice(index, 1);
+            }
+          }
+
+          // Update the setting with comma-separated values
+          this.pluginSettings[settingKey] = selectedValues.join(',');
+        },
         async savePluginSettings() {
           if (!this.pluginDetails || !this.pluginDetails.name) {
             this.log('No plugin selected');
@@ -1730,6 +1848,106 @@
           } else {
             // Player is already unassigned - do nothing
             this.log(`${playerName} is already unassigned`);
+          }
+        },
+        async addCompletedGame(playerName, game) {
+          if (!game || !playerName) return;
+          try {
+            const res = await fetch(`/api/players/${encodeURIComponent(playerName)}/completed_games`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ game })
+            });
+            if (res.ok) {
+              this.log(`Added completed game ${game} for ${playerName}`);
+              await this.refreshState();
+            } else {
+              this.log(`Failed to add completed game: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('addCompletedGame err: ' + e.message);
+          }
+        },
+        async removeCompletedGame(playerName, game) {
+          if (!game || !playerName) return;
+          try {
+            const res = await fetch(`/api/players/${encodeURIComponent(playerName)}/completed_games?game=${encodeURIComponent(game)}`, {
+              method: 'DELETE'
+            });
+            if (res.ok) {
+              this.log(`Removed completed game ${game} for ${playerName}`);
+              await this.refreshState();
+            } else {
+              this.log(`Failed to remove completed game: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('removeCompletedGame err: ' + e.message);
+          }
+        },
+        async addCompletedInstance(playerName, instance) {
+          if (!instance || !playerName) return;
+          try {
+            const res = await fetch(`/api/players/${encodeURIComponent(playerName)}/completed_instances`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ instance })
+            });
+            if (res.ok) {
+              this.log(`Added completed instance ${instance} for ${playerName}`);
+              await this.refreshState();
+            } else {
+              this.log(`Failed to add completed instance: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('addCompletedInstance err: ' + e.message);
+          }
+        },
+        async removeCompletedInstance(playerName, instance) {
+          if (!instance || !playerName) return;
+          try {
+            const res = await fetch(`/api/players/${encodeURIComponent(playerName)}/completed_instances?instance=${encodeURIComponent(instance)}`, {
+              method: 'DELETE'
+            });
+            if (res.ok) {
+              this.log(`Removed completed instance ${instance} for ${playerName}`);
+              await this.refreshState();
+            } else {
+              this.log(`Failed to remove completed instance: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('removeCompletedInstance err: ' + e.message);
+          }
+        },
+        async markGameCompletedForAll(game) {
+          if (!game) return;
+          try {
+            const res = await fetch(`/api/games/${encodeURIComponent(game)}/mark_completed_all`, {
+              method: 'POST'
+            });
+            if (res.ok) {
+              this.log(`Marked game ${game} as completed for all players`);
+              await this.refreshState();
+            } else {
+              this.log(`Failed to mark game as completed: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('markGameCompletedForAll err: ' + e.message);
+          }
+        },
+        async markInstanceCompletedForAll(instance) {
+          if (!instance) return;
+          try {
+            const res = await fetch(`/api/instances/${encodeURIComponent(instance)}/mark_completed_all`, {
+              method: 'POST'
+            });
+            if (res.ok) {
+              this.log(`Marked instance ${instance} as completed for all players`);
+              await this.refreshState();
+            } else {
+              this.log(`Failed to mark instance as completed: ${res.statusText}`);
+            }
+          } catch (e) {
+            this.log('markInstanceCompletedForAll err: ' + e.message);
           }
         },
       };

@@ -92,6 +92,10 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/remove_player", s.apiRemovePlayer)
 	mux.HandleFunc("/api/add_player", s.apiAddPlayer)
 	mux.HandleFunc("/api/swap_all_to_game", s.apiSwapAllToGame)
+	// Completed games/instances routes
+	mux.HandleFunc("/api/players/", s.handlePlayerCompletedRoutes)
+	mux.HandleFunc("/api/games/", s.handleGameCompletedRoutes)
+	mux.HandleFunc("/api/instances/", s.handleInstanceCompletedRoutes)
 	// Plugin management routes
 	mux.HandleFunc("/api/plugins", s.handlePluginsList)
 	// Plugin management routes - handles settings and other plugin actions

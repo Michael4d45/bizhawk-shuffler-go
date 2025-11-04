@@ -207,6 +207,8 @@ type ServerState struct {
 	PreventSameGameSwap bool `json:"prevent_same_game_swap"`
 	// CountdownEnabled enables a 3-2-1 countdown before auto swaps
 	CountdownEnabled bool `json:"countdown_enabled"`
+	// SwapSeed is used for deterministic random game selection in sync mode
+	SwapSeed int64 `json:"swap_seed,omitempty"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
@@ -226,6 +228,10 @@ type Player struct {
 	InstanceID string `json:"instance_id,omitempty"`
 	// PingMs stores the last measured round-trip time to the player in milliseconds.
 	PingMs int `json:"ping_ms,omitempty"`
+	// CompletedGames lists game files that this player has completed (for sync mode)
+	CompletedGames []string `json:"completed_games,omitempty"`
+	// CompletedInstances lists instance IDs that this player has completed (for save mode)
+	CompletedInstances []string `json:"completed_instances,omitempty"`
 }
 
 type GameSwapInstance struct {

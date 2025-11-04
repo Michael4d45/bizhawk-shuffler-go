@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/internal/types"
@@ -138,4 +139,137 @@ func (s *Server) apiInterval(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+}
+
+// apiMarkGameCompletedForAll: POST /api/games/{game}/mark_completed_all
+// Marks the specified game as completed for all players
+func (s *Server) apiMarkGameCompletedForAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Parse game from path: /api/games/{game}/mark_completed_all
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "games" || pathParts[3] != "mark_completed_all" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	game := pathParts[2]
+	if game == "" {
+		http.Error(w, "missing game", http.StatusBadRequest)
+		return
+	}
+
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
+		if st.Players == nil {
+			return
+		}
+		for playerName, player := range st.Players {
+			// Check if already in list
+			found := false
+			for _, cg := range player.CompletedGames {
+				if cg == game {
+					found = true
+					break
+				}
+			}
+			if !found {
+				player.CompletedGames = append(player.CompletedGames, game)
+				st.Players[playerName] = player
+			}
+		}
+	})
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
+}
+
+// apiMarkInstanceCompletedForAll: POST /api/instances/{instance}/mark_completed_all
+// Marks the specified instance as completed for all players
+func (s *Server) apiMarkInstanceCompletedForAll(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	// Parse instance from path: /api/instances/{instance}/mark_completed_all
+	pathParts := strings.Split(strings.Trim(r.URL.Path, "/"), "/")
+	if len(pathParts) < 4 || pathParts[0] != "api" || pathParts[1] != "instances" || pathParts[3] != "mark_completed_all" {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	instance := pathParts[2]
+	if instance == "" {
+		http.Error(w, "missing instance", http.StatusBadRequest)
+		return
+	}
+
+	s.UpdateStateAndPersist(func(st *types.ServerState) {
+		if st.Players == nil {
+			return
+		}
+		for playerName, player := range st.Players {
+			// Check if already in list
+			found := false
+			for _, ci := range player.CompletedInstances {
+				if ci == instance {
+					found = true
+					break
+				}
+			}
+			if !found {
+				player.CompletedInstances = append(player.CompletedInstances, instance)
+				st.Players[playerName] = player
+			}
+		}
+	})
+	w.Header().Set("Content-Type", "application/json")
+	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
+		fmt.Printf("encode response error: %v\n", err)
+	}
+}
+
+// handleGameCompletedRoutes routes game completed actions
+func (s *Server) handleGameCompletedRoutes(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/games/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		// This might be a regular games request, let it fall through
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	game := parts[0]
+	action := parts[1]
+
+	// Create a new request with the original path for the API handlers to parse
+	originalPath := r.URL.Path
+	defer func() { r.URL.Path = originalPath }()
+
+	if action == "mark_completed_all" && game != "" {
+		s.apiMarkGameCompletedForAll(w, r)
+	} else {
+		http.Error(w, "invalid action", http.StatusBadRequest)
+	}
+}
+
+// handleInstanceCompletedRoutes routes instance completed actions
+func (s *Server) handleInstanceCompletedRoutes(w http.ResponseWriter, r *http.Request) {
+	path := strings.TrimPrefix(r.URL.Path, "/api/instances/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 {
+		http.Error(w, "invalid path", http.StatusBadRequest)
+		return
+	}
+	instance := parts[0]
+	action := parts[1]
+
+	// Create a new request with the original path for the API handlers to parse
+	originalPath := r.URL.Path
+	defer func() { r.URL.Path = originalPath }()
+
+	if action == "mark_completed_all" && instance != "" {
+		s.apiMarkInstanceCompletedForAll(w, r)
+	} else {
+		http.Error(w, "invalid action", http.StatusBadRequest)
+	}
 }
