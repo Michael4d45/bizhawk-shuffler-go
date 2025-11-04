@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
+	"strconv"
 	"strings"
 
 	"fyne.io/fyne/v2"
@@ -489,7 +490,7 @@ func installComponent(component, installDir string, release *installer.Release, 
 func configureServer(serverDir, host, port string) error {
 	settingsPath := filepath.Join(serverDir, "state.json")
 
-	settings := make(map[string]string)
+	settings := make(map[string]any)
 	if data, err := os.ReadFile(settingsPath); err == nil {
 		if err := json.Unmarshal(data, &settings); err != nil {
 			// ignore invalid or missing settings file
@@ -502,7 +503,12 @@ func configureServer(serverDir, host, port string) error {
 		settings["host"] = host
 	}
 	if port != "" {
-		settings["port"] = port
+		// Parse port as integer
+		portInt, err := strconv.Atoi(port)
+		if err != nil {
+			return fmt.Errorf("invalid port number: %w", err)
+		}
+		settings["port"] = portInt
 	}
 
 	// Only write if we have values to set
@@ -547,7 +553,7 @@ func configureClient(clientDir, bizhawkDir, serverURL, playerName string) error 
 
 	// Set player name if provided
 	if playerName != "" {
-		cfg["player_name"] = playerName
+		cfg["name"] = playerName
 	}
 
 	// Write config
