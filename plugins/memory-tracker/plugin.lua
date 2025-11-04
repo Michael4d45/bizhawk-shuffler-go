@@ -243,6 +243,11 @@ local lastValueByGame = {}
 local bestDomainCached = nil
 local lastRomName = nil
 local lastInstanceID = nil
+-- Module-level settings storage (will be populated by server or on_settings_changed)
+-- Note: Not local so it can be accessed/modified by server.lua's plugin_module._settings
+_settings = _settings or {}
+-- Forward reference to exported table for syncing settings
+local exported = nil
 
 local probe = {
     active = false,
@@ -396,23 +401,32 @@ end
 -- Parse enabled types from settings
 local function get_enabled_types()
     local enabled = {}
+
+    -- Try to sync _settings from exported table if not populated
+    -- (server sets plugin_module._settings after load, but might not call on_settings_changed)
+    if (not _settings or not _settings["enabled_types"]) and exported and exported._settings then
+        _settings = exported._settings
+    end
+
     if not _settings or not _settings["enabled_types"] then
         -- Default to "door" for backward compatibility
         enabled["door"] = true
+        console.log("Memory Tracker: No enabled_types setting, defaulting to door")
         return enabled
     end
 
     local types_str = _settings["enabled_types"] or ""
-    for type_str in types_str:gmatch("[^,]+") do
-        type_str = type_str:gsub("^%s*(.-)%s*$", "%1") -- trim whitespace
-        if type_str ~= "" then
-            enabled[type_str:lower()] = true
-        end
+
+    -- Use csv_to_array helper function
+    local types_array = csv_to_array(types_str)
+    for _, type_str in ipairs(types_array) do
+        enabled[type_str:lower()] = true
     end
 
     -- If no types found, default to door
     if not next(enabled) then
         enabled["door"] = true
+        console.log("Memory Tracker: No types parsed, defaulting to door")
     end
 
     return enabled
@@ -466,9 +480,10 @@ local function trackMemory()
                 goto continue
             end
 
-            console.log(("Memory Tracker: %s %s read addr=0x%X size=%d domain=%s value=%s"):format(
-                tostring(currentGame), tostring(type_name), type_cfg.addr, type_cfg.size or 1,
-                tostring(type_cfg.domain or "best-guess"), tostring(val)))
+            -- Log read operations at debug level (commented out for production)
+            -- console.log(("Memory Tracker: %s %s read addr=0x%X size=%d domain=%s value=%s"):format(
+            --     tostring(currentGame), tostring(type_name), type_cfg.addr, type_cfg.size or 1,
+            --     tostring(type_cfg.domain or "best-guess"), tostring(val)))
 
             local key = currentGame
             if not lastValueByGame[key] then
@@ -500,10 +515,31 @@ local function on_init()
     console.log("Memory Tracker: Plugin initialized")
 end
 
+local function on_settings_changed(settings)
+    -- Update _settings with new settings
+    if settings then
+        _settings = settings
+        -- Log enabled types summary
+        local enabledTypes = get_enabled_types()
+        local typesList = {}
+        for k, v in pairs(enabledTypes) do
+            table.insert(typesList, k)
+        end
+        console.log("Memory Tracker: Settings updated, enabled types: " .. table.concat(typesList, ", "))
+    else
+        console.log("Memory Tracker: on_settings_changed called with nil settings!")
+    end
+end
+
 local function on_frame()
     frameCounter = frameCounter + 1
 
-    -- Check for game change
+    -- Sync _settings from exported table if needed (server sets plugin_module._settings after load)
+    if not _settings or not _settings["enabled_types"] then
+        if exported and exported._settings then
+            _settings = exported._settings
+        end
+    end
     local rom = gameinfo.getromname()
     if rom and (rom ~= lastRomName or InstanceID ~= lastInstanceID) then
         console.log("Memory Tracker: Game/Instance changed to " .. tostring(rom) .. " instance " .. tostring(InstanceID))
@@ -546,9 +582,10 @@ local function on_frame()
 end
 
 -- Exported helpers for manual use
-local exported = {
+exported = {
     on_init = on_init,
-    on_frame = on_frame
+    on_frame = on_frame,
+    on_settings_changed = on_settings_changed
 }
 
 return exported

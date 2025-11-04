@@ -23,6 +23,23 @@ local PLUGIN_DIR = "./plugins"
 
 console.log("Shuffler server starting (listening)...")
 
+-- === Global Utility Functions ===
+-- Convert comma-separated values to string array
+-- Available to all plugins as a global function
+function csv_to_array(csv_string)
+    if not csv_string or csv_string == "" then
+        return {}
+    end
+    local result = {}
+    for value in csv_string:gmatch("[^,]+") do
+        value = value:gsub("^%s*(.-)%s*$", "%1") -- trim whitespace
+        if value ~= "" then
+            table.insert(result, value)
+        end
+    end
+    return result
+end
+
 -- Simple plugin loading system (basic implementation)
 local loaded_plugins = {}
 
