@@ -4,11 +4,15 @@ import (
 	"archive/tar"
 	"archive/zip"
 	"compress/gzip"
+	"encoding/json"
 	"fmt"
 	"io"
+	"net/http"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
+	"time"
 )
 
 // BizHawkInstaller handles BizHawk emulator installation
@@ -166,8 +170,110 @@ func (b *BizHawkInstaller) extractTarGz(tarPath, destDir string) error {
 	return nil
 }
 
+const (
+	bizhawkRepoOwner = "TASEmulators"
+	bizhawkRepoName  = "BizHawk"
+	bizhawkAPIURL    = "https://api.github.com"
+)
+
+// getBizHawkPlatformSuffix returns the platform suffix for BizHawk asset names
+func getBizHawkPlatformSuffix() string {
+	switch runtime.GOOS {
+	case "windows":
+		if runtime.GOARCH == "amd64" || runtime.GOARCH == "386" {
+			return "win-x64"
+		}
+		return "win-x64" // Default to x64 for Windows
+	case "linux":
+		if runtime.GOARCH == "amd64" {
+			return "linux-x64"
+		} else if runtime.GOARCH == "arm64" {
+			return "linux-arm64"
+		}
+		return "linux-x64" // Default to x64 for Linux
+	case "darwin":
+		if runtime.GOARCH == "amd64" {
+			return "osx-x64"
+		} else if runtime.GOARCH == "arm64" {
+			return "osx-arm64"
+		}
+		return "osx-x64" // Default to x64 for macOS
+	default:
+		return "win-x64" // Fallback to Windows x64
+	}
+}
+
+// getBizHawkLatestRelease fetches the latest BizHawk release from GitHub
+func getBizHawkLatestRelease() (*Release, error) {
+	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", bizhawkAPIURL, bizhawkRepoOwner, bizhawkRepoName)
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create request: %w", err)
+	}
+	req.Header.Set("Accept", "application/vnd.github.v3+json")
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch latest release: %w", err)
+	}
+	defer func() { _ = resp.Body.Close() }()
+
+	if resp.StatusCode != http.StatusOK {
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("GitHub API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var release Release
+	if err := json.NewDecoder(resp.Body).Decode(&release); err != nil {
+		return nil, fmt.Errorf("failed to decode release JSON: %w", err)
+	}
+
+	return &release, nil
+}
+
 // GetBizHawkDownloadURL returns the default BizHawk download URL for the current platform
+// It fetches the latest release from GitHub and finds the appropriate asset
 func GetBizHawkDownloadURL() string {
-	// Using the same URL as in client config.go
+	// Fetch latest release
+	release, err := getBizHawkLatestRelease()
+	if err != nil {
+		// Fallback to hardcoded URL if API call fails
+		return "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-win-x64.zip"
+	}
+
+	// Determine platform suffix
+	platformSuffix := getBizHawkPlatformSuffix()
+
+	// Build expected asset name pattern (e.g., "BizHawk-2.10-win-x64.zip")
+	// BizHawk releases use tag names like "2.10", so we need to match assets
+	// that contain the version and platform suffix
+	tagName := strings.TrimPrefix(release.TagName, "v")
+
+	// Try multiple patterns to find the matching asset
+	patterns := []string{
+		fmt.Sprintf("BizHawk-%s-%s.zip", tagName, platformSuffix),
+		fmt.Sprintf("BizHawk-%s-%s.zip", release.TagName, platformSuffix),
+	}
+
+	for _, pattern := range patterns {
+		asset := release.FindAssetByName(pattern)
+		if asset != nil {
+			return asset.DownloadURL
+		}
+	}
+
+	// Fallback: find any asset that contains the platform suffix
+	for _, a := range release.Assets {
+		if strings.Contains(a.Name, platformSuffix) && strings.HasSuffix(a.Name, ".zip") {
+			return a.DownloadURL
+		}
+	}
+
+	// Last resort: fallback to hardcoded URL
 	return "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-win-x64.zip"
 }
