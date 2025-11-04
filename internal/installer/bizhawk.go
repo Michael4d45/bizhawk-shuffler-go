@@ -180,24 +180,30 @@ const (
 func getBizHawkPlatformSuffix() string {
 	switch runtime.GOOS {
 	case "windows":
-		if runtime.GOARCH == "amd64" || runtime.GOARCH == "386" {
+		switch runtime.GOARCH {
+		case "amd64", "386":
 			return "win-x64"
+		default:
+			return "win-x64" // Default to x64 for Windows
 		}
-		return "win-x64" // Default to x64 for Windows
 	case "linux":
-		if runtime.GOARCH == "amd64" {
+		switch runtime.GOARCH {
+		case "amd64":
 			return "linux-x64"
-		} else if runtime.GOARCH == "arm64" {
+		case "arm64":
 			return "linux-arm64"
+		default:
+			return "linux-x64" // Default to x64 for Linux
 		}
-		return "linux-x64" // Default to x64 for Linux
 	case "darwin":
-		if runtime.GOARCH == "amd64" {
+		switch runtime.GOARCH {
+		case "amd64":
 			return "osx-x64"
-		} else if runtime.GOARCH == "arm64" {
+		case "arm64":
 			return "osx-arm64"
+		default:
+			return "osx-x64" // Default to x64 for macOS
 		}
-		return "osx-x64" // Default to x64 for macOS
 	default:
 		return "win-x64" // Fallback to Windows x64
 	}
