@@ -44,17 +44,25 @@ jobs:
         run: |
           mkdir -p dist/client
           go build -o dist/client/${{ matrix.binary }} ./cmd/client
-          
+
           # Copy server.lua script if it exists
           if [ -f server.lua ]; then
             cp server.lua dist/client/
           fi
 
-      - name: Create release archive
+      - name: Create release archive (Linux)
+        if: matrix.os == 'ubuntu-latest'
         shell: bash
         run: |
           cd dist/client
-          zip ${{ matrix.zip }} ${{ matrix.binary }} server.lua 2>/dev/null || true
+          zip ${{ matrix.zip }} ${{ matrix.binary }} server.lua
+
+      - name: Create release archive (Windows)
+        if: matrix.os == 'windows-latest'
+        shell: pwsh
+        run: |
+          cd dist/client
+          Compress-Archive -Path ${{ matrix.binary }}, server.lua -DestinationPath ${{ matrix.zip }} -Force
 
       - name: Upload artifact
         uses: actions/upload-artifact@v4
