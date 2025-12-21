@@ -102,10 +102,10 @@ func waitForFileStable(filePath string, timeout time.Duration) error {
 	}
 	checkInterval := 50 * time.Millisecond
 	maxChecks := int(timeout / checkInterval)
-	
+
 	var lastSize int64
 	var lastModTime time.Time
-	
+
 	for i := 0; i < maxChecks; i++ {
 		info, err := os.Stat(filePath)
 		if err != nil {
@@ -116,10 +116,10 @@ func waitForFileStable(filePath string, timeout time.Duration) error {
 			}
 			return err
 		}
-		
+
 		currentSize := info.Size()
 		currentModTime := info.ModTime()
-		
+
 		// First check - establish baseline
 		if i == 0 {
 			lastSize = currentSize
@@ -127,7 +127,7 @@ func waitForFileStable(filePath string, timeout time.Duration) error {
 			time.Sleep(checkInterval)
 			continue
 		}
-		
+
 		// Check if file is stable (size and mod time unchanged)
 		if currentSize == lastSize && currentModTime.Equal(lastModTime) {
 			// File appears stable, wait one more check to be sure
@@ -140,12 +140,12 @@ func waitForFileStable(filePath string, timeout time.Duration) error {
 				return nil // File is stable
 			}
 		}
-		
+
 		lastSize = currentSize
 		lastModTime = currentModTime
 		time.Sleep(checkInterval)
 	}
-	
+
 	// Timeout - file may still be changing, but proceed anyway
 	return nil
 }
@@ -153,7 +153,7 @@ func waitForFileStable(filePath string, timeout time.Duration) error {
 // UploadSave uploads a local save file to the server.
 func (a *API) UploadSaveState(instanceID string) error {
 	localPath := "./saves/" + instanceID + ".state"
-	
+
 	// Wait for file to be stable before uploading
 	if err := waitForFileStable(localPath, 2*time.Second); err != nil {
 		// If file doesn't exist, inform server
@@ -162,7 +162,7 @@ func (a *API) UploadSaveState(instanceID string) error {
 		}
 		// Log warning but continue - file might be stable enough
 	}
-	
+
 	f, err := os.Open(localPath)
 	if err != nil {
 		// If the file doesn't exist, just return nil (no save to upload)
