@@ -5,10 +5,12 @@ import (
 	"fmt"
 	"net"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
@@ -27,11 +29,8 @@ func main() {
 	var installServer, installClient bool
 	var serverDir, clientDir string
 
-	// Current directory as default
-	currentDir, err := os.Getwd()
-	if err != nil {
-		currentDir = "."
-	}
+	// Get appropriate default directory (avoid system folders when running from zip)
+	currentDir := getDefaultInstallDir()
 
 	serverDir = filepath.Join(currentDir, "BizShuffle Server")
 	clientDir = filepath.Join(currentDir, "BizShuffle Client")
@@ -146,7 +145,7 @@ func main() {
 	logScroll := container.NewScroll(logText)
 	logScroll.SetMinSize(fyne.NewSize(0, 200))
 
-	var installButton *widget.Button
+	var installButton, closeAndOpenButton *widget.Button
 	installButton = widget.NewButton("Install", func() {
 		if !installServer && !installClient {
 			dialog.ShowError(fmt.Errorf("please select at least one component to install"), myWindow)
@@ -219,6 +218,7 @@ func main() {
 					progressLabel.SetText("Installation complete!")
 					progressBar.SetValue(1.0)
 					dialog.ShowInformation("Success", "BizShuffle has been installed successfully!", myWindow)
+					closeAndOpenButton.Show()
 				})
 			}
 
@@ -239,6 +239,25 @@ func main() {
 		}()
 	})
 
+	// Close and Open Folder button - initially hidden
+	closeAndOpenButton = widget.NewButton("Close and Open Folder", func() {
+		// Determine which folder to open (prefer server if both installed)
+		folderToOpen := ""
+		if installServer {
+			folderToOpen = serverDir
+		} else if installClient {
+			folderToOpen = clientDir
+		}
+
+		if folderToOpen != "" {
+			openFolder(folderToOpen)
+		}
+
+		// Close the installer window
+		myWindow.Close()
+	})
+	closeAndOpenButton.Hide()
+
 	content := container.NewVBox(
 		title,
 		widget.NewSeparator(),
@@ -252,6 +271,7 @@ func main() {
 		logScroll,
 		widget.NewSeparator(),
 		installButton,
+		closeAndOpenButton,
 	)
 
 	myWindow.SetContent(container.NewPadded(content))
@@ -562,4 +582,137 @@ func configureClient(clientDir, bizhawkDir, serverURL, playerName string) error 
 		return err
 	}
 	return os.WriteFile(configPath, data, 0644)
+}
+
+// openFolder opens the specified folder in the default file manager
+func openFolder(folderPath string) {
+	var cmd *exec.Cmd
+	switch runtime.GOOS {
+	case "windows":
+		cmd = exec.Command("explorer", folderPath)
+	case "darwin":
+		cmd = exec.Command("open", folderPath)
+	default: // linux and others
+		cmd = exec.Command("xdg-open", folderPath)
+	}
+
+	// Run in background and don't wait for completion
+	go func() {
+		_ = cmd.Start()
+	}()
+}
+
+// getDefaultInstallDir returns an appropriate default installation directory
+// avoiding system folders that might occur when running from extracted zip files
+func getDefaultInstallDir() string {
+	// Get current working directory
+	currentDir, err := os.Getwd()
+	if err != nil {
+		currentDir = "."
+	}
+
+	// Check if current directory is a system/temp directory
+	if isSystemOrTempDir(currentDir) {
+		// Try to get user directories in order of preference
+		userDirs := []string{"Downloads", "Desktop", "Documents"}
+
+		for _, dirName := range userDirs {
+			if userDir := getUserDir(dirName); userDir != "" {
+				return userDir
+			}
+		}
+
+		// Fallback to home directory
+		if homeDir, err := os.UserHomeDir(); err == nil {
+			return homeDir
+		}
+	}
+
+	return currentDir
+}
+
+// isSystemOrTempDir checks if the given path is a system or temporary directory
+func isSystemOrTempDir(path string) bool {
+	// Convert to lowercase for case-insensitive comparison on Windows
+	lowerPath := strings.ToLower(path)
+
+	// Check for common system directory names
+	systemDirs := []string{
+		"system32", "syswow64", "system", "windows", "winnt",
+		"program files", "program files (x86)", "programdata",
+		"temp", "tmp", "temporary", "cache", "appdata",
+	}
+
+	for _, sysDir := range systemDirs {
+		if strings.Contains(lowerPath, sysDir) {
+			return true
+		}
+	}
+
+	// Check for paths that look like temp directories (containing random chars)
+	parts := strings.Split(filepath.ToSlash(path), "/")
+	for _, part := range parts {
+		// Skip empty parts
+		if part == "" {
+			continue
+		}
+
+		// Check if part looks like a temp directory name
+		// (mostly numbers/letters, no spaces, reasonable length)
+		if len(part) >= 8 && len(part) <= 16 {
+			hasLetters := false
+			hasNumbers := false
+			hasSpaces := false
+
+			for _, r := range part {
+				if unicode.IsLetter(r) {
+					hasLetters = true
+				} else if unicode.IsDigit(r) {
+					hasNumbers = true
+				} else if r == ' ' {
+					hasSpaces = true
+					break
+				}
+			}
+
+			// If it has both letters and numbers, no spaces, it's likely a temp dir
+			if hasLetters && hasNumbers && !hasSpaces {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// getUserDir returns the path to a user directory like Downloads, Desktop, etc.
+func getUserDir(dirName string) string {
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		return ""
+	}
+
+	// Try platform-specific paths
+	var possiblePaths []string
+
+	switch runtime.GOOS {
+	case "windows":
+		// Windows: C:\Users\Username\Downloads
+		possiblePaths = []string{filepath.Join(homeDir, dirName)}
+	default:
+		// Unix-like systems: /home/username/Downloads or /home/username/Desktop
+		possiblePaths = []string{
+			filepath.Join(homeDir, dirName),
+			filepath.Join(homeDir, strings.ToLower(dirName)),
+		}
+	}
+
+	// Check if any of the paths exist
+	for _, path := range possiblePaths {
+		if _, err := os.Stat(path); err == nil {
+			return path
+		}
+	}
+
+	return ""
 }
