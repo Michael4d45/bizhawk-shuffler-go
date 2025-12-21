@@ -25,15 +25,22 @@ type Controller struct {
 	// mainGames caches the server's main games list for extra_files lookup
 	mainGames []types.GameEntry
 	mu        sync.RWMutex // protects mainGames
+	// helloAck signals when hello has been acknowledged (first CmdGamesUpdate received)
+	helloAck chan struct{}
 }
 
 func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error) *Controller {
+	return NewControllerWithHelloAck(cfg, bipc, api, writeJSON, nil)
+}
+
+func NewControllerWithHelloAck(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error, helloAck chan struct{}) *Controller {
 	c := &Controller{
 		cfg:       cfg,
 		bipc:      bipc,
 		api:       api,
 		writeJSON: writeJSON,
 		mainGames: make([]types.GameEntry, 0),
+		helloAck:  helloAck,
 	}
 	c.progressTracking = NewProgressTrackingAPI(api, c)
 	return c
@@ -129,6 +136,15 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			sendAck(id)
 		}(cmd.ID)
 	case types.CmdGamesUpdate:
+		// Signal hello acknowledgment on first games update
+		if c.helloAck != nil {
+			select {
+			case c.helloAck <- struct{}{}:
+			default:
+			}
+			c.helloAck = nil // prevent multiple signals
+		}
+
 		go func(payload any) {
 			required := make(map[string]struct{})
 			// Build set of instance games we need

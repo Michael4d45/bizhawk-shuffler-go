@@ -36,24 +36,33 @@ type WSClient struct {
 
 	api  *API
 	bipc *BizhawkIPC
+
+	// name is the player name for hello messages
+	name string
+
+	// helloAck signals when hello has been acknowledged by server
+	helloAck chan struct{}
 }
 
 // NewWSClient creates a client for wsURL.
 // The client does nothing until Start() is called.
 func NewWSClient(wsURL string, api *API, bipc *BizhawkIPC) *WSClient {
 	return &WSClient{
-		wsURL:  wsURL,
-		sendCh: make(chan types.Command, 64),
-		api:    api,
-		bipc:   bipc,
+		wsURL:    wsURL,
+		sendCh:   make(chan types.Command, 64),
+		api:      api,
+		bipc:     bipc,
+		helloAck: make(chan struct{}),
 	}
 }
 
-// Start begins the connection and goroutines. It returns immediately.
+// Start begins the connection and goroutines. It waits for hello acknowledgment before returning.
 func (w *WSClient) Start(parent context.Context, cfg Config) {
 	if w.ctx != nil {
 		return // already started
 	}
+
+	w.name = cfg["name"]
 
 	ctx, cancel := context.WithCancel(parent)
 	w.ctx = ctx
@@ -66,18 +75,21 @@ func (w *WSClient) Start(parent context.Context, cfg Config) {
 	// channel for incoming commands
 	w.cmdCh = make(chan types.Command, 64)
 
-	// send initial hello message
-	hello := types.Command{
-		Cmd:     types.CmdHello,
-		Payload: map[string]string{"name": cfg["name"]},
-	}
+	// start controller loop (handles incoming commands)
 	sendFunc := func(cmd types.Command) error {
 		return w.SendWithTimeout(cmd, 2*time.Second)
 	}
-	_ = sendFunc(hello)
-	// start controller loop (handles incoming commands)
-	controller := NewController(cfg, w.bipc, w.api, sendFunc)
+	controller := NewControllerWithHelloAck(cfg, w.bipc, w.api, sendFunc, w.helloAck)
 	go w.runController(ctx, controller)
+
+	// wait for hello acknowledgment or context cancellation
+	log.Printf("wsclient: waiting for hello acknowledgment from server...")
+	select {
+	case <-w.helloAck:
+		log.Printf("wsclient: hello acknowledged, client startup complete")
+	case <-ctx.Done():
+		log.Printf("wsclient: context cancelled during hello wait")
+	}
 }
 
 // Stop signals the client to stop and waits for goroutines to exit.
@@ -161,6 +173,18 @@ func (w *WSClient) run() {
 		// start writer goroutine
 		writeDone := make(chan struct{})
 		go w.writer(conn, writeDone)
+
+		// send hello message
+		hello := types.Command{
+			Cmd:     types.CmdHello,
+			Payload: map[string]string{"name": w.name},
+		}
+		if err := conn.WriteJSON(hello); err != nil {
+			log.Printf("wsclient: failed to send hello: %v", err)
+			_ = conn.Close()
+			continue
+		}
+		log.Printf("wsclient: sent hello as %s", w.name)
 
 		// run reader loop (blocking)
 		w.reader(conn)
