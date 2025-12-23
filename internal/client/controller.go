@@ -634,7 +634,7 @@ func (c *Controller) verifySaveWithRetry(instanceID string) error {
 			log.Printf("failed to open save file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
 			continue
 		} else {
-			defer file.Close()
+			defer func() { _ = file.Close() }()
 			if _, err := zip.NewReader(file, info.Size()); err != nil {
 				log.Printf("save file is not a valid zip file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
 				continue

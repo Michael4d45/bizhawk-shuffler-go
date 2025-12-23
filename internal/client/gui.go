@@ -211,7 +211,12 @@ func (g *GUI) showUpdateWarning() {
 
 func (g *GUI) performUpdate() {
 	g.updateBtn.Disable()
-	progress := dialog.NewProgress("Updating BizHawk", "Please wait...", g.window)
+	progressBar := widget.NewProgressBar()
+	progressBar.SetValue(0)
+	progress := dialog.NewCustomWithoutButtons("Updating BizHawk", container.NewVBox(
+		widget.NewLabel("Please wait..."),
+		progressBar,
+	), g.window)
 	progress.Show()
 
 	go func() {
@@ -246,7 +251,7 @@ func (g *GUI) launchBizHawk() {
 		if err := g.client.bhController.LaunchAndManage(g.ctx, g.cancel); err != nil {
 			log.Printf("GUI: LaunchAndManage error: %v", err)
 			fyne.Do(func() {
-				dialog.ShowError(fmt.Errorf("Failed to launch BizHawk: %v", err), g.window)
+				dialog.ShowError(fmt.Errorf("failed to launch BizHawk: %v", err), g.window)
 			})
 		}
 	}()
@@ -290,11 +295,8 @@ func (g *GUI) updateLoop() {
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 
-	for {
-		select {
-		case <-ticker.C:
-			g.refreshStatus()
-		}
+	for range ticker.C {
+		g.refreshStatus()
 	}
 }
 

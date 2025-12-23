@@ -495,18 +495,18 @@ func zipLogFile(logFilePath, zipFilePath string) error {
 	if err != nil {
 		return fmt.Errorf("failed to open log file for zipping: %w", err)
 	}
-	defer logFile.Close()
+	defer func() { _ = logFile.Close() }()
 
 	// Create the zip file
 	zipFile, err := os.Create(zipFilePath)
 	if err != nil {
 		return fmt.Errorf("failed to create zip file: %w", err)
 	}
-	defer zipFile.Close()
+	defer func() { _ = zipFile.Close() }()
 
 	// Create zip writer
 	zipWriter := zip.NewWriter(zipFile)
-	defer zipWriter.Close()
+	defer func() { _ = zipWriter.Close() }()
 
 	// Get the filename for the zip entry
 	_, fileName := filepath.Split(logFilePath)

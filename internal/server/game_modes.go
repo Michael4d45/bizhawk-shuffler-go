@@ -128,9 +128,7 @@ func (h *SyncModeHandler) getCurrentGame() string {
 // selectGameForPlayer selects an appropriate game for a player, considering their completed games
 func (h *SyncModeHandler) selectGameForPlayer(player types.Player, games []string, excludeList []string, seed int64) string {
 	playerExclusions := append([]string{}, excludeList...)
-	for _, completed := range player.CompletedGames {
-		playerExclusions = append(playerExclusions, completed)
-	}
+	playerExclusions = append(playerExclusions, player.CompletedGames...)
 
 	game := selectNextGame(games, playerExclusions, seed)
 	if game == "" {
