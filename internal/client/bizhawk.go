@@ -203,6 +203,9 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 		}
 		return fmt.Errorf("StartBizHawk failed: %w", err)
 	}
+
+	// Notify IPC that BizHawk has been launched
+	c.bipc.SetBizhawkLaunched(true)
 	bhMu.Lock()
 	bhCmd = cmd
 	bhMu.Unlock()
@@ -211,6 +214,8 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 		log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
 		MonitorProcess(bhCmd, func(err error) {
 			log.Printf("MonitorProcess: BizHawk pid=%d exited with err=%v; cancelling client", bhCmd.Process.Pid, err)
+			// Notify IPC that BizHawk has closed
+			c.bipc.SetBizhawkLaunched(false)
 			if origCancel != nil {
 				origCancel()
 			}
@@ -226,6 +231,8 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 			log.Printf("signal: %v", s)
 			log.Printf("terminating BizHawk due to signal: %v", s)
 			TerminateProcess(&bhCmd, &bhMu, 3*time.Second)
+			// Notify IPC that BizHawk has closed
+			c.bipc.SetBizhawkLaunched(false)
 			log.Printf("signal handler: calling origCancel() after TerminateProcess")
 			if origCancel != nil {
 				origCancel()
@@ -241,6 +248,9 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 	case s := <-sigs:
 		log.Printf("received shutdown signal: %v; terminating BizHawk and exiting", s)
 	}
+
+	// Notify IPC that BizHawk has closed
+	c.bipc.SetBizhawkLaunched(false)
 
 	bhMu.Lock()
 	if bhCmd != nil && bhCmd.Process != nil {

@@ -46,7 +46,7 @@ type GUI struct {
 }
 
 // NewGUI creates a new GUI instance.
-func NewGUI(c *Client) *GUI {
+func NewGUI(c *Client, ctx context.Context, cancel context.CancelFunc) *GUI {
 	a := app.NewWithID("com.bizshuffle.client")
 	w := a.NewWindow("BizShuffle Client")
 	w.Resize(fyne.NewSize(500, 600))
@@ -55,6 +55,8 @@ func NewGUI(c *Client) *GUI {
 		app:    a,
 		window: w,
 		client: c,
+		ctx:    ctx,
+		cancel: cancel,
 	}
 
 	g.setupUI()

@@ -1,6 +1,7 @@
 package client
 
 import (
+	"archive/zip"
 	"bufio"
 	"context"
 	"errors"
@@ -354,7 +355,7 @@ func (c *Client) RunGUI() {
 	}
 
 	// Start the GUI (this blocks until the window is closed)
-	gui := NewGUI(c)
+	gui := NewGUI(c, ctx, cancel)
 	gui.Show()
 
 	log.Printf("[Client] GUI window closed, shutdown complete")
@@ -437,13 +438,45 @@ func (c *Client) Run() {
 }
 
 // InitLogging sets up global logging and returns the opened log file which the
-// caller should Close when finished.
+// caller should Close when finished. It rotates old log files by zipping them
+// with a timestamp, similar to Minecraft's logging system.
 func InitLogging(verbose bool) (*os.File, error) {
-	f, err := os.OpenFile("client.log", os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o666)
+	// Create logs directory if it doesn't exist
+	logsDir := "logs"
+	if err := os.MkdirAll(logsDir, 0755); err != nil {
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to create logs directory: %v\n", err)
+		return nil, fmt.Errorf("failed to create logs directory: %w", err)
+	}
+
+	logFilePath := filepath.Join(logsDir, "client.log")
+
+	// Check if old log file exists in logs directory and zip it
+	oldLogPath := filepath.Join(logsDir, "client.log")
+	if _, err := os.Stat(oldLogPath); err == nil {
+		// Old log file exists, zip it with timestamp
+		timestamp := time.Now().Format("2006-01-02-15-04-05")
+		zipFileName := fmt.Sprintf("client-%s.log.zip", timestamp)
+		zipFilePath := filepath.Join(logsDir, zipFileName)
+
+		if err := zipLogFile(oldLogPath, zipFilePath); err != nil {
+			fmt.Fprintf(os.Stderr, "WARNING: Failed to zip old log file: %v\n", err)
+			// Continue anyway, don't fail startup
+		} else {
+			fmt.Fprintf(os.Stderr, "Zipped old log file to: %s\n", zipFilePath)
+			// Remove the old log file after successful zipping
+			if err := os.Remove(oldLogPath); err != nil {
+				fmt.Fprintf(os.Stderr, "WARNING: Failed to remove old log file: %v\n", err)
+			}
+		}
+	}
+
+	// Create new log file
+	f, err := os.OpenFile(logFilePath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0o666)
 	if err != nil {
-		fmt.Fprintf(os.Stderr, "ERROR: Failed to open log file 'client.log': %v\n", err)
+		fmt.Fprintf(os.Stderr, "ERROR: Failed to open log file '%s': %v\n", logFilePath, err)
 		return nil, fmt.Errorf("failed to open log file: %w", err)
 	}
+
 	if verbose {
 		mw := io.MultiWriter(os.Stdout, f)
 		log.SetOutput(mw)
@@ -451,8 +484,46 @@ func InitLogging(verbose bool) (*os.File, error) {
 		log.SetOutput(f)
 	}
 	log.SetFlags(log.Ldate | log.Ltime | log.Lshortfile)
-	log.Printf("[InitLogging] Logging initialized (verbose=%v)", verbose)
+	log.Printf("[InitLogging] Logging initialized (verbose=%v, logs_dir=%s)", verbose, logsDir)
 	return f, nil
+}
+
+// zipLogFile creates a zip archive of the specified log file
+func zipLogFile(logFilePath, zipFilePath string) error {
+	// Open the log file for reading
+	logFile, err := os.Open(logFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to open log file for zipping: %w", err)
+	}
+	defer logFile.Close()
+
+	// Create the zip file
+	zipFile, err := os.Create(zipFilePath)
+	if err != nil {
+		return fmt.Errorf("failed to create zip file: %w", err)
+	}
+	defer zipFile.Close()
+
+	// Create zip writer
+	zipWriter := zip.NewWriter(zipFile)
+	defer zipWriter.Close()
+
+	// Get the filename for the zip entry
+	_, fileName := filepath.Split(logFilePath)
+
+	// Create zip entry
+	zipEntry, err := zipWriter.Create(fileName)
+	if err != nil {
+		return fmt.Errorf("failed to create zip entry: %w", err)
+	}
+
+	// Copy log file content to zip entry
+	_, err = io.Copy(zipEntry, logFile)
+	if err != nil {
+		return fmt.Errorf("failed to copy log content to zip: %w", err)
+	}
+
+	return nil
 }
 
 // BuildWSAndHTTP takes the -server flag value (which may be a ws:// or http://

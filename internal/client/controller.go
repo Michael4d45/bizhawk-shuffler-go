@@ -1,6 +1,7 @@
 package client
 
 import (
+	"archive/zip"
 	"context"
 	"fmt"
 	"log"
@@ -132,7 +133,13 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			log.Printf("sending swap to lua for game=%s", game)
 
-			_ = c.bipc.SendSave(ctx)
+			if c.bipc.IsReady() {
+				_ = c.bipc.SendSave(ctx)
+				if err := c.verifySaveWithRetry(c.bipc.instanceID); err != nil {
+					sendNack(id, "save verification failed: "+err.Error())
+					return
+				}
+			}
 			if err := c.EnsureSaveState(oldInstanceID, instanceID); err != nil {
 				sendNack(id, "save state orchestration failed: "+err.Error())
 				return
@@ -593,4 +600,50 @@ func savePluginSettingsToFile(pluginName string, settings map[string]string) err
 	}
 
 	return nil
+}
+
+// verifySaveWithRetry checks if the save file exists, has size > 0, and is a valid zip file.
+// It retries up to 3 times with 200ms delays between attempts.
+func (c *Controller) verifySaveWithRetry(instanceID string) error {
+	filename := "./saves/" + instanceID + ".state"
+
+	for attempt := range 3 {
+		if attempt > 0 {
+			time.Sleep(200 * time.Millisecond)
+		}
+
+		// file exists?
+		if _, err := os.Stat(filename); err != nil {
+			log.Printf("save file does not exist for instanceID=%s (attempt %d)", instanceID, attempt+1)
+			continue
+		}
+
+		// file size > 0?
+		info, err := os.Stat(filename)
+		if err != nil {
+			log.Printf("failed to stat save file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
+			continue
+		}
+		if info.Size() == 0 {
+			log.Printf("save file size is 0 for instanceID=%s (attempt %d)", instanceID, attempt+1)
+			continue
+		}
+
+		// valid zip file?
+		if file, err := os.Open(filename); err != nil {
+			log.Printf("failed to open save file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
+			continue
+		} else {
+			defer file.Close()
+			if _, err := zip.NewReader(file, info.Size()); err != nil {
+				log.Printf("save file is not a valid zip file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
+				continue
+			}
+		}
+
+		log.Printf("save file verification successful for instanceID=%s", instanceID)
+		return nil
+	}
+
+	return fmt.Errorf("save file verification failed after 3 attempts for instanceID=%s", instanceID)
 }

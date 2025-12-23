@@ -57,6 +57,11 @@ type BizhawkIPC struct {
 	readyMu sync.Mutex
 	ready   bool
 
+	// bizhawkLaunched tracks whether BizHawk has been launched by the client
+	// This prevents IPC from attempting connections before BizHawk is available
+	bizhawkLaunchedMu sync.Mutex
+	bizhawkLaunched   bool
+
 	commandQueue chan *queuedCmd
 
 	instanceID string
@@ -209,6 +214,17 @@ func (b *BizhawkIPC) readLoop(ctx context.Context) {
 		b.mu.Unlock()
 
 		if r == nil || conn == nil {
+			// Only attempt connection if BizHawk has been launched
+			if !b.IsBizhawkLaunched() {
+				select {
+				case <-ctx.Done():
+					log.Printf("bizhawk ipc: readLoop context cancelled while waiting for BizHawk launch")
+					return
+				case <-time.After(500 * time.Millisecond):
+					continue
+				}
+			}
+
 			// try reconnect
 			if err := b.connect(); err != nil {
 				log.Printf("bizhawk ipc: connect failed in readLoop: %v", err)
@@ -484,6 +500,28 @@ func (b *BizhawkIPC) IsReady() bool {
 	b.readyMu.Lock()
 	v := b.ready
 	b.readyMu.Unlock()
+	return v
+}
+
+// SetBizhawkLaunched sets whether BizHawk has been launched by the client.
+func (b *BizhawkIPC) SetBizhawkLaunched(launched bool) {
+	b.bizhawkLaunchedMu.Lock()
+	b.bizhawkLaunched = launched
+	b.bizhawkLaunchedMu.Unlock()
+	if launched {
+		log.Printf("bizhawk ipc: BizHawk launched, IPC will now attempt connections")
+	} else {
+		log.Printf("bizhawk ipc: BizHawk closed, IPC will stop attempting connections")
+		// Also mark as not ready when BizHawk is closed
+		b.SetReady(false)
+	}
+}
+
+// IsBizhawkLaunched returns whether BizHawk has been launched by the client.
+func (b *BizhawkIPC) IsBizhawkLaunched() bool {
+	b.bizhawkLaunchedMu.Lock()
+	v := b.bizhawkLaunched
+	b.bizhawkLaunchedMu.Unlock()
 	return v
 }
 
