@@ -35,6 +35,7 @@ type GUI struct {
 	latestVer       *widget.Label
 	updateBtn       *widget.Button
 	launchBtn       *widget.Button
+	restartBtn      *widget.Button
 	playerName      *widget.Label
 	connectedStatus *widget.Label
 	currentGame     *widget.Label
@@ -102,13 +103,20 @@ func (g *GUI) setupUI() {
 		g.showUpdateWarning()
 	})
 	g.launchBtn = widget.NewButton("Launch BizHawk", func() {
-		g.launchBizHawk()
+		if g.client.bipc.IsBizhawkLaunched() {
+			g.closeBizHawk()
+		} else {
+			g.launchBizHawk()
+		}
+	})
+	g.restartBtn = widget.NewButton("Restart BizHawk", func() {
+		g.restartBizHawk()
 	})
 
 	bizhawkSection := container.NewVBox(
 		widget.NewLabelWithStyle("BizHawk Management", fyne.TextAlignLeading, fyne.TextStyle{Bold: true}),
 		container.NewHBox(g.installVer, layout.NewSpacer(), g.latestVer),
-		container.NewHBox(g.launchBtn, g.updateBtn),
+		container.NewHBox(g.launchBtn, g.restartBtn, g.updateBtn),
 	)
 
 	// Quick Actions
@@ -238,12 +246,23 @@ func (g *GUI) performUpdate() {
 }
 
 func (g *GUI) launchBizHawk() {
-	g.launchBtn.Disable()
-	defer g.launchBtn.Enable()
+	g.launchBizHawkWithRestartMode(false)
+}
+
+func (g *GUI) launchBizHawkWithRestartMode(keepRestartMode bool) {
+	fyne.Do(func() {
+		g.launchBtn.Disable()
+		defer g.launchBtn.Enable()
+	})
 
 	if g.ctx == nil || g.ctx.Err() != nil {
 		log.Printf("GUI: Cannot launch BizHawk - no valid context")
 		return
+	}
+
+	// Only disable restart mode for normal launches (not config updates)
+	if !keepRestartMode {
+		g.client.bhController.SetRestartMode(false)
 	}
 
 	go func() {
@@ -255,6 +274,68 @@ func (g *GUI) launchBizHawk() {
 			})
 		}
 	}()
+}
+
+func (g *GUI) closeBizHawk() {
+	log.Printf("GUI: Closing BizHawk manually")
+
+	// Enable restart mode so BizHawk exit doesn't shut down the client
+	g.client.bhController.SetRestartMode(true)
+
+	// Cancel the context to terminate BizHawk
+	if g.ctx != nil && g.ctx.Err() == nil {
+		g.cancel()
+		// Create new context for potential future launches
+		g.ctx, g.cancel = context.WithCancel(context.Background())
+	}
+}
+
+func (g *GUI) terminateBizHawkForConfig() {
+	log.Printf("GUI: Terminating BizHawk for config update")
+
+	// Enable restart mode so BizHawk exit doesn't shut down the client
+	g.client.bhController.SetRestartMode(true)
+
+	// Reset IPC state to ensure clean reconnection for new BizHawk
+	g.client.bipc.Reset()
+
+	// Terminate BizHawk process directly without cancelling client context
+	g.client.bhController.Terminate()
+
+	// Wait a bit for the old process's MonitorProcess callback to run
+	// This ensures restartMode stays true when the callback checks it
+	time.Sleep(200 * time.Millisecond)
+}
+
+func (g *GUI) setBizHawkRestartMode(mode bool) {
+	log.Printf("GUI: Setting BizHawk restart mode to %v", mode)
+	g.client.bhController.SetRestartMode(mode)
+}
+
+func (g *GUI) restartBizHawk() {
+	log.Printf("GUI: Restarting BizHawk")
+
+	// Check if BizHawk is running
+	wasRunning := g.client.bipc.IsBizhawkLaunched()
+
+	// Close BizHawk if it's running before restart
+	if wasRunning {
+		log.Printf("GUI: Terminating BizHawk before restart")
+		g.terminateBizHawkForConfig()
+	}
+
+	// Small delay to allow BizHawk process cleanup before relaunch
+	time.Sleep(500 * time.Millisecond)
+
+	// Launch BizHawk again (preserving restart mode)
+	if wasRunning {
+		log.Printf("GUI: Launching BizHawk after restart")
+		fyne.Do(func() {
+			g.launchBizHawkWithRestartMode(true)
+		})
+	} else {
+		log.Printf("GUI: BizHawk was not running - start BizHawk to apply restart")
+	}
 }
 
 func (g *GUI) openFolder(path string) {
@@ -314,11 +395,17 @@ func (g *GUI) refreshStatus() {
 		if iid == "" {
 			iid = "None"
 		}
+		// Set BizHawk control callbacks on controller for config updates (only once)
+		ctrl.SetRestartBizhawkCallback(g.restartBizHawk)
+		ctrl.SetBizhawkCallbacks(g.closeBizHawk, g.terminateBizHawkForConfig, g.launchBizHawk, func() { g.launchBizHawkWithRestartMode(true) }, g.setBizHawkRestartMode)
 	} else {
 		game = "None"
 		iid = "None"
 		pending = ""
 	}
+
+	// Check if BizHawk is launched
+	bizhawkLaunched := g.client.bipc.IsBizhawkLaunched()
 
 	// Marshal all UI updates to the main UI thread
 	fyne.Do(func() {
@@ -341,6 +428,15 @@ func (g *GUI) refreshStatus() {
 			g.connectedStatus.SetText("Status: Offline")
 		}
 		g.statusDot.Refresh()
+
+		// Update launch button text and restart button state based on BizHawk status
+		if bizhawkLaunched {
+			g.launchBtn.SetText("Close BizHawk")
+			g.restartBtn.Enable()
+		} else {
+			g.launchBtn.SetText("Launch BizHawk")
+			g.restartBtn.Disable()
+		}
 
 		g.currentGame.SetText("Current Game: " + game)
 		g.instanceID.SetText("Instance ID: " + iid)

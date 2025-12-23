@@ -141,6 +141,30 @@ func (b *BizhawkIPC) connect() error {
 	return nil
 }
 
+// Reset clears connection state for restart without fully closing the IPC
+func (b *BizhawkIPC) Reset() {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	// Close existing connection if any
+	if b.conn != nil {
+		_ = b.conn.Close()
+		b.conn = nil
+	}
+	b.reader = nil
+
+	// Cancel any pending commands
+	if b.pending != nil {
+		select {
+		case b.pending.ch <- errors.New("ipc reset"):
+		default:
+		}
+		b.pending = nil
+	}
+
+	log.Printf("bizhawk ipc: reset connection state for restart")
+}
+
 func (b *BizhawkIPC) Close() error {
 	b.mu.Lock()
 	defer b.mu.Unlock()

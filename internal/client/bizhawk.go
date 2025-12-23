@@ -29,6 +29,14 @@ type BizHawkController struct {
 	bipc        *BizhawkIPC
 	wsClient    *WSClient
 	initialized bool
+
+	// restartMode indicates if BizHawk exits should trigger client shutdown
+	// When true, BizHawk exits are treated as normal (for restarts)
+	restartMode bool
+
+	// currentProcess holds the currently running BizHawk process for direct termination
+	currentProcess *exec.Cmd
+	processMutex   sync.Mutex
 }
 
 // NewBizHawkController creates a new controller with provided API, http client and config.
@@ -208,16 +216,27 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 	c.bipc.SetBizhawkLaunched(true)
 	bhMu.Lock()
 	bhCmd = cmd
+	c.processMutex.Lock()
+	c.currentProcess = cmd
+	c.processMutex.Unlock()
 	bhMu.Unlock()
 
 	if bhCmd != nil {
 		log.Printf("monitoring BizHawk pid=%d", bhCmd.Process.Pid)
 		MonitorProcess(bhCmd, func(err error) {
-			log.Printf("MonitorProcess: BizHawk pid=%d exited with err=%v; cancelling client", bhCmd.Process.Pid, err)
+			log.Printf("MonitorProcess: BizHawk pid=%d exited with err=%v", bhCmd.Process.Pid, err)
 			// Notify IPC that BizHawk has closed
 			c.bipc.SetBizhawkLaunched(false)
-			if origCancel != nil {
+			// Clear current process
+			c.processMutex.Lock()
+			c.currentProcess = nil
+			c.processMutex.Unlock()
+			// Only cancel client if not in restart mode
+			if !c.restartMode && origCancel != nil {
+				log.Printf("MonitorProcess: not in restart mode, cancelling client")
 				origCancel()
+			} else if c.restartMode {
+				log.Printf("MonitorProcess: in restart mode, not cancelling client")
 			}
 		})
 	}
@@ -261,6 +280,54 @@ func (c *BizHawkController) LaunchAndManage(ctx context.Context, origCancel func
 	bhMu.Unlock()
 
 	return nil
+}
+
+// Terminate terminates the currently running BizHawk process if any.
+// This is used for config updates where we need to close BizHawk without
+// cancelling the client context. This method waits for the process to exit.
+func (c *BizHawkController) Terminate() {
+	c.processMutex.Lock()
+	defer c.processMutex.Unlock()
+
+	if c.currentProcess != nil && c.currentProcess.Process != nil {
+		log.Printf("terminating BizHawk pid=%d for config update", c.currentProcess.Process.Pid)
+		pid := c.currentProcess.Process.Pid
+
+		// Kill the process
+		if runtime.GOOS == "windows" {
+			log.Printf("killing BizHawk pid=%d (windows)", pid)
+			_ = c.currentProcess.Process.Kill()
+		} else {
+			log.Printf("sending SIGTERM to BizHawk pid=%d", pid)
+			_ = c.currentProcess.Process.Signal(syscall.SIGTERM)
+
+			// Wait up to 5 seconds for graceful exit, then force kill
+			done := make(chan error, 1)
+			go func() {
+				done <- c.currentProcess.Wait()
+			}()
+
+			select {
+			case err := <-done:
+				if err != nil {
+					log.Printf("BizHawk pid=%d exited with error: %v", pid, err)
+				} else {
+					log.Printf("BizHawk pid=%d exited cleanly", pid)
+				}
+			case <-time.After(5 * time.Second):
+				log.Printf("BizHawk pid=%d didn't exit gracefully, force killing", pid)
+				_ = c.currentProcess.Process.Kill()
+				<-done // Wait for the kill to complete
+				log.Printf("BizHawk pid=%d force killed", pid)
+			}
+		}
+
+		// Clear the process reference
+		c.currentProcess = nil
+
+		// Note: We don't call bipc.SetBizhawkLaunched(false) here because
+		// the MonitorProcess callback will handle that when the process exits
+	}
 }
 
 // TerminateProcess attempts to gracefully stop the given process and falls
@@ -324,6 +391,17 @@ func (c *BizHawkController) GetLatestVersion() (string, error) {
 		return "", err
 	}
 	return strings.TrimPrefix(rel.TagName, "v"), nil
+}
+
+// SetRestartMode sets whether BizHawk exits should trigger client shutdown.
+// When true, BizHawk exits are treated as normal (for restarts).
+func (c *BizHawkController) SetRestartMode(mode bool) {
+	c.restartMode = mode
+}
+
+// IsRestartMode returns whether restart mode is enabled.
+func (c *BizHawkController) IsRestartMode() bool {
+	return c.restartMode
 }
 
 // UpdateBizHawk downloads and updates BizHawk to the latest version.
@@ -500,6 +578,13 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 				if strings.HasPrefix(line, msgHELLO) {
 					log.Printf("ipc handler: received HELLO from lua")
 					c.bipc.SetReady(true)
+
+					// Disable restart mode now that BizHawk is connected and ready
+					// This ensures normal shutdown behavior if user closes BizHawk later
+					if c.restartMode {
+						log.Printf("ipc handler: disabling restart mode now that BizHawk is ready")
+						c.restartMode = false
+					}
 
 					// Notify server that BizHawk is now ready
 					if err := c.wsClient.SendBizhawkReadinessUpdate(true); err != nil {

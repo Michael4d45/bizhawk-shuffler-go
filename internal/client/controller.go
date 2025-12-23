@@ -3,8 +3,10 @@ package client
 import (
 	"archive/zip"
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
+	"maps"
 	"net/http"
 	"os"
 	"path/filepath"
@@ -34,23 +36,64 @@ type Controller struct {
 
 	// helloAck signals when hello has been acknowledged (first CmdGamesUpdate received)
 	helloAck chan struct{}
+
+	// restartBizhawk is called to restart BizHawk after config updates
+	restartBizhawk func()
+	// closeBizhawk is called to close BizHawk
+	closeBizhawk func()
+	// terminateBizhawkForConfig is called to terminate BizHawk for config updates (without cancelling client context)
+	terminateBizhawkForConfig func()
+	// launchBizhawk is called to launch BizHawk (normal launch, resets restart mode)
+	launchBizhawk func()
+	// launchBizhawkForConfig is called to launch BizHawk after config update (preserves restart mode)
+	launchBizhawkForConfig func()
+	// setRestartMode is called to set BizHawk restart mode
+	setRestartMode func(bool)
 }
 
 func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error) *Controller {
-	return NewControllerWithHelloAck(cfg, bipc, api, writeJSON, nil)
+	return NewControllerWithHelloAckAndCallbacks(cfg, bipc, api, writeJSON, nil, nil, nil, nil, nil, nil, nil)
 }
 
 func NewControllerWithHelloAck(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error, helloAck chan struct{}) *Controller {
+	return NewControllerWithHelloAckAndCallbacks(cfg, bipc, api, writeJSON, helloAck, nil, nil, nil, nil, nil, nil)
+}
+
+func NewControllerWithHelloAckAndRestart(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error, helloAck chan struct{}, restartBizhawk func()) *Controller {
+	return NewControllerWithHelloAckAndCallbacks(cfg, bipc, api, writeJSON, helloAck, restartBizhawk, nil, nil, nil, nil, nil)
+}
+
+func NewControllerWithHelloAckAndCallbacks(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(types.Command) error, helloAck chan struct{}, restartBizhawk func(), closeBizhawk func(), terminateBizhawkForConfig func(), launchBizhawk func(), launchBizhawkForConfig func(), setRestartMode func(bool)) *Controller {
 	c := &Controller{
-		cfg:       cfg,
-		bipc:      bipc,
-		api:       api,
-		writeJSON: writeJSON,
-		mainGames: make([]types.GameEntry, 0),
-		helloAck:  helloAck,
+		cfg:                       cfg,
+		bipc:                      bipc,
+		api:                       api,
+		writeJSON:                 writeJSON,
+		mainGames:                 make([]types.GameEntry, 0),
+		helloAck:                  helloAck,
+		restartBizhawk:            restartBizhawk,
+		closeBizhawk:              closeBizhawk,
+		terminateBizhawkForConfig: terminateBizhawkForConfig,
+		launchBizhawk:             launchBizhawk,
+		launchBizhawkForConfig:    launchBizhawkForConfig,
+		setRestartMode:            setRestartMode,
 	}
 	c.progressTracking = NewProgressTrackingAPI(api, c)
 	return c
+}
+
+// SetRestartBizhawkCallback sets the callback function to restart BizHawk
+func (c *Controller) SetRestartBizhawkCallback(restartFunc func()) {
+	c.restartBizhawk = restartFunc
+}
+
+// SetBizhawkCallbacks sets the callback functions for BizHawk control
+func (c *Controller) SetBizhawkCallbacks(closeFunc func(), terminateForConfigFunc func(), launchFunc func(), launchForConfigFunc func(), setRestartModeFunc func(bool)) {
+	c.closeBizhawk = closeFunc
+	c.terminateBizhawkForConfig = terminateForConfigFunc
+	c.launchBizhawk = launchFunc
+	c.launchBizhawkForConfig = launchForConfigFunc
+	c.setRestartMode = setRestartModeFunc
 }
 
 // Handle processes a single incoming command. It launches goroutines for
@@ -426,6 +469,157 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}
 			log.Printf("fullscreen toggle executed (Alt+Enter)")
 			sendAck(id)
+		}(cmd.ID)
+	case types.CmdCheckConfig:
+		go func(id string) {
+			log.Printf("handling check config command")
+			// Read config.ini from BizHawk directory (same dir as EmuHawk.exe)
+			bizhawkDir := filepath.Dir(c.cfg["bizhawk_path"])
+			configPath := filepath.Join(bizhawkDir, "config.ini")
+			configData, err := os.ReadFile(configPath)
+			if err != nil {
+				log.Printf("failed to read config.ini: %v", err)
+				sendNack(id, "failed to read config: "+err.Error())
+				return
+			}
+
+			// Parse JSON config
+			var config map[string]any
+			if err := json.Unmarshal(configData, &config); err != nil {
+				log.Printf("failed to parse config JSON: %v", err)
+				sendNack(id, "failed to parse config: "+err.Error())
+				return
+			}
+
+			// Extract requested config keys
+			var requestedKeys []string
+			if pl, ok := cmd.Payload.(map[string]any); ok {
+				if keys, ok := pl["config_keys"].([]any); ok {
+					for _, key := range keys {
+						if keyStr, ok := key.(string); ok {
+							requestedKeys = append(requestedKeys, keyStr)
+						}
+					}
+				}
+			}
+
+			// Extract values for requested keys
+			configValues := make(map[string]any)
+			for _, key := range requestedKeys {
+				if val, exists := config[key]; exists {
+					configValues[key] = val
+				}
+			}
+
+			// Send config values back to server
+			response := types.Command{
+				Cmd:     types.CmdConfigResponse,
+				Payload: map[string]any{"config_values": configValues},
+				ID:      fmt.Sprintf("config-response-%d", time.Now().UnixNano()),
+			}
+			if err := c.writeJSON(response); err != nil {
+				log.Printf("failed to send config response: %v", err)
+				sendNack(id, "failed to send response: "+err.Error())
+				return
+			}
+			sendAck(id)
+		}(cmd.ID)
+	case types.CmdUpdateConfig:
+		go func(id string) {
+			log.Printf("handling update config command")
+			if pl, ok := cmd.Payload.(map[string]any); ok {
+				if configUpdates, ok := pl["config_updates"].(string); ok {
+					bizhawkDir := filepath.Dir(c.cfg["bizhawk_path"])
+					configPath := filepath.Join(bizhawkDir, "config.ini")
+
+					// Read current config
+					configData, err := os.ReadFile(configPath)
+					if err != nil {
+						log.Printf("failed to read current config.ini: %v", err)
+						sendNack(id, "failed to read current config: "+err.Error())
+						return
+					}
+
+					// Parse current config
+					var config map[string]any
+					if err := json.Unmarshal(configData, &config); err != nil {
+						log.Printf("failed to parse current config JSON: %v", err)
+						sendNack(id, "failed to parse current config: "+err.Error())
+						return
+					}
+
+					// Parse updates
+					var updates map[string]any
+					if err := json.Unmarshal([]byte(configUpdates), &updates); err != nil {
+						log.Printf("failed to parse config updates: %v", err)
+						sendNack(id, "failed to parse config updates: "+err.Error())
+						return
+					}
+
+					// Check if BizHawk is running
+					wasRunning := c.bipc.IsBizhawkLaunched()
+
+					// Close BizHawk if it's running before updating config
+					if wasRunning {
+						if c.terminateBizhawkForConfig != nil {
+							log.Printf("terminating BizHawk before config update")
+							c.terminateBizhawkForConfig()
+						} else {
+							log.Printf("BizHawk is running but no terminate callback available")
+						}
+					}
+
+					// Apply updates to config
+					maps.Copy(config, updates)
+
+					// Write updated config back
+					updatedConfig, err := json.MarshalIndent(config, "", "  ")
+					if err != nil {
+						log.Printf("failed to marshal updated config: %v", err)
+						sendNack(id, "failed to marshal config: "+err.Error())
+						return
+					}
+
+					if err := os.WriteFile(configPath, updatedConfig, 0644); err != nil {
+						log.Printf("failed to write updated config.ini: %v", err)
+						sendNack(id, "failed to write config: "+err.Error())
+						return
+					}
+
+					log.Printf("config updated successfully")
+
+					// Send ACK
+					sendAck(id)
+
+					// Launch BizHawk if it was running before
+					if wasRunning {
+						if c.launchBizhawkForConfig != nil {
+							// Small delay to allow BizHawk process cleanup before relaunch
+							time.Sleep(500 * time.Millisecond)
+							log.Printf("launching BizHawk after config update")
+							c.launchBizhawkForConfig()
+						} else if c.launchBizhawk != nil {
+							// Fallback to normal launch if config-specific launch not available
+							time.Sleep(500 * time.Millisecond)
+							log.Printf("launching BizHawk after config update (using normal launch)")
+							c.launchBizhawk()
+							// Re-enable restart mode after launch to prevent the old BizHawk's
+							// MonitorProcess from cancelling the client if it exits after launch
+							if c.setRestartMode != nil {
+								c.setRestartMode(true)
+							}
+						} else {
+							log.Printf("BizHawk config updated but no launch callback available - manual launch required")
+						}
+					} else {
+						log.Printf("BizHawk config updated - start BizHawk to apply changes")
+					}
+				} else {
+					sendNack(id, "missing config_updates in payload")
+				}
+			} else {
+				sendNack(id, "invalid payload format")
+			}
 		}(cmd.ID)
 	default:
 		sendAck(cmd.ID)

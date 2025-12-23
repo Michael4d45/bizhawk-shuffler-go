@@ -307,6 +307,10 @@
                   class="px-2 py-1 rounded text-xs font-semibold transition bg-purple-600 hover:bg-purple-500">
                   Fullscreen
                 </button>
+                <button @click="checkPlayerConfig(name)"
+                  class="px-2 py-1 rounded text-xs font-semibold transition bg-blue-600 hover:bg-blue-500">
+                  Check Config
+                </button>
                 <button @click="removePlayer(name)"
                   class="px-2 py-1 rounded text-xs font-semibold transition bg-red-600 hover:bg-red-500">
                   Remove
@@ -784,6 +788,54 @@
     </div>
   </div>
 
+  <!-- Config Management Modal -->
+  <div x-show="showConfigModal" x-transition
+    class="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
+    <div class="bg-card rounded-lg w-11/12 max-w-4xl p-4 max-h-[90vh] overflow-y-auto">
+      <div class="flex justify-between items-center mb-4">
+        <h3 class="text-lg font-bold">BizHawk Config: <span x-text="configPlayer"></span></h3>
+        <button @click="closeConfigModal()" class="px-3 py-1 rounded bg-slate-700 hover:bg-slate-600">×</button>
+      </div>
+
+      <div x-show="!getPlayerConfigValues()" class="text-center py-8">
+        <div class="text-gray-400">Loading config...</div>
+      </div>
+
+      <div x-show="getPlayerConfigValues()" class="space-y-4">
+        <div class="text-sm text-gray-400 mb-4">
+          Only the predefined config keys are shown below. You can edit their values and save to apply changes to the player's BizHawk configuration.
+        </div>
+
+        <div class="space-y-3">
+          <template x-for="key in configKeys" :key="key">
+            <div class="border border-white/10 rounded p-3">
+              <label class="block text-sm font-medium text-gray-300 mb-2" x-text="key"></label>
+              <textarea x-model="configValues[key]"
+                class="w-full bg-slate-700 rounded px-2 py-1 text-white font-mono text-sm resize-vertical"
+                :placeholder="'Enter value for ' + key"
+                rows="2"></textarea>
+            </div>
+          </template>
+        </div>
+
+        <div x-show="configKeys.length === 0" class="text-center py-4 text-gray-500">
+          No config keys defined. Set config keys in server state first.
+        </div>
+
+        <div class="mt-6 flex gap-2 justify-end">
+          <button @click="closeConfigModal()" class="px-4 py-2 rounded bg-slate-700 hover:bg-slate-600">
+            Cancel
+          </button>
+              <button @click="savePlayerConfig()"
+              :disabled="!getPlayerConfigValues() || configKeys.length === 0"
+              class="px-4 py-2 rounded bg-orange-600 hover:bg-orange-500 disabled:bg-slate-800 disabled:text-gray-500">
+              Save Config (Restart BizHawk Manually)
+            </button>
+        </div>
+      </div>
+    </div>
+  </div>
+
   <script>
     function app() {
       return {
@@ -827,6 +879,12 @@
           bg: "#000000"
         },
         messageTarget: null, // 'player' or 'all', and player name if player
+        // Config management modal state
+        showConfigModal: false,
+        configPlayer: "",
+        configData: null,
+        configValues: {},
+        configKeys: [],
         // Drag and drop state
         draggedPlayer: null,
         draggedType: null,
@@ -945,6 +1003,30 @@
             return this.state.prevent_same_game_swap ? 'Better Random: ON' : 'Better Random: OFF';
           } else {
             return btn.label;
+          }
+        },
+        getPlayerConfigValues() {
+          if (!this.configPlayer || !this.state.players) return null;
+          const player = this.state.players[this.configPlayer];
+          return player ? player.config_values : null;
+        },
+        // Watch for config data changes and populate form values
+        updateConfigFormValues() {
+          const configData = this.getPlayerConfigValues();
+          if (configData && this.configKeys.length > 0) {
+            this.configValues = {};
+            for (const key of this.configKeys) {
+              if (configData[key] !== undefined) {
+                const val = configData[key];
+                if (typeof val === 'object' || Array.isArray(val)) {
+                  this.configValues[key] = JSON.stringify(val, null, 2);
+                } else {
+                  this.configValues[key] = String(val);
+                }
+              } else {
+                this.configValues[key] = '';
+              }
+            }
           }
         },
         async init() {
@@ -1418,6 +1500,10 @@
                 this.log(`WS Broadcast: ${d.cmd} ${JSON.stringify(d.payload || {})}`);
                 if (d.cmd === "state_update") {
                   this.refreshState();
+                  // Update config form values if config data changed
+                  if (this.showConfigModal && this.configPlayer) {
+                    this.updateConfigFormValues();
+                  }
                 }
               } catch (e) {
                 const timestamp = new Date().toLocaleTimeString();
@@ -1764,6 +1850,117 @@
             }
           } catch (e) {
             this.log('Message send error: ' + e.message);
+          }
+        },
+        // Config management functions
+        async checkPlayerConfig(playerName) {
+          if (!playerName) return;
+
+          this.configPlayer = playerName;
+          this.configValues = {};
+          this.configKeys = this.state.config_keys || [];
+
+          try {
+            // Request config from player
+            const res = await fetch('/api/check_player_config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ player: playerName })
+            });
+
+            if (res.ok) {
+              this.log(`Config check requested for ${playerName}`);
+              // Clear any existing config values and show modal
+              // Values will be populated when state updates arrive
+              this.showConfigModal = true;
+              // Try to populate form immediately in case data is already available
+              setTimeout(() => this.updateConfigFormValues(), 100);
+            } else {
+              const error = await res.text().catch(() => 'request failed');
+              this.log(`Failed to request config for ${playerName}: ${error}`);
+              this.closeConfigModal();
+            }
+          } catch (e) {
+            this.log('Config check error: ' + e.message);
+            this.closeConfigModal();
+          }
+        },
+        closeConfigModal() {
+          this.showConfigModal = false;
+          this.configPlayer = "";
+          this.configValues = {};
+        },
+        async savePlayerConfig() {
+          if (!this.configPlayer) return;
+
+          const playerConfigValues = this.getPlayerConfigValues();
+          if (!playerConfigValues) return;
+
+          // Build object with only the changed values
+          const updates = {};
+          for (const key of this.configKeys) {
+            if (this.configValues[key] !== undefined) {
+              let newValue;
+              // Try to parse as JSON first (for objects/arrays), otherwise use as string
+              try {
+                newValue = JSON.parse(this.configValues[key]);
+              } catch {
+                // If JSON parsing fails, treat as string/number/boolean
+                const val = this.configValues[key];
+                if (val === 'true') {
+                  newValue = true;
+                } else if (val === 'false') {
+                  newValue = false;
+                } else if (!isNaN(val) && val !== '') {
+                  newValue = Number(val);
+                } else {
+                  newValue = val;
+                }
+              }
+
+              // Only include if the value actually changed
+              const currentValue = playerConfigValues[key];
+              if (JSON.stringify(currentValue) !== JSON.stringify(newValue)) {
+                updates[key] = newValue;
+              }
+            }
+          }
+
+          if (Object.keys(updates).length === 0) {
+            this.log('No config changes detected');
+            this.closeConfigModal();
+            return;
+          }
+
+          // Serialize updates to JSON
+          const updatesJson = JSON.stringify(updates);
+
+          if (!confirm(`This will update ${this.configPlayer}'s BizHawk config. You will need to restart BizHawk manually for changes to take effect. Continue?`)) {
+            return;
+          }
+
+          try {
+            const res = await fetch('/api/update_player_config', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ player: this.configPlayer, config: updatesJson })
+            });
+
+            if (res.ok) {
+              this.log(`Config update sent to ${this.configPlayer}`);
+              this.toast = 'Config updated - please restart BizHawk manually';
+              setTimeout(() => this.toast = '', 3000);
+              this.closeConfigModal();
+            } else {
+              const error = await res.text().catch(() => 'update failed');
+              this.log(`Failed to update config for ${this.configPlayer}: ${error}`);
+              this.toast = 'Failed to update config';
+              setTimeout(() => this.toast = '', 2000);
+            }
+          } catch (e) {
+            this.log('Config update error: ' + e.message);
+            this.toast = 'Error updating config';
+            setTimeout(() => this.toast = '', 2000);
           }
         },
         // Drag and Drop Functions

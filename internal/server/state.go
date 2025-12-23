@@ -351,6 +351,12 @@ func (s *Server) loadState() {
 	if tmp.Players == nil {
 		tmp.Players = map[string]types.Player{}
 	}
+	if tmp.ConfigKeys == nil {
+		// Initialize default config keys if not set
+		tmp.ConfigKeys = []string{
+			"DisplayFps",
+		}
+	}
 	if tmp.UpdatedAt.IsZero() {
 		tmp.UpdatedAt = time.Now()
 	}

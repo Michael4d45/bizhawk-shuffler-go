@@ -197,6 +197,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.withLock(func() {
 					delete(s.pending, cmd.ID)
 				})
+			} else {
+				// Log nack/ack for commands not in pending map (like async responses)
+				if cmd.Cmd == types.CmdNack {
+					log.Printf("received nack for non-pending command id=%s payload=%+v", cmd.ID, cmd.Payload)
+				}
 			}
 			continue
 		case types.CmdGamesUpdateAck:
@@ -337,6 +342,26 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				fmt.Printf("[ERROR] Invalid payload type for CmdTypeLua: %T\n", cmd.Payload)
+			}
+			continue
+		case types.CmdConfigResponse:
+			// Handle config response from client
+			if pl, ok := cmd.Payload.(map[string]any); ok {
+				name := ""
+				s.withRLock(func() {
+					name = s.findPlayerNameForClient(client)
+				})
+				if name != "" {
+					if configValues, ok := pl["config_values"].(map[string]any); ok {
+						// Store config values on the player state
+						s.UpdateStateAndPersist(func(st *types.ServerState) {
+							if player, exists := st.Players[name]; exists {
+								player.ConfigValues = configValues
+								st.Players[name] = player
+							}
+						})
+					}
+				}
 			}
 			continue
 		default:
