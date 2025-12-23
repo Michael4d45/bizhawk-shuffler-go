@@ -19,7 +19,7 @@ jobs:
             goarch: amd64
             binary: bizshuffle-client
             zip: bizshuffle-client-linux-amd64.zip
-            cgo: "0"
+            cgo: "1"
           - os: windows-latest
             goos: windows
             goarch: amd64
@@ -39,7 +39,7 @@ jobs:
         if: matrix.os == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev xorg-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libasound2-dev pkg-config
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libglfw3-dev pkg-config
 
       - name: Build binary
         shell: bash
