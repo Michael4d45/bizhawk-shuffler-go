@@ -1,7 +1,18 @@
+// Package server contains game mode handlers that implement different swap behaviors.
+//
+// Game modes determine how players swap between games:
+//   - Sync mode: All players play the same game simultaneously, swapping together.
+//     Each player maintains their own save state for the shared game.
+//   - Save mode: Players have individual game instances and swap save states between each other.
+//     Multiple players can play the same game but with different save files.
+//
+// The "better random" setting (PreventSameGameSwap) controls whether players avoid
+// being assigned the same game they just played, improving variety in random selections.
 package server
 
 import (
 	"errors"
+	"fmt"
 	"log"
 	"math/rand"
 	"os"
@@ -12,6 +23,40 @@ import (
 
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
+
+// InstanceSelectionCriteria holds criteria for selecting an instance
+type InstanceSelectionCriteria struct {
+	ExcludeInstanceIDs  map[string]bool
+	ExcludeGameNames    map[string]bool
+	PreferDifferentGame bool
+	CurrentGame         string
+	CurrentInstanceID   string
+}
+
+// InstanceCategory groups instances by availability and preference
+type InstanceCategory struct {
+	UnassignedDifferentGame     []string
+	UnassignedDifferentInstance []string
+	UnassignedSame              []string
+	AssignedDifferentGame       []string
+	AssignedDifferentInstance   []string
+	AssignedSame                []string
+}
+
+// validateNoDuplicateInstanceAssignments checks that no two players have the same instance ID
+func validateNoDuplicateInstanceAssignments(state *types.ServerState) error {
+	instanceToPlayer := make(map[string]string)
+	for name, player := range state.Players {
+		if player.InstanceID != "" {
+			if existingPlayer, exists := instanceToPlayer[player.InstanceID]; exists {
+				return fmt.Errorf("duplicate instance assignment: instance %s assigned to both %s and %s",
+					player.InstanceID, existingPlayer, name)
+			}
+			instanceToPlayer[player.InstanceID] = name
+		}
+	}
+	return nil
+}
 
 // selectNextGame selects the next game from available games using deterministic random with seed.
 // This function is abstracted to support future ordering modes (e.g., sequential, custom).
@@ -61,20 +106,15 @@ type GameModeHandler interface {
 	HandleRandomSwapForPlayer(param1 string) error
 }
 
-// SyncModeHandler implements the sync game mode
+// SyncModeHandler implements the sync game mode where all players play the same game
 type SyncModeHandler struct {
 	server *Server
 }
 
-func (h *SyncModeHandler) HandleSwap() error {
-	var preventSame bool
-	var games []string
+// getCurrentGame returns the game currently being played by any player in sync mode
+func (h *SyncModeHandler) getCurrentGame() string {
 	var currentGame string
-	var seed int64
 	h.server.withRLock(func() {
-		preventSame = h.server.state.PreventSameGameSwap
-		games = h.server.state.Games
-		seed = h.server.state.SwapSeed
 		for _, player := range h.server.state.Players {
 			if player.Game != "" {
 				currentGame = player.Game
@@ -82,14 +122,62 @@ func (h *SyncModeHandler) HandleSwap() error {
 			}
 		}
 	})
+	return currentGame
+}
 
-	// Initialize seed if not set
+// selectGameForPlayer selects an appropriate game for a player, considering their completed games
+func (h *SyncModeHandler) selectGameForPlayer(player types.Player, games []string, excludeList []string, seed int64) string {
+	playerExclusions := append([]string{}, excludeList...)
+	for _, completed := range player.CompletedGames {
+		playerExclusions = append(playerExclusions, completed)
+	}
+
+	game := selectNextGame(games, playerExclusions, seed)
+	if game == "" {
+		log.Printf("[SyncMode] Player %s has all games completed, skipping game assignment", player.Name)
+	}
+	return game
+}
+
+// initializeSwapSeed ensures the swap seed is set for deterministic random selections
+func (h *SyncModeHandler) initializeSwapSeed() int64 {
+	var seed int64
+	h.server.withRLock(func() {
+		seed = h.server.state.SwapSeed
+	})
+
 	if seed == 0 {
 		seed = time.Now().Unix()
 		h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 			st.SwapSeed = seed
 		})
+		log.Printf("[SyncMode] Initialized swap seed to %d", seed)
 	}
+	return seed
+}
+
+// isGameCompletedForPlayer checks if a game is in the player's completed games list
+func (h *SyncModeHandler) isGameCompletedForPlayer(player types.Player, game string) bool {
+	for _, completedGame := range player.CompletedGames {
+		if completedGame == game {
+			return true
+		}
+	}
+	return false
+}
+
+// HandleSwap performs a synchronized swap where all players switch to the same new game.
+// In sync mode, all players play the same game simultaneously, swapping together as a group.
+func (h *SyncModeHandler) HandleSwap() error {
+	var preventSame bool
+	var games []string
+	h.server.withRLock(func() {
+		preventSame = h.server.state.PreventSameGameSwap
+		games = h.server.state.Games
+	})
+
+	currentGame := h.getCurrentGame()
+	seed := h.initializeSwapSeed()
 
 	// Select next game using deterministic seed
 	exclude := []string{}
@@ -98,70 +186,60 @@ func (h *SyncModeHandler) HandleSwap() error {
 	}
 	game := selectNextGame(games, exclude, seed)
 	if game == "" {
-		// Try without exclusion
+		// Try without exclusion if no game found with current restrictions
 		game = selectNextGame(games, []string{}, seed)
 		if game == "" {
 			return errors.New("no games available for swap")
 		}
 	}
 
+	log.Printf("[SyncMode] Selected game %s for all players (preventSame=%v, seed=%d)",
+		game, preventSame, seed)
+
 	// Increment seed for next swap
-	newSeed := seed + 1
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
-		st.SwapSeed = newSeed
+		st.SwapSeed = seed + 1
 	})
 
-	// In sync mode, check completed games per player and assign accordingly
+	// Assign the game to all players, handling individual completions
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		for name, player := range st.Players {
 			playerGame := game
 			// Check if selected game is completed for this player
-			completed := false
-			for _, cg := range player.CompletedGames {
-				if cg == game {
-					completed = true
-					break
-				}
-			}
-			if completed {
+			if h.isGameCompletedForPlayer(player, game) {
 				// Try to find a different game excluding completed ones
 				excludeList := append([]string{}, player.CompletedGames...)
 				if preventSame && currentGame != "" && currentGame != game {
 					excludeList = append(excludeList, currentGame)
 				}
-				playerGame = selectNextGame(games, excludeList, seed)
+				playerGame = h.selectGameForPlayer(player, games, excludeList, seed)
 				if playerGame == "" {
 					// No available games for this player, skip them
-					log.Printf("Player %s has all games completed, skipping swap", name)
 					continue
 				}
 			}
 			player.Game = playerGame
 			player.InstanceID = ""
 			st.Players[name] = player
+			log.Printf("[SyncMode] Assigned game %s to player %s", playerGame, name)
 		}
 	})
+
 	h.server.sendSwapAll()
 	return nil
 }
 
+// randomGame selects a random game for new players joining sync mode
 func (h *SyncModeHandler) randomGame() string {
 	var games []string
-	var seed int64
 	h.server.withRLock(func() {
 		games = h.server.state.Games
-		seed = h.server.state.SwapSeed
 	})
 	if len(games) == 0 {
 		return ""
 	}
-	// Initialize seed if not set
-	if seed == 0 {
-		seed = time.Now().Unix()
-		h.server.UpdateStateAndPersist(func(st *types.ServerState) {
-			st.SwapSeed = seed
-		})
-	}
+
+	seed := h.initializeSwapSeed()
 	return selectNextGame(games, []string{}, seed)
 }
 
@@ -222,53 +300,178 @@ func (h *SyncModeHandler) HandlePlayerSwap(player string, game string, _ string)
 }
 
 // HandleRandomSwapForPlayer performs a random swap for a specific player in sync mode
-func (h *SyncModeHandler) HandleRandomSwapForPlayer(player string) error {
+func (h *SyncModeHandler) HandleRandomSwapForPlayer(playerName string) error {
+	var player types.Player
+	var found bool
 	var preventSame bool
 	var games []string
-	var currentGame string
-	var completedGames []string
-	var seed int64
+
 	h.server.withRLock(func() {
 		preventSame = h.server.state.PreventSameGameSwap
 		games = h.server.state.Games
-		seed = h.server.state.SwapSeed
-		if p, ok := h.server.state.Players[player]; ok {
-			currentGame = p.Game
-			completedGames = append([]string{}, p.CompletedGames...)
-		}
+		player, found = h.server.state.Players[playerName]
 	})
 
-	// Initialize seed if not set
-	if seed == 0 {
-		seed = time.Now().Unix()
-		h.server.UpdateStateAndPersist(func(st *types.ServerState) {
-			st.SwapSeed = seed
-		})
+	if !found {
+		return fmt.Errorf("player %s not found", playerName)
 	}
 
+	seed := h.initializeSwapSeed()
+
 	// Build exclude list
-	exclude := append([]string{}, completedGames...)
-	if preventSame && currentGame != "" {
-		exclude = append(exclude, currentGame)
+	exclude := append([]string{}, player.CompletedGames...)
+	if preventSame && player.Game != "" {
+		exclude = append(exclude, player.Game)
 	}
 
 	game := selectNextGame(games, exclude, seed)
 	if game == "" {
-		log.Printf("Player %s has no available games for swap (all completed or same game prevented)", player)
+		log.Printf("[SyncMode] Player %s has no available games for random swap (all completed or same game prevented)", playerName)
 		return nil
 	}
+
+	log.Printf("[SyncMode] Random swap for player %s: %s -> %s (preventSame=%v)",
+		playerName, player.Game, game, preventSame)
 
 	// Increment seed for next swap
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
 		st.SwapSeed = seed + 1
 	})
 
-	return h.HandlePlayerSwap(player, game, "")
+	return h.HandlePlayerSwap(playerName, game, "")
 }
 
-// SaveModeHandler implements the save game mode
+// SaveModeHandler implements the save game mode where players swap save states between game instances
 type SaveModeHandler struct {
 	server *Server
+}
+
+// buildCompletedMaps creates fast lookup maps for a player's completed games and instances
+func (h *SaveModeHandler) buildCompletedMaps(player types.Player) (map[string]bool, map[string]bool) {
+	completedInstances := make(map[string]bool)
+	for _, ci := range player.CompletedInstances {
+		completedInstances[ci] = true
+	}
+
+	completedGames := make(map[string]bool)
+	for _, cg := range player.CompletedGames {
+		completedGames[cg] = true
+	}
+
+	return completedInstances, completedGames
+}
+
+// clearInstanceFromPlayer removes an instance assignment from a specific player
+func (h *SaveModeHandler) clearInstanceFromPlayer(instanceID string, excludePlayerName string) {
+	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+		for playerName, player := range st.Players {
+			if player.InstanceID == instanceID && playerName != excludePlayerName {
+				player.Game = ""
+				player.InstanceID = ""
+				st.Players[playerName] = player
+				log.Printf("[SaveMode] Cleared instance %s from player %s", instanceID, playerName)
+				break
+			}
+		}
+	})
+}
+
+// findAvailableInstanceForPlayer finds the best available instance for a player based on criteria
+func (h *SaveModeHandler) findAvailableInstanceForPlayer(
+	player types.Player,
+	gameInstances []types.GameSwapInstance,
+	assignedInstances map[int]bool,
+	preventSame bool,
+) (int, bool) {
+	completedInstances, completedGames := h.buildCompletedMaps(player)
+
+	// Helper function to check if an instance is available
+	isAvailable := func(idx int) bool {
+		inst := gameInstances[idx]
+		return !assignedInstances[idx] &&
+			!completedInstances[inst.ID] &&
+			!completedGames[inst.Game]
+	}
+
+	// Try different preference levels
+	if preventSame && player.Game != "" {
+		// First pass: try to find instance with different game
+		for j := range gameInstances {
+			inst := gameInstances[j]
+			if isAvailable(j) && inst.Game != player.Game {
+				return j, true
+			}
+		}
+		// Second pass: try to find different instance (even if same game)
+		if player.InstanceID != "" {
+			for j := range gameInstances {
+				inst := gameInstances[j]
+				if isAvailable(j) && inst.ID != player.InstanceID {
+					return j, true
+				}
+			}
+		}
+		// Third pass: any available instance (including same game/instance)
+		for j := range gameInstances {
+			if isAvailable(j) {
+				return j, true
+			}
+		}
+	} else {
+		// Find first available instance
+		for j := range gameInstances {
+			if isAvailable(j) {
+				return j, true
+			}
+		}
+	}
+
+	return -1, false
+}
+
+// canPlayerSwapToInstance validates whether a player can swap to a specific instance
+func (h *SaveModeHandler) canPlayerSwapToInstance(player types.Player, instance types.GameSwapInstance, hasOtherPlayer bool, otherPlayer types.Player) bool {
+	// Check if instance's game is completed for this player
+	for _, cg := range player.CompletedGames {
+		if cg == instance.Game {
+			return false
+		}
+	}
+
+	// Check if instance is completed for this player
+	for _, ci := range player.CompletedInstances {
+		if ci == instance.ID {
+			return false
+		}
+	}
+
+	// If swapping with another player, check if current player's game/instance is completed for the other player
+	if hasOtherPlayer {
+		var otherPlayerState types.Player
+		h.server.withRLock(func() {
+			if p, ok := h.server.state.Players[otherPlayer.Name]; ok {
+				otherPlayerState = p
+			}
+		})
+
+		// Check if current player's game is completed for other player
+		for _, cg := range otherPlayerState.CompletedGames {
+			if cg == player.Game {
+				return false
+			}
+		}
+
+		// Check if current player's instance is completed for other player
+		if player.InstanceID != "" {
+			for _, ci := range otherPlayerState.CompletedInstances {
+				if ci == player.InstanceID {
+					return false
+				}
+			}
+		}
+	}
+
+	return true
 }
 
 func (h *SaveModeHandler) waitForFileCheck() bool {
@@ -301,6 +504,10 @@ func (h *SaveModeHandler) waitForFileCheck() bool {
 	return waitingForPendingFiles || waitingForPendingCommands
 }
 
+// HandleSwap performs a full swap of all players to different game instances in save mode.
+// In save mode, players are assigned to different game instances and swap save states between them.
+// The "better random" setting (PreventSameGameSwap) attempts to avoid assigning the same game
+// to players who just played it, improving variety.
 func (h *SaveModeHandler) HandleSwap() error {
 	if h.waitForFileCheck() {
 		return nil
@@ -314,12 +521,16 @@ func (h *SaveModeHandler) HandleSwap() error {
 		return errors.New("no game instances available for swap")
 	}
 
+	log.Printf("[SaveMode] Starting full swap (preventSame=%v)", preventSame)
+
 	h.server.SetPendingAllFiles()
-	// Collect player names and perform state updates under lock where necessary
+
+	// Collect player names and current assignments
 	var players []string
 	playerCurrentGames := make(map[string]string)
 	playerCurrentInstances := make(map[string]string)
 	var gameInstances []types.GameSwapInstance
+
 	h.server.withRLock(func() {
 		for name := range h.server.state.Players {
 			players = append(players, name)
@@ -332,96 +543,56 @@ func (h *SaveModeHandler) HandleSwap() error {
 		copy(gameInstances, h.server.state.GameSwapInstances)
 	})
 
-	// Shuffle instances outside the lock
+	// Shuffle instances for randomness
 	rand.Shuffle(len(gameInstances), func(i, j int) {
 		gameInstances[i], gameInstances[j] = gameInstances[j], gameInstances[i]
 	})
 
 	h.server.UpdateStateAndPersist(func(st *types.ServerState) {
-		// Clear players' InstanceID for a fresh assignment
+		// Clear all players' assignments for a fresh round-robin assignment
 		for n, p := range st.Players {
 			p.InstanceID = ""
 			p.Game = ""
 			st.Players[n] = p
 		}
-		// Assign instances to players: one instance per player up to available instances
+
+		// Assign instances to players using round-robin with preference logic
 		maxAssign := min(len(gameInstances), len(players))
 		assignedInstances := make(map[int]bool) // track assigned instance indices
+
 		for i := range maxAssign {
 			pname := players[i]
-			p := st.Players[pname]
-			currentGame := playerCurrentGames[pname]
-			currentInstance := playerCurrentInstances[pname]
+			player := st.Players[pname]
 
-			// Build completed maps for this player
-			completedInstances := make(map[string]bool)
-			for _, ci := range p.CompletedInstances {
-				completedInstances[ci] = true
-			}
-			completedGames := make(map[string]bool)
-			for _, cg := range p.CompletedGames {
-				completedGames[cg] = true
+			// Create a temporary player object with current game/instance for preference logic
+			tempPlayer := types.Player{
+				Name:               player.Name,
+				Game:               playerCurrentGames[pname],
+				InstanceID:         playerCurrentInstances[pname],
+				CompletedGames:     player.CompletedGames,
+				CompletedInstances: player.CompletedInstances,
 			}
 
-			// Find an available instance, preferring one with different game if preventSame is true
-			// and excluding completed instances/games
-			assignedIdx := -1
-			if preventSame && currentGame != "" {
-				// First pass: try to find instance with different game and not completed
-				for j := range gameInstances {
-					inst := gameInstances[j]
-					if !assignedInstances[j] && inst.Game != currentGame &&
-						!completedInstances[inst.ID] && !completedGames[inst.Game] {
-						assignedIdx = j
-						break
-					}
-				}
-				// Second pass: try to find different instance if player had an instance assigned
-				if assignedIdx == -1 && currentInstance != "" {
-					for j := range gameInstances {
-						inst := gameInstances[j]
-						if !assignedInstances[j] && inst.ID != currentInstance &&
-							!completedInstances[inst.ID] && !completedGames[inst.Game] {
-							assignedIdx = j
-							break
-						}
-					}
-				}
-
-				// If no different game found, assign any available non-completed
-				if assignedIdx == -1 {
-					for j := range gameInstances {
-						inst := gameInstances[j]
-						if !assignedInstances[j] &&
-							!completedInstances[inst.ID] && !completedGames[inst.Game] {
-							assignedIdx = j
-							break
-						}
-					}
-				}
-			} else {
-				// Find first available instance that's not completed
-				for j := range gameInstances {
-					inst := gameInstances[j]
-					if !assignedInstances[j] &&
-						!completedInstances[inst.ID] && !completedGames[inst.Game] {
-						assignedIdx = j
-						break
-					}
-				}
-			}
-
-			if assignedIdx != -1 {
+			// Find the best available instance for this player
+			assignedIdx, found := h.findAvailableInstanceForPlayer(tempPlayer, gameInstances, assignedInstances, preventSame)
+			if found {
 				inst := gameInstances[assignedIdx]
-				p.Game = inst.Game
-				p.InstanceID = inst.ID
-				st.Players[pname] = p
+				player.Game = inst.Game
+				player.InstanceID = inst.ID
+				st.Players[pname] = player
 				assignedInstances[assignedIdx] = true
+				log.Printf("[SaveMode] Assigned instance %s (game %s) to player %s", inst.ID, inst.Game, pname)
 			} else {
-				log.Printf("Player %s has no available instances for swap (all completed)", pname)
+				log.Printf("[SaveMode] Player %s has no available instances for swap (all completed)", pname)
 			}
 		}
+
+		// Validate the final state
+		if err := validateNoDuplicateInstanceAssignments(st); err != nil {
+			log.Printf("[SaveMode] WARNING: State validation failed after swap: %v", err)
+		}
 	})
+
 	h.server.sendSwapAll()
 	return nil
 }
@@ -557,113 +728,133 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	return nil
 }
 
-// getRandomInstanceForPlayer selects a random game instance for the player, avoiding their current game if possible
-func (h *SaveModeHandler) getRandomInstanceForPlayer(player types.Player) (types.GameSwapInstance, bool, types.Player, bool) {
-	// First, try to find instances with different games than the player's current game
-	// and that are not currently assigned to any player
-	// Also filter out completed instances for this player
-	var (
-		preventSame                                    bool
-		playersByInstance                              = make(map[string]types.Player)
-		instanceIDs                                    []string
-		instancesWithPlayer                            []string
-		instancesWithPlayerWithoutPlayersGame          []string
-		instancesWithPlayerWithoutPlayersInstanceID    []string
-		instancesWithoutPlayer                         []string
-		instancesWithoutPlayerWithoutPlayersGame       []string
-		instancesWithoutPlayerWithoutPlayersInstanceID []string
-		completedInstances                             = make(map[string]bool)
-	)
-	// Build completed instances map for fast lookup
-	for _, ci := range player.CompletedInstances {
-		completedInstances[ci] = true
-	}
-	// Also check completed games - if an instance's game is completed, exclude the instance
-	completedGames := make(map[string]bool)
-	for _, cg := range player.CompletedGames {
-		completedGames[cg] = true
-	}
+// categorizeInstances groups available instances by preference level for a player
+func (h *SaveModeHandler) categorizeInstances(player types.Player, preventSame bool) InstanceCategory {
+	completedInstances, completedGames := h.buildCompletedMaps(player)
 
+	playersByInstance := make(map[string]types.Player)
 	h.server.withRLock(func() {
-		preventSame = h.server.state.PreventSameGameSwap
 		for _, pl := range h.server.state.Players {
 			if pl.InstanceID != "" {
 				playersByInstance[pl.InstanceID] = pl
 			}
 		}
-		for _, inst := range h.server.state.GameSwapInstances {
-			// Skip if instance is completed for this player
-			if completedInstances[inst.ID] {
-				continue
-			}
-			// Skip if instance's game is completed for this player
-			if completedGames[inst.Game] {
-				continue
-			}
-			instanceIDs = append(instanceIDs, inst.ID)
-			if playerByInstance, ok := playersByInstance[inst.ID]; ok {
-				if inst.Game != player.Game {
-					instancesWithPlayerWithoutPlayersGame = append(instancesWithPlayerWithoutPlayersGame, inst.ID)
-				} else if inst.ID != player.InstanceID {
-					instancesWithPlayerWithoutPlayersInstanceID = append(instancesWithPlayerWithoutPlayersInstanceID, inst.ID)
-				} else if playerByInstance.Name != player.Name {
-					instancesWithPlayer = append(instancesWithPlayer, inst.ID)
-				}
-			} else {
-				if inst.Game != player.Game {
-					instancesWithoutPlayerWithoutPlayersGame = append(instancesWithoutPlayerWithoutPlayersGame, inst.ID)
-				} else if inst.ID != player.InstanceID {
-					instancesWithoutPlayerWithoutPlayersInstanceID = append(instancesWithoutPlayerWithoutPlayersInstanceID, inst.ID)
-				} else {
-					instancesWithoutPlayer = append(instancesWithoutPlayer, inst.ID)
-				}
-			}
-		}
 	})
 
-	var instanceID string
-	if !preventSame && len(instanceIDs) > 0 {
-		instanceID = instanceIDs[rand.Intn(len(instanceIDs))]
-	} else if len(instancesWithoutPlayerWithoutPlayersGame) > 0 {
-		instanceID = instancesWithoutPlayerWithoutPlayersGame[rand.Intn(len(instancesWithoutPlayerWithoutPlayersGame))]
-	} else if len(instancesWithoutPlayerWithoutPlayersInstanceID) > 0 {
-		instanceID = instancesWithoutPlayerWithoutPlayersInstanceID[rand.Intn(len(instancesWithoutPlayerWithoutPlayersInstanceID))]
-	} else if len(instancesWithoutPlayer) > 0 {
-		instanceID = instancesWithoutPlayer[rand.Intn(len(instancesWithoutPlayer))]
-	} else if len(instancesWithPlayerWithoutPlayersGame) > 0 {
-		instanceID = instancesWithPlayerWithoutPlayersGame[rand.Intn(len(instancesWithPlayerWithoutPlayersGame))]
-	} else if len(instancesWithPlayerWithoutPlayersInstanceID) > 0 {
-		instanceID = instancesWithPlayerWithoutPlayersInstanceID[rand.Intn(len(instancesWithPlayerWithoutPlayersInstanceID))]
-	} else if len(instancesWithPlayer) > 0 {
-		instanceID = instancesWithPlayer[rand.Intn(len(instancesWithPlayer))]
+	category := InstanceCategory{}
+
+	for _, inst := range h.server.state.GameSwapInstances {
+		// Skip completed instances/games
+		if completedInstances[inst.ID] || completedGames[inst.Game] {
+			continue
+		}
+
+		playerByInstance, hasPlayer := playersByInstance[inst.ID]
+
+		if hasPlayer {
+			// Instance is assigned to someone
+			if inst.Game != player.Game {
+				category.AssignedDifferentGame = append(category.AssignedDifferentGame, inst.ID)
+			} else if inst.ID != player.InstanceID {
+				category.AssignedDifferentInstance = append(category.AssignedDifferentInstance, inst.ID)
+			} else if playerByInstance.Name != player.Name {
+				category.AssignedSame = append(category.AssignedSame, inst.ID)
+			}
+		} else {
+			// Instance is unassigned
+			if inst.Game != player.Game {
+				category.UnassignedDifferentGame = append(category.UnassignedDifferentGame, inst.ID)
+			} else if inst.ID != player.InstanceID {
+				category.UnassignedDifferentInstance = append(category.UnassignedDifferentInstance, inst.ID)
+			} else {
+				category.UnassignedSame = append(category.UnassignedSame, inst.ID)
+			}
+		}
+	}
+
+	return category
+}
+
+// getRandomInstanceForPlayer selects a random game instance for the player using priority-based selection.
+// Returns the selected instance, whether it was found, the current player assigned to it (if any), and whether there's a player assigned.
+// When PreventSameGameSwap is enabled, prioritizes instances with different games over same games.
+// Prefers unassigned instances over assigned ones to minimize swap chains.
+func (h *SaveModeHandler) getRandomInstanceForPlayer(player types.Player) (types.GameSwapInstance, bool, types.Player, bool) {
+	var preventSame bool
+	h.server.withRLock(func() {
+		preventSame = h.server.state.PreventSameGameSwap
+	})
+
+	category := h.categorizeInstances(player, preventSame)
+
+	// Select instance ID by priority (best to worst)
+	var selectedID string
+	if !preventSame {
+		// When preventSame is off, allow any instance including current ones
+		var allIDs []string
+		allIDs = append(allIDs, category.UnassignedDifferentGame...)
+		allIDs = append(allIDs, category.UnassignedDifferentInstance...)
+		allIDs = append(allIDs, category.UnassignedSame...)
+		allIDs = append(allIDs, category.AssignedDifferentGame...)
+		allIDs = append(allIDs, category.AssignedDifferentInstance...)
+		allIDs = append(allIDs, category.AssignedSame...)
+		if len(allIDs) > 0 {
+			selectedID = allIDs[rand.Intn(len(allIDs))]
+		}
 	} else {
+		// Priority order: unassigned different game > unassigned different instance > unassigned same > assigned different game > assigned different instance > assigned same
+		if len(category.UnassignedDifferentGame) > 0 {
+			selectedID = category.UnassignedDifferentGame[rand.Intn(len(category.UnassignedDifferentGame))]
+		} else if len(category.UnassignedDifferentInstance) > 0 {
+			selectedID = category.UnassignedDifferentInstance[rand.Intn(len(category.UnassignedDifferentInstance))]
+		} else if len(category.UnassignedSame) > 0 {
+			selectedID = category.UnassignedSame[rand.Intn(len(category.UnassignedSame))]
+		} else if len(category.AssignedDifferentGame) > 0 {
+			selectedID = category.AssignedDifferentGame[rand.Intn(len(category.AssignedDifferentGame))]
+		} else if len(category.AssignedDifferentInstance) > 0 {
+			selectedID = category.AssignedDifferentInstance[rand.Intn(len(category.AssignedDifferentInstance))]
+		} else if len(category.AssignedSame) > 0 {
+			selectedID = category.AssignedSame[rand.Intn(len(category.AssignedSame))]
+		}
+	}
+
+	if selectedID == "" {
 		return types.GameSwapInstance{}, false, types.Player{}, false
 	}
-	otherPlayer, hasOtherPlayer := playersByInstance[instanceID]
+
+	// Find the instance and check if it has a player
 	var instance types.GameSwapInstance
+	var otherPlayer types.Player
+	var hasOtherPlayer bool
+
 	h.server.withRLock(func() {
 		for _, inst := range h.server.state.GameSwapInstances {
-			if inst.ID == instanceID {
+			if inst.ID == selectedID {
 				instance = inst
 				break
 			}
 		}
+		// Check if instance is assigned to someone
+		for _, p := range h.server.state.Players {
+			if p.InstanceID == selectedID {
+				otherPlayer = p
+				hasOtherPlayer = true
+				break
+			}
+		}
 	})
-	return instance, instance.ID != "", otherPlayer, hasOtherPlayer
+
+	return instance, true, otherPlayer, hasOtherPlayer
 }
 
-// HandleRandomSwapForPlayer performs a random swap for a specific player in save mode
+// HandleRandomSwapForPlayer performs a random swap for a specific player in save mode.
+// In save mode, this can result in a chain of swaps if players need to exchange instances.
 func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 	if h.waitForFileCheck() {
 		return nil
 	}
 
-	var (
-		player         types.Player
-		foundPlayer    bool
-		swappedPlayers = make(map[string]bool)
-	)
-	// Read current state
+	var swappedPlayers = make(map[string]bool)
 	h.server.withRLock(func() {
 		for name := range h.server.state.Players {
 			swappedPlayers[name] = false
@@ -671,76 +862,49 @@ func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 	})
 
 	for {
-		// Refresh player data
+		var player types.Player
+		var found bool
 		h.server.withRLock(func() {
-			player, foundPlayer = h.server.state.Players[playerName]
+			player, found = h.server.state.Players[playerName]
 		})
-		if !foundPlayer {
-			return errors.New("player not found: " + playerName)
+		if !found {
+			return fmt.Errorf("player %s not found", playerName)
 		}
 
 		instance, hasInstance, otherPlayer, hasOtherPlayer := h.getRandomInstanceForPlayer(player)
 		if !hasInstance {
-			log.Printf("Player %s has no available instances for swap (all completed)", playerName)
+			log.Printf("[SaveMode] Player %s has no available instances for random swap (all completed)", playerName)
 			break
 		}
 
-		// Check if instance's game is completed for Player A
-		gameCompleted := false
-		for _, cg := range player.CompletedGames {
-			if cg == instance.Game {
-				gameCompleted = true
-				break
-			}
-		}
-		instanceCompleted := false
-		for _, ci := range player.CompletedInstances {
-			if ci == instance.ID {
-				instanceCompleted = true
-				break
-			}
-		}
-		if gameCompleted || instanceCompleted {
-			log.Printf("Player %s cannot swap to instance %s (game %s) - completed", playerName, instance.ID, instance.Game)
+		// Validate that this swap is allowed
+		if !h.canPlayerSwapToInstance(player, instance, hasOtherPlayer, otherPlayer) {
+			log.Printf("[SaveMode] Player %s cannot swap to instance %s (game %s) - validation failed",
+				playerName, instance.ID, instance.Game)
 			break
 		}
 
-		// If swapping with another player, check if Player A's current game is completed for Player B
-		if hasOtherPlayer {
-			var otherPlayerCompleted bool
-			h.server.withRLock(func() {
-				if op, ok := h.server.state.Players[otherPlayer.Name]; ok {
-					// Check if Player A's current game is completed for Player B
-					for _, cg := range op.CompletedGames {
-						if cg == player.Game {
-							otherPlayerCompleted = true
-							break
-						}
-					}
-					// Check if Player A's current instance is completed for Player B
-					if player.InstanceID != "" {
-						for _, ci := range op.CompletedInstances {
-							if ci == player.InstanceID {
-								otherPlayerCompleted = true
-								break
-							}
-						}
-					}
-				}
-			})
-			if otherPlayerCompleted {
-				log.Printf("Player %s cannot swap with %s - Player A's game/instance is completed for Player B", playerName, otherPlayer.Name)
-				break
-			}
-		}
+		log.Printf("[SaveMode] Swapping player %s to instance %s (game %s)",
+			playerName, instance.ID, instance.Game)
 
 		h.server.setPlayerFilePending(player)
 
 		player.InstanceID = instance.ID
 		player.Game = instance.Game
+
 		h.server.UpdateStateAndPersist(func(st *types.ServerState) {
+			// Clear instance from previous owner if swapping with another player
+			if hasOtherPlayer {
+				h.clearInstanceFromPlayer(instance.ID, playerName)
+			}
+			// Assign to current player
 			st.Players[player.Name] = player
+			// Validate no duplicates after assignment
+			if err := validateNoDuplicateInstanceAssignments(st); err != nil {
+				log.Printf("[SaveMode] WARNING: State validation failed: %v", err)
+			}
 		})
+
 		h.server.sendSwap(player)
 		swappedPlayers[player.Name] = true
 
