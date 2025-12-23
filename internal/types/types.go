@@ -46,6 +46,7 @@ const (
 	CmdAck            CommandName = "ack"
 	CmdNack           CommandName = "nack"
 	CmdGamesUpdateAck CommandName = "games_update_ack"
+	CmdStatusUpdate   CommandName = "status_update"
 	CmdTypeLua        CommandName = "lua_command"
 
 	// From Server to Client
@@ -221,11 +222,12 @@ type GameEntry struct {
 
 // Player represents a connected client
 type Player struct {
-	Name       string `json:"name"`
-	HasFiles   bool   `json:"has_files"`
-	Connected  bool   `json:"connected"`
-	Game       string `json:"game,omitempty"`
-	InstanceID string `json:"instance_id,omitempty"`
+	Name         string `json:"name"`
+	HasFiles     bool   `json:"has_files"`
+	Connected    bool   `json:"connected"`
+	BizhawkReady bool   `json:"bizhawk_ready"`
+	Game         string `json:"game,omitempty"`
+	InstanceID   string `json:"instance_id,omitempty"`
 	// PingMs stores the last measured round-trip time to the player in milliseconds.
 	PingMs int `json:"ping_ms,omitempty"`
 	// CompletedGames lists game files that this player has completed (for sync mode)

@@ -24,7 +24,13 @@ type Controller struct {
 	writeJSON        func(types.Command) error
 	// mainGames caches the server's main games list for extra_files lookup
 	mainGames []types.GameEntry
-	mu        sync.RWMutex // protects mainGames
+	mu        sync.RWMutex // protects mainGames and state fields
+
+	// state fields
+	currentGame       string
+	currentInstanceID string
+	pendingFile       string
+
 	// helloAck signals when hello has been acknowledged (first CmdGamesUpdate received)
 	helloAck chan struct{}
 }
@@ -86,6 +92,12 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 				}
 			}
 
+			c.mu.Lock()
+			oldInstanceID := c.currentInstanceID
+			c.currentGame = game
+			c.currentInstanceID = instanceID
+			c.mu.Unlock()
+
 			// Disable auto-save during swap to prevent race conditions
 			if err := c.bipc.SendAutoSaveDisable(ctx); err != nil {
 				log.Printf("Failed to disable auto-save: %v", err)
@@ -98,19 +110,30 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 			}()
 
 			if game != "" {
+				c.mu.Lock()
+				c.pendingFile = game
+				c.mu.Unlock()
+
 				ctx2, cancel2 := context.WithTimeout(ctx, 30*time.Second)
 				log.Printf("ensuring ROM present for game=%s", game)
 				if err := c.progressTracking.EnsureFileWithProgress(ctx2, game); err != nil {
 					cancel2()
+					c.mu.Lock()
+					c.pendingFile = ""
+					c.mu.Unlock()
 					sendNack(id, "download failed: "+err.Error())
 					return
 				}
 				cancel2()
+
+				c.mu.Lock()
+				c.pendingFile = ""
+				c.mu.Unlock()
 			}
 			log.Printf("sending swap to lua for game=%s", game)
 
 			_ = c.bipc.SendSave(ctx)
-			if err := c.EnsureSaveState(instanceID); err != nil {
+			if err := c.EnsureSaveState(oldInstanceID, instanceID); err != nil {
 				sendNack(id, "save state orchestration failed: "+err.Error())
 				return
 			}
@@ -402,7 +425,7 @@ func (c *Controller) Handle(ctx context.Context, cmd types.Command) {
 	}
 }
 
-func (c *Controller) EnsureSaveState(instanceID string) error {
+func (c *Controller) EnsureSaveState(oldInstanceID, instanceID string) error {
 	log.Println("Ensuring save state for instanceID:", instanceID)
 
 	// Create saves directory if it doesn't exist
@@ -411,19 +434,18 @@ func (c *Controller) EnsureSaveState(instanceID string) error {
 		return err
 	}
 
-	// 1. Upload old instance if it exists (current player's save state)
-	go func() {
-		if c.bipc.instanceID != "" {
-			log.Printf("Uploading save state for old instance: %s", c.bipc.instanceID)
-			err := c.api.UploadSaveState(c.bipc.instanceID)
+	if oldInstanceID != "" {
+		// 1. Upload old instance if it exists (current player's save state)
+		go func() {
+			log.Printf("Uploading save state for old instance: %s", oldInstanceID)
+			err := c.api.UploadSaveState(oldInstanceID)
 			if err != nil {
-				log.Printf("Failed to upload old save state for instance %s: %v", c.bipc.instanceID, err)
+				log.Printf("Failed to upload old save state for instance %s: %v", oldInstanceID, err)
 			} else {
-				log.Printf("Successfully uploaded save state for instance %s", c.bipc.instanceID)
+				log.Printf("Successfully uploaded save state for instance %s", oldInstanceID)
 			}
-		}
-	}()
-
+		}()
+	}
 	if instanceID == "" {
 		log.Println("No instanceID provided, skipping save state orchestration")
 		return nil
@@ -444,6 +466,13 @@ func (c *Controller) EnsureSaveState(instanceID string) error {
 	}
 
 	return nil
+}
+
+// GetState returns the current game, instance ID and pending file
+func (c *Controller) GetState() (game, instanceID, pending string) {
+	c.mu.RLock()
+	defer c.mu.RUnlock()
+	return c.currentGame, c.currentInstanceID, c.pendingFile
 }
 
 // GetMainGames returns a copy of the cached main games list

@@ -134,7 +134,7 @@ func (s *Server) handleNoSaveState(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseForm()
+	err := r.ParseMultipartForm(32 << 20) // 32MB max memory
 	if err != nil {
 		http.Error(w, "parse form: "+err.Error(), http.StatusBadRequest)
 		return
@@ -142,9 +142,11 @@ func (s *Server) handleNoSaveState(w http.ResponseWriter, r *http.Request) {
 
 	instanceID := r.FormValue("instance_id")
 	if instanceID == "" {
+		fmt.Println("instance_id required")
 		http.Error(w, "instance_id required", http.StatusBadRequest)
 		return
 	}
+	fmt.Println("handleNoSaveState called for instanceID:", instanceID)
 
 	// Set state to none since there's no save file
 	s.setInstanceFileState(instanceID, types.FileStateNone)

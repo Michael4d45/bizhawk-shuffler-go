@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"log"
 	"mime/multipart"
 	"net/http"
 	"net/url"
@@ -154,22 +155,23 @@ func waitForFileStable(filePath string, timeout time.Duration) error {
 func (a *API) UploadSaveState(instanceID string) error {
 	localPath := "./saves/" + instanceID + ".state"
 
-	// Wait for file to be stable before uploading
+	log.Println("Waiting for file to be stable before uploading")
 	if err := waitForFileStable(localPath, 2*time.Second); err != nil {
-		// If file doesn't exist, inform server
-		if os.IsNotExist(err) {
-			return a.UploadNoSaveState(instanceID)
-		}
-		// Log warning but continue - file might be stable enough
+		log.Println("File is not stable, uploading no save state")
+		return a.UploadNoSaveState(instanceID)
 	}
+	log.Println("File is stable, uploading save state")
 
 	f, err := os.Open(localPath)
 	if err != nil {
+		log.Println("Error opening file:", err)
 		// If the file doesn't exist, just return nil (no save to upload)
 		if os.IsNotExist(err) {
+			log.Println("File does not exist, uploading no save state")
 			// Inform the server that there's no save file
 			return a.UploadNoSaveState(instanceID)
 		}
+		log.Println("Error opening file:", err)
 		return nil
 	}
 	defer func() { _ = f.Close() }()
@@ -207,12 +209,14 @@ func (a *API) UploadSaveState(instanceID string) error {
 func (a *API) UploadNoSaveState(instanceID string) error {
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
+	log.Println("Writing instance_id to multipart writer:", instanceID)
 	_ = w.WriteField("instance_id", instanceID)
 	if err := w.Close(); err != nil {
 		return err
 	}
 	req, err := http.NewRequestWithContext(a.Ctx, "POST", a.BaseURL+"/save/no-save", &buf)
 	if err != nil {
+		log.Println("Error creating request:", err)
 		return err
 	}
 	req.Header.Set("Content-Type", w.FormDataContentType())

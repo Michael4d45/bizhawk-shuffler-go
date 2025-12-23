@@ -31,7 +31,11 @@ func main() {
 	}
 
 	fmt.Fprintf(os.Stderr, "[main] Client initialized, starting runtime...\n")
-	c.Run()
+	if c.GetConfig()["no_gui"] == "true" {
+		c.Run()
+	} else {
+		c.RunGUI()
+	}
 	log.Println("[main] client.Run() returned, exiting process")
 	os.Exit(0)
 }

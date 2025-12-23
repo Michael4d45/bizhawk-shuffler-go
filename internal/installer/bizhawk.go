@@ -176,8 +176,8 @@ const (
 	bizhawkAPIURL    = "https://api.github.com"
 )
 
-// getBizHawkPlatformSuffix returns the platform suffix for BizHawk asset names
-func getBizHawkPlatformSuffix() string {
+// GetBizHawkPlatformSuffix returns the platform suffix for BizHawk asset names
+func GetBizHawkPlatformSuffix() string {
 	switch runtime.GOOS {
 	case "windows":
 		switch runtime.GOARCH {
@@ -209,8 +209,8 @@ func getBizHawkPlatformSuffix() string {
 	}
 }
 
-// getBizHawkLatestRelease fetches the latest BizHawk release from GitHub
-func getBizHawkLatestRelease() (*Release, error) {
+// GetBizHawkLatestRelease fetches the latest BizHawk release from GitHub
+func GetBizHawkLatestRelease() (*Release, error) {
 	url := fmt.Sprintf("%s/repos/%s/%s/releases/latest", bizhawkAPIURL, bizhawkRepoOwner, bizhawkRepoName)
 
 	client := &http.Client{
@@ -246,14 +246,14 @@ func getBizHawkLatestRelease() (*Release, error) {
 // It fetches the latest release from GitHub and finds the appropriate asset
 func GetBizHawkDownloadURL() string {
 	// Fetch latest release
-	release, err := getBizHawkLatestRelease()
+	release, err := GetBizHawkLatestRelease()
 	if err != nil {
 		// Fallback to hardcoded URL if API call fails
 		return "https://github.com/TASEmulators/BizHawk/releases/download/2.10/BizHawk-2.10-win-x64.zip"
 	}
 
 	// Determine platform suffix
-	platformSuffix := getBizHawkPlatformSuffix()
+	platformSuffix := GetBizHawkPlatformSuffix()
 
 	// Build expected asset name pattern (e.g., "BizHawk-2.10-win-x64.zip")
 	// BizHawk releases use tag names like "2.10", so we need to match assets

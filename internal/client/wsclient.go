@@ -37,6 +37,9 @@ type WSClient struct {
 	api  *API
 	bipc *BizhawkIPC
 
+	// controller is the current command handler
+	controller *Controller
+
 	// name is the player name for hello messages
 	name string
 
@@ -54,6 +57,34 @@ func NewWSClient(wsURL string, api *API, bipc *BizhawkIPC) *WSClient {
 		bipc:     bipc,
 		helloAck: make(chan struct{}),
 	}
+}
+
+// GetConnectionStatus returns whether the client is connected to the server and whether BizHawk is ready.
+func (w *WSClient) GetConnectionStatus() (connected, bizhawkReady bool) {
+	w.connMu.Lock()
+	connected = w.conn != nil
+	w.connMu.Unlock()
+
+	if w.bipc != nil {
+		bizhawkReady = w.bipc.IsReady()
+	}
+	return connected, bizhawkReady
+}
+
+// GetController returns the active controller if connected.
+func (w *WSClient) GetController() *Controller {
+	return w.controller
+}
+
+// SendBizhawkReadinessUpdate sends an update to the server about BizHawk readiness status.
+func (w *WSClient) SendBizhawkReadinessUpdate(ready bool) error {
+	update := types.Command{
+		Cmd: types.CmdStatusUpdate,
+		Payload: map[string]any{
+			"bizhawk_ready": ready,
+		},
+	}
+	return w.Send(update)
 }
 
 // Start begins the connection and goroutines. It waits for hello acknowledgment before returning.
@@ -79,8 +110,8 @@ func (w *WSClient) Start(parent context.Context, cfg Config) {
 	sendFunc := func(cmd types.Command) error {
 		return w.SendWithTimeout(cmd, 2*time.Second)
 	}
-	controller := NewControllerWithHelloAck(cfg, w.bipc, w.api, sendFunc, w.helloAck)
-	go w.runController(ctx, controller)
+	w.controller = NewControllerWithHelloAck(cfg, w.bipc, w.api, sendFunc, w.helloAck)
+	go w.runController(ctx, w.controller)
 
 	// wait for hello acknowledgment or context cancellation
 	log.Printf("wsclient: waiting for hello acknowledgment from server...")
@@ -108,6 +139,10 @@ func (w *WSClient) Stop() {
 
 	// Close cmdCh to unblock runController if needed
 	close(w.cmdCh)
+
+	// Reset context state so Start() can be called again
+	w.ctx = nil
+	w.cancel = nil
 }
 
 // Send enqueues a command for sending. Returns error if client is stopped.
@@ -174,17 +209,24 @@ func (w *WSClient) run() {
 		writeDone := make(chan struct{})
 		go w.writer(conn, writeDone)
 
-		// send hello message
+		// send hello message with BizHawk readiness status
+		bizhawkReady := false
+		if w.bipc != nil {
+			bizhawkReady = w.bipc.IsReady()
+		}
 		hello := types.Command{
-			Cmd:     types.CmdHello,
-			Payload: map[string]string{"name": w.name},
+			Cmd: types.CmdHello,
+			Payload: map[string]any{
+				"name":          w.name,
+				"bizhawk_ready": bizhawkReady,
+			},
 		}
 		if err := conn.WriteJSON(hello); err != nil {
 			log.Printf("wsclient: failed to send hello: %v", err)
 			_ = conn.Close()
 			continue
 		}
-		log.Printf("wsclient: sent hello as %s", w.name)
+		log.Printf("wsclient: sent hello as %s (bizhawk_ready: %v)", w.name, bizhawkReady)
 
 		// run reader loop (blocking)
 		w.reader(conn)

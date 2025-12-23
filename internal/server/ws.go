@@ -230,6 +230,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 				player := s.currentPlayer(name)
 				player.Connected = true
+				if bizhawkReady, ok := pl["bizhawk_ready"].(bool); ok {
+					player.BizhawkReady = bizhawkReady
+				}
 				s.UpdateStateAndPersist(func(st *types.ServerState) {
 					st.Players[name] = player
 					s.conns[c] = client
@@ -243,6 +246,24 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				}
 			} else {
 				fmt.Printf("[ERROR] Invalid payload type for CmdHello: %T\n", cmd.Payload)
+			}
+			continue
+		case types.CmdStatusUpdate:
+			if pl, ok := cmd.Payload.(map[string]any); ok {
+				// determine player name and update under locks
+				name := ""
+				s.withRLock(func() {
+					name = s.findPlayerNameForClient(client)
+				})
+				if name != "" {
+					if bizhawkReady, ok := pl["bizhawk_ready"].(bool); ok {
+						s.UpdateStateAndPersist(func(st *types.ServerState) {
+							p := st.Players[name]
+							p.BizhawkReady = bizhawkReady
+							st.Players[name] = p
+						})
+					}
+				}
 			}
 			continue
 		case types.CmdHelloAdmin:

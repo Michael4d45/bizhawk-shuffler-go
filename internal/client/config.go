@@ -80,5 +80,27 @@ func (c Config) EnsureDefaults() error {
 	if c["broadcast_interval_seconds"] == "" {
 		c["broadcast_interval_seconds"] = "5"
 	}
+	if c["auto_open_bizhawk"] == "" {
+		c["auto_open_bizhawk"] = "true"
+	}
 	return nil
+}
+
+// GetBool returns the boolean value of the given key. Defaults to false if not
+// found or invalid.
+func (c Config) GetBool(key string) bool {
+	v, ok := c[key]
+	if !ok {
+		return false
+	}
+	return v == "true" || v == "1" || v == "yes"
+}
+
+// SetBool sets the boolean value of the given key as "true" or "false".
+func (c Config) SetBool(key string, val bool) {
+	if val {
+		c[key] = "true"
+	} else {
+		c[key] = "false"
+	}
 }

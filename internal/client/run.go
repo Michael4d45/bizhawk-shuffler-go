@@ -56,41 +56,47 @@ func New(args []string) (*Client, error) {
 
 	var verbose bool
 	var serverFlag string
+	var noGui bool
 	fs := flag.NewFlagSet("client", flag.ContinueOnError)
 	fs.StringVar(&serverFlag, "server", "", "server URL (ws://, wss://, http:// or https://)")
 	fs.BoolVar(&verbose, "v", false, "enable verbose logging to stdout and file")
+	fs.BoolVar(&noGui, "no-gui", false, "disable graphical user interface")
 	if err := fs.Parse(args); err != nil {
 		return nil, err
 	}
+
+	c := &Client{}
+	var err error
+	c.cfg, err = LoadConfig()
+	if err != nil {
+		return nil, fmt.Errorf("failed to load config: %w", err)
+	}
+	c.cfg["no_gui"] = strconv.FormatBool(noGui)
 
 	logFile, err := InitLogging(verbose)
 	if err != nil {
 		return nil, fmt.Errorf("failed to init logging: %w", err)
 	}
+	c.logFile = logFile
 
-	cfg, err := LoadConfig()
-	if err != nil {
-		_ = logFile.Close()
-		return nil, fmt.Errorf("failed to load config: %w", err)
-	}
-
-	if err := cfg.EnsureDefaults(); err != nil {
+	if err := c.cfg.EnsureDefaults(); err != nil {
 		_ = logFile.Close()
 		return nil, fmt.Errorf("EnsureDefaults: %w", err)
 	}
 
 	httpClient := &http.Client{Timeout: 0}
+	c.api = NewAPI("", httpClient, c.cfg) // Temporary API without server URL
 
 	// Check and install dependencies if needed
 	// Determine install directory - default to installing next to the client executable
 	bizhawkDir := ""
-	if exe, err := os.Executable(); err == nil {
+	if exe, err2 := os.Executable(); err2 == nil {
 		bizhawkDir = filepath.Join(filepath.Dir(exe), "BizHawk")
-	} else if cwd, err := os.Getwd(); err == nil {
+	} else if cwd, err2 := os.Getwd(); err2 == nil {
 		bizhawkDir = filepath.Join(cwd, "BizHawk")
 	}
 
-	configuredPath := cfg["bizhawk_path"]
+	configuredPath := c.cfg["bizhawk_path"]
 	// If bizhawk_path is configured, use its directory as the install directory
 	if configuredPath != "" {
 		bizhawkDir = filepath.Dir(configuredPath)
@@ -120,121 +126,133 @@ func New(args []string) (*Client, error) {
 	}
 
 	// Update config with resolved BizHawk path if it changed
-	oldPath := cfg["bizhawk_path"]
+	oldPath := c.cfg["bizhawk_path"]
 	if resolvedBizhawkPath != oldPath {
-		cfg["bizhawk_path"] = resolvedBizhawkPath
+		c.cfg["bizhawk_path"] = resolvedBizhawkPath
 		log.Printf("Updated bizhawk_path from %s to %s", oldPath, resolvedBizhawkPath)
-		if err := cfg.Save(); err != nil {
+		if err := c.cfg.Save(); err != nil {
 			log.Printf("Warning: Failed to save updated bizhawk_path to config: %v", err)
 		}
 	}
 
-	bhController := NewBizHawkController(nil, httpClient, cfg, nil, nil)
+	bhController := NewBizHawkController(nil, httpClient, c.cfg, nil, nil)
 	bhController.initialized = true
 
-	reader := bufio.NewReader(os.Stdin)
 	serverURL := serverFlag
-	for serverURL == "" {
-		if s, ok := cfg["server"]; ok && s != "" {
-			serverURL = s
-			break
-		}
+	isGui := !noGui
 
-		// Try discovery first
-		fmt.Println("Attempting to discover servers on the network...")
-		startTime := time.Now()
-		discoveredURL, err := discoverServerWithPrompt(cfg)
-		discoveryDuration := time.Since(startTime)
-		log.Printf("[Client] Discovery completed in %v", discoveryDuration)
-		if err != nil {
-			log.Printf("Discovery failed: %v", err)
-			fmt.Println("Falling back to manual entry...")
-		} else if discoveredURL != "" {
-			// Validate and save discovered URL just like manual entry
-			u, err := url.Parse(discoveredURL)
-			if err != nil {
-				fmt.Printf("invalid discovered server URL: %v\n", err)
-				fmt.Println("Falling back to manual entry...")
-			} else {
-				switch u.Scheme {
-				case "ws":
-					u.Scheme = "http"
-				case "wss":
-					u.Scheme = "https"
-				}
-				u.Path = ""
-				u.RawQuery = ""
-				u.Fragment = ""
-				cfg["server"] = u.String()
-				serverURL = u.String()
+	if !isGui {
+		reader := bufio.NewReader(os.Stdin)
+		for serverURL == "" {
+			if s, ok := c.cfg["server"]; ok && s != "" {
+				serverURL = s
 				break
 			}
+
+			// Try discovery first
+			fmt.Println("Attempting to discover servers on the network...")
+			startTime := time.Now()
+			discoveredURL, err := discoverServerWithPrompt(c.cfg)
+			discoveryDuration := time.Since(startTime)
+			log.Printf("[Client] Discovery completed in %v", discoveryDuration)
+			if err != nil {
+				log.Printf("Discovery failed: %v", err)
+				fmt.Println("Falling back to manual entry...")
+			} else if discoveredURL != "" {
+				// Validate and save discovered URL just like manual entry
+				u, err := url.Parse(discoveredURL)
+				if err != nil {
+					fmt.Printf("invalid discovered server URL: %v\n", err)
+					fmt.Println("Falling back to manual entry...")
+				} else {
+					switch u.Scheme {
+					case "ws":
+						u.Scheme = "http"
+					case "wss":
+						u.Scheme = "https"
+					}
+					u.Path = ""
+					u.RawQuery = ""
+					u.Fragment = ""
+					c.cfg["server"] = u.String()
+					serverURL = u.String()
+					break
+				}
+			}
+
+			// Fallback to manual entry
+			fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
+			line, _ := reader.ReadString('\n')
+			serverURL = strings.TrimSpace(line)
+			if serverURL == "" {
+				fmt.Println("server URL cannot be empty")
+				continue
+			}
+			if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://") {
+				// ok
+			} else {
+				fmt.Println("server URL must start with ws://, wss://, http:// or https://")
+				serverURL = ""
+				continue
+			}
+			u, err := url.Parse(serverURL)
+			if err != nil {
+				fmt.Printf("invalid server URL: %v\n", err)
+				serverURL = ""
+				continue
+			}
+			switch u.Scheme {
+			case "ws":
+				u.Scheme = "http"
+			case "wss":
+				u.Scheme = "https"
+			}
+			u.Path = ""
+			u.RawQuery = ""
+			u.Fragment = ""
+			c.cfg["server"] = u.String()
 		}
 
-		// Fallback to manual entry
-		fmt.Print("Server URL (ws://host:port/ws or http://host:port): ")
-		line, _ := reader.ReadString('\n')
-		serverURL = strings.TrimSpace(line)
-		if serverURL == "" {
-			fmt.Println("server URL cannot be empty")
-			continue
-		}
-		if strings.HasPrefix(serverURL, "ws://") || strings.HasPrefix(serverURL, "wss://") || strings.HasPrefix(serverURL, "http://") || strings.HasPrefix(serverURL, "https://") {
-			// ok
-		} else {
-			fmt.Println("server URL must start with ws://, wss://, http:// or https://")
-			serverURL = ""
-			continue
-		}
-		u, err := url.Parse(serverURL)
-		if err != nil {
-			fmt.Printf("invalid server URL: %v\n", err)
-			serverURL = ""
-			continue
-		}
-		switch u.Scheme {
-		case "ws":
-			u.Scheme = "http"
-		case "wss":
-			u.Scheme = "https"
-		}
-		u.Path = ""
-		u.RawQuery = ""
-		u.Fragment = ""
-		cfg["server"] = u.String()
-	}
-
-	for {
-		if n, ok := cfg["name"]; ok && strings.TrimSpace(n) != "" {
+		for {
+			if n, ok := c.cfg["name"]; ok && strings.TrimSpace(n) != "" {
+				break
+			}
+			fmt.Print("Player name: ")
+			line, _ := reader.ReadString('\n')
+			name := strings.TrimSpace(line)
+			if name == "" {
+				fmt.Println("player name cannot be empty")
+				continue
+			}
+			c.cfg["name"] = name
 			break
 		}
-		fmt.Print("Player name: ")
-		line, _ := reader.ReadString('\n')
-		name := strings.TrimSpace(line)
-		if name == "" {
-			fmt.Println("player name cannot be empty")
-			continue
+	} else {
+		if serverURL == "" {
+			serverURL = c.cfg["server"]
 		}
-		cfg["name"] = name
-		break
 	}
 
-	_ = cfg.Save()
+	_ = c.cfg.Save()
 
-	wsURL, serverHTTP, err := BuildWSAndHTTP(serverURL, cfg)
-	if err != nil {
-		_ = logFile.Close()
-		return nil, err
+	var wsURL string
+	var serverHTTP string
+	if serverURL != "" {
+		wsURL, serverHTTP, err = BuildWSAndHTTP(serverURL, c.cfg)
+		if err != nil {
+			_ = logFile.Close()
+			return nil, err
+		}
 	}
 
-	api := NewAPI(serverHTTP, httpClient, cfg)
+	c.api = NewAPI(serverHTTP, httpClient, c.cfg)
 
 	bipc := NewBizhawkIPC()
 
-	wsClient := NewWSClient(wsURL, api, bipc)
+	wsClient := NewWSClient(wsURL, c.api, bipc)
 
 	bhController.wsClient = wsClient
-	bhController.api = api
+	bhController.api = c.api
 	bhController.bipc = bipc
 
 	// Ensure BizhawkFiles are downloaded if needed (check for config.ini)
@@ -243,25 +261,103 @@ func New(args []string) (*Client, error) {
 		// Don't fail startup, just log a warning
 	}
 
-	_ = cfg.Save()
+	_ = c.cfg.Save()
 
 	// Initialize plugin sync manager
-	pluginSyncManager := NewPluginSyncManager(api, httpClient, cfg)
+	pluginSyncManager := NewPluginSyncManager(c.api, httpClient, c.cfg)
 
-	c := &Client{
-		cfg:          cfg,
-		logFile:      logFile,
-		wsClient:     wsClient,
-		api:          api,
-		bhController: bhController,
-		bipc:         bipc,
-
-		discoveryListener: nil,
-
-		pluginSyncManager: pluginSyncManager,
-	}
+	c.wsClient = wsClient
+	c.bhController = bhController
+	c.bipc = bipc
+	c.discoveryListener = nil
+	c.pluginSyncManager = pluginSyncManager
 
 	return c, nil
+}
+
+// GetConfig returns the client's configuration.
+func (c *Client) GetConfig() Config {
+	return c.cfg
+}
+
+// RunGUI starts the client with a graphical user interface.
+func (c *Client) RunGUI() {
+	// Recover from panics to ensure we log something
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("[Client] PANIC in RunGUI(): %v", r)
+			panic(r) // Re-panic so main() can catch it
+		}
+	}()
+
+	log.Printf("[Client] RunGUI() starting")
+	fmt.Fprintf(os.Stderr, "[Client] RunGUI() starting\n")
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer func() {
+		log.Printf("[Client] cancelling context and cleaning up")
+		cancel()
+	}()
+
+	// Set up signal handling as a backup to BizHawkController's signal handling
+	sigs := make(chan os.Signal, 1)
+	signal.Notify(sigs, os.Interrupt, syscall.SIGTERM)
+	go func() {
+		sig := <-sigs
+		log.Printf("[Client] received signal %v, initiating shutdown", sig)
+		cancel()
+	}()
+
+	// Launch BizHawk if auto_open_bizhawk is enabled
+	if c.cfg.GetBool("auto_open_bizhawk") {
+		go func() {
+			log.Printf("[Client] auto-launching BizHawk")
+			if err := c.bhController.LaunchAndManage(ctx, cancel); err != nil {
+				log.Printf("LaunchAndManage error: %v", err)
+				cancel() // Ensure we exit if LaunchAndManage fails
+			}
+		}()
+	}
+
+	log.Printf("[Client] starting bizhawk ipc")
+	if err := c.bipc.Start(ctx); err != nil {
+		log.Printf("bizhawk ipc start error: %v", err)
+		log.Printf("[Client] bizhawk ipc failed to start, continuing anyway...")
+	} else {
+		log.Printf("bizhawk ipc started")
+	}
+	defer func() {
+		_ = c.bipc.Close()
+		log.Printf("closing bizhawk ipc")
+	}()
+
+	log.Printf("[Client] starting bizhawk ipc goroutine")
+	c.bhController.StartIPCGoroutine(ctx)
+
+	log.Printf("[Client] starting websocket client")
+	c.wsClient.Start(ctx, c.cfg)
+	defer c.wsClient.Stop()
+
+	// Perform initial plugin sync
+	log.Printf("[Client] performing initial plugin sync")
+	if result, err := c.pluginSyncManager.SyncPlugins(); err != nil {
+		log.Printf("[Client] plugin sync failed: %v", err)
+	} else {
+		log.Printf("[Client] plugin sync completed: %d total, %d downloaded, %d updated, %d removed in %v",
+			result.TotalPlugins, result.Downloaded, result.Updated, result.Removed, result.Duration)
+		if len(result.Errors) > 0 {
+			log.Printf("[Client] plugin sync had %d errors:", len(result.Errors))
+			for _, err := range result.Errors {
+				log.Printf("[Client]   - %s", err)
+			}
+		}
+	}
+
+	// Start the GUI (this blocks until the window is closed)
+	gui := NewGUI(c)
+	gui.Show()
+
+	log.Printf("[Client] GUI window closed, shutdown complete")
 }
 
 // Run starts the client's runtime: opens connections, starts goroutines and

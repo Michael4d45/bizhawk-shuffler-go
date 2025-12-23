@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/michael4d45/bizshuffle/internal/installer"
 	"github.com/michael4d45/bizshuffle/internal/types"
 )
 
@@ -301,6 +302,156 @@ func TerminateProcess(cmdPtr **exec.Cmd, mu *sync.Mutex, grace time.Duration) {
 	})
 }
 
+// GetInstalledVersion returns the currently installed version of BizHawk.
+func (c *BizHawkController) GetInstalledVersion() string {
+	return c.cfg["bizhawk_version"]
+}
+
+// GetLatestVersion fetches the latest available BizHawk version from GitHub.
+func (c *BizHawkController) GetLatestVersion() (string, error) {
+	rel, err := installer.GetBizHawkLatestRelease()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimPrefix(rel.TagName, "v"), nil
+}
+
+// UpdateBizHawk downloads and updates BizHawk to the latest version.
+func (c *BizHawkController) UpdateBizHawk(progress func(string)) error {
+	if progress == nil {
+		progress = func(string) {}
+	}
+
+	progress("Checking for latest BizHawk version...")
+	rel, err := installer.GetBizHawkLatestRelease()
+	if err != nil {
+		return fmt.Errorf("failed to get latest release: %w", err)
+	}
+
+	tagName := strings.TrimPrefix(rel.TagName, "v")
+	progress(fmt.Sprintf("Latest version is %s", tagName))
+
+	// Find the appropriate asset
+	platformSuffix := installer.GetBizHawkPlatformSuffix()
+	assetName := fmt.Sprintf("BizHawk-%s-%s.zip", tagName, platformSuffix)
+	asset := rel.FindAssetByName(assetName)
+	if asset == nil {
+		// Try alternative naming pattern
+		assetName = fmt.Sprintf("BizHawk-%s-%s.zip", rel.TagName, platformSuffix)
+		asset = rel.FindAssetByName(assetName)
+	}
+
+	if asset == nil {
+		// Fallback: search for any zip with platform suffix
+		for _, a := range rel.Assets {
+			if strings.Contains(a.Name, platformSuffix) && strings.HasSuffix(a.Name, ".zip") {
+				asset = &a
+				break
+			}
+		}
+	}
+
+	if asset == nil {
+		return fmt.Errorf("could not find BizHawk asset for platform %s", platformSuffix)
+	}
+
+	bp := c.cfg["bizhawk_path"]
+	if bp == "" {
+		return fmt.Errorf("bizhawk_path not set")
+	}
+	bizhawkDir := filepath.Dir(bp)
+
+	// Backup config.ini and Firmware if they exist
+	progress("Backing up configuration and firmware...")
+	configPath := filepath.Join(bizhawkDir, "config.ini")
+	firmwarePath := filepath.Join(bizhawkDir, "Firmware")
+	tempDir, err := os.MkdirTemp("", "bizhawk-backup")
+	if err != nil {
+		return fmt.Errorf("failed to create temp dir for backup: %w", err)
+	}
+	defer os.RemoveAll(tempDir)
+
+	configBackup := filepath.Join(tempDir, "config.ini")
+	hasConfig := false
+	if _, err := os.Stat(configPath); err == nil {
+		if err := copyFile(configPath, configBackup); err != nil {
+			return fmt.Errorf("failed to backup config.ini: %w", err)
+		}
+		hasConfig = true
+	}
+
+	firmwareBackup := filepath.Join(tempDir, "Firmware")
+	hasFirmware := false
+	if _, err := os.Stat(firmwarePath); err == nil {
+		if err := copyDir(firmwarePath, firmwareBackup); err != nil {
+			return fmt.Errorf("failed to backup Firmware: %w", err)
+		}
+		hasFirmware = true
+	}
+
+	progress(fmt.Sprintf("Downloading BizHawk %s...", tagName))
+	bhInstaller := installer.NewBizHawkInstaller()
+	if err := bhInstaller.InstallBizHawk(asset.DownloadURL, bizhawkDir, progress); err != nil {
+		return fmt.Errorf("failed to install BizHawk: %w", err)
+	}
+
+	// Restore backups
+	if hasConfig {
+		progress("Restoring config.ini...")
+		if err := copyFile(configBackup, configPath); err != nil {
+			log.Printf("Warning: failed to restore config.ini: %v", err)
+		}
+	}
+	if hasFirmware {
+		progress("Restoring Firmware...")
+		if err := copyDir(firmwareBackup, firmwarePath); err != nil {
+			log.Printf("Warning: failed to restore Firmware: %v", err)
+		}
+	}
+
+	c.cfg["bizhawk_version"] = tagName
+	if err := c.cfg.Save(); err != nil {
+		log.Printf("Warning: failed to save config after update: %v", err)
+	}
+
+	progress("BizHawk updated successfully")
+	return nil
+}
+
+func copyFile(src, dst string) error {
+	in, err := os.Open(src)
+	if err != nil {
+		return err
+	}
+	defer in.Close()
+
+	out, err := os.Create(dst)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	_, err = io.Copy(out, in)
+	return err
+}
+
+func copyDir(src, dst string) error {
+	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+		relPath, err := filepath.Rel(src, path)
+		if err != nil {
+			return err
+		}
+		targetPath := filepath.Join(dst, relPath)
+		if info.IsDir() {
+			return os.MkdirAll(targetPath, info.Mode())
+		}
+		return copyFile(path, targetPath)
+	})
+}
+
 func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 	// Use API.FetchServerState to query the server state for this client/player.
 	go func() {
@@ -315,6 +466,10 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 					log.Printf("bizhawk ipc: incoming channel closed or handler goroutine exiting; marking ipcReady=false")
 					if c.bipc != nil {
 						c.bipc.SetReady(false)
+						// Notify server that BizHawk is no longer ready
+						if err := c.wsClient.SendBizhawkReadinessUpdate(false); err != nil {
+							log.Printf("ipc handler: failed to send BizHawk readiness update: %v", err)
+						}
 					}
 					return
 				}
@@ -323,6 +478,10 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 					log.Printf("bizhawk ipc: disconnected detected from readLoop (ipc handler); marking ipcReady=false and continuing")
 					if c.bipc != nil {
 						c.bipc.SetReady(false)
+						// Notify server that BizHawk is no longer ready
+						if err := c.wsClient.SendBizhawkReadinessUpdate(false); err != nil {
+							log.Printf("ipc handler: failed to send BizHawk readiness update: %v", err)
+						}
 					}
 					// don't cancel the main context here; allow reconnect logic to run
 					continue
@@ -331,6 +490,11 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 				if strings.HasPrefix(line, msgHELLO) {
 					log.Printf("ipc handler: received HELLO from lua")
 					c.bipc.SetReady(true)
+
+					// Notify server that BizHawk is now ready
+					if err := c.wsClient.SendBizhawkReadinessUpdate(true); err != nil {
+						log.Printf("ipc handler: failed to send BizHawk readiness update: %v", err)
+					}
 
 					running := c.bipc.running
 					game := c.bipc.game
