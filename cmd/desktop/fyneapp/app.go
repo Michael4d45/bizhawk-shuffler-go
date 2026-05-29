@@ -3,6 +3,7 @@ package fyneapp
 import (
 	"context"
 	"fmt"
+	"log"
 	"strconv"
 	"sync"
 	"time"
@@ -222,16 +223,17 @@ func Run(opts Options) {
 		if busy {
 			return
 		}
-		opts.StopJoin()
-		if serverStop != nil {
-			serverStop()
-			serverStop = nil
-		}
 		port, _ := strconv.Atoi(portEntry.Text)
 		busy = true
 		updateJoinEnabled()
 		status.SetText("Starting host…")
+		prevStop := serverStop
+		serverStop = nil
 		go func() {
+			opts.StopJoin()
+			if prevStop != nil {
+				prevStop()
+			}
 			adminURL, bindHost, hostPort, stop, err := opts.StartServer(hostEntry.Text, port)
 			fyne.Do(func() {
 				busy = false
@@ -261,16 +263,42 @@ func Run(opts Options) {
 	}
 
 	stopHostBtn.OnTapped = func() {
-		if serverStop != nil {
-			serverStop()
-			serverStop = nil
+		if busy {
+			return
 		}
-		if opts.StopServer != nil {
-			opts.StopServer()
-		}
-		stopHostBtn.Hide()
-		status.SetText("Host stopped")
-		refreshDiscovery()
+		busy = true
+		stopHostBtn.Disable()
+		hostBtn.Disable()
+		updateJoinEnabled()
+		status.SetText("Stopping host…")
+		stopFn := serverStop
+		serverStop = nil
+		go func() {
+			defer func() {
+				fyne.Do(func() {
+					busy = false
+					stopHostBtn.Hide()
+					stopHostBtn.Enable()
+					hostBtn.Enable()
+					status.SetText("Host stopped")
+					updateJoinEnabled()
+					refreshDiscovery()
+				})
+			}()
+			if stopFn != nil {
+				stopFn()
+			}
+			joinDone := make(chan struct{})
+			go func() {
+				opts.StopJoin()
+				close(joinDone)
+			}()
+			select {
+			case <-joinDone:
+			case <-time.After(6 * time.Second):
+				log.Printf("desktop: join cleanup timed out during host stop")
+			}
+		}()
 	}
 
 	joinBtn.OnTapped = func() {

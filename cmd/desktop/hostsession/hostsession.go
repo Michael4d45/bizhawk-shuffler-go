@@ -2,7 +2,9 @@ package hostsession
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"log"
 	"net"
 	"net/http"
 	"regexp"
@@ -21,12 +23,15 @@ type StartResult struct {
 
 // Session holds an embedded BizShuffle server for desktop Host.
 type Session struct {
-	server     *serverhost.Server
-	httpSrv    *http.Server
-	bindHost   string
-	bindPort   int
-	adminURL   string
-	broadcastC context.CancelFunc
+	server        *serverhost.Server
+	httpSrv       *http.Server
+	listener      net.Listener
+	sessionCtx    context.Context
+	sessionCancel context.CancelFunc
+	bindHost      string
+	bindPort      int
+	adminURL      string
+	broadcastC    context.CancelFunc
 }
 
 // NormalizeBindHost validates and normalizes a bind address.
@@ -90,12 +95,16 @@ func (s *Session) Start(ctx context.Context, bindHost string, hostPort int) (Sta
 		listenHost = "0.0.0.0"
 	}
 
-	ln, err := net.Listen("tcp", fmt.Sprintf("%s:%d", listenHost, hostPort))
+	probe, err := net.Listen("tcp", fmt.Sprintf("%s:%d", listenHost, hostPort))
 	if err != nil {
 		return StartResult{}, fmt.Errorf("listen: %w", err)
 	}
-	actualPort := ln.Addr().(*net.TCPAddr).Port
-	_ = ln.Close()
+	actualPort := probe.Addr().(*net.TCPAddr).Port
+	_ = probe.Close()
+
+	sessionCtx, sessionCancel := context.WithCancel(context.Background())
+	s.sessionCtx = sessionCtx
+	s.sessionCancel = sessionCancel
 
 	s.server = serverhost.New()
 	s.server.SetHost(host)
@@ -107,20 +116,32 @@ func (s *Session) Start(ctx context.Context, bindHost string, hostPort int) (Sta
 	bcastCtx, cancel := context.WithCancel(ctx)
 	s.broadcastC = cancel
 	if err := s.server.StartBroadcaster(bcastCtx); err != nil {
-		cancel()
+		sessionCancel()
+		s.sessionCtx = nil
+		s.sessionCancel = nil
 		s.server = nil
 		return StartResult{}, err
 	}
 
 	addr := fmt.Sprintf("%s:%d", listenHost, actualPort)
-	s.httpSrv = &http.Server{Addr: addr, Handler: mux}
-	srv := s.httpSrv
+	ln, err := net.Listen("tcp", addr)
+	if err != nil {
+		_ = s.Stop()
+		return StartResult{}, fmt.Errorf("listen: %w", err)
+	}
+	s.listener = ln
+
+	s.httpSrv = &http.Server{
+		Handler: mux,
+		BaseContext: func(net.Listener) context.Context {
+			return sessionCtx
+		},
+	}
 	go func() {
-		ln2, err := net.Listen("tcp", addr)
-		if err != nil {
-			return
+		err := s.httpSrv.Serve(ln)
+		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+			log.Printf("hostsession: serve ended: %v", err)
 		}
-		_ = srv.Serve(ln2)
 	}()
 
 	if _, err := s.server.SyncCatalogFromRoms(); err != nil {
@@ -144,21 +165,53 @@ func (s *Session) Stop() error {
 	if s == nil {
 		return nil
 	}
+
+	if s.server != nil {
+		s.server.BeginShutdown()
+	}
+
+	// Stop accepting new connections first.
+	if s.listener != nil {
+		_ = s.listener.Close()
+		s.listener = nil
+	}
+
 	if s.broadcastC != nil {
 		s.broadcastC()
 		s.broadcastC = nil
 	}
-	if s.server != nil {
-		_ = s.server.StopBroadcaster()
+
+	// Cancel in-flight /ws request contexts (admin UI, players).
+	if s.sessionCancel != nil {
+		log.Printf("hostsession: cancelling session context")
+		s.sessionCancel()
+		s.sessionCancel = nil
+		s.sessionCtx = nil
 	}
-	var err error
+
+	if s.server != nil {
+		log.Printf("hostsession: draining server")
+		s.server.Shutdown()
+		log.Printf("hostsession: server drained")
+		if err := s.server.StopBroadcaster(); err != nil {
+			log.Printf("hostsession: stop broadcaster: %v", err)
+		}
+		log.Printf("hostsession: broadcaster stopped")
+	}
+
 	if s.httpSrv != nil {
-		err = s.httpSrv.Close()
+		log.Printf("hostsession: closing http server")
+		// Close, not Shutdown: upgraded /ws handlers may still be unwinding; Shutdown can block forever.
+		if err := s.httpSrv.Close(); err != nil {
+			log.Printf("hostsession: http close: %v", err)
+		}
 		s.httpSrv = nil
 	}
+
 	s.server = nil
 	s.bindHost = ""
 	s.bindPort = 0
 	s.adminURL = ""
-	return err
+	log.Printf("hostsession: stopped")
+	return nil
 }

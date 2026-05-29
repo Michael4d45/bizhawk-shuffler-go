@@ -91,14 +91,14 @@ func main() {
 				"requested":  obslog.FormatIntPort(port),
 			})
 			stopFn := func() {
-				obslog.Event(obslog.Host, "stopped", nil)
 				_ = hostSess.Stop()
+				obslog.Event(obslog.Host, "stopped", nil)
 			}
 			return res.AdminURL, res.BindHost, res.HostPort, stopFn, nil
 		},
 		StopServer: func() {
-			obslog.Event(obslog.Host, "stopped", nil)
 			_ = hostSess.Stop()
+			obslog.Event(obslog.Host, "stopped", nil)
 		},
 		HostedURL:   func() string { return hostSess.HostedURL() },
 		OpenBrowser: openBrowser,
@@ -118,6 +118,15 @@ func main() {
 					if onLost != nil {
 						onLost("BizHawk closed — disconnected from server")
 					}
+					go func() {
+						joinMu.Lock()
+						sess := joinSession
+						joinSession = nil
+						joinMu.Unlock()
+						if sess != nil {
+							clienthost.StopJoinSession(sess)
+						}
+					}()
 				},
 			}
 			sess, err := clienthost.StartJoinSession(ctx, dataDir, opts)
@@ -140,11 +149,12 @@ func main() {
 		},
 		StopJoin: func() {
 			joinMu.Lock()
-			if joinSession != nil {
-				clienthost.StopJoinSession(joinSession)
-				joinSession = nil
-			}
+			sess := joinSession
+			joinSession = nil
 			joinMu.Unlock()
+			if sess != nil {
+				clienthost.StopJoinSession(sess)
+			}
 		},
 		DepsSnapshot:   clienthost.GetDependenciesSnapshot,
 		InstallDep:     clienthost.InstallDependency,

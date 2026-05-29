@@ -134,6 +134,8 @@ func (w *WSClient) Start(parent context.Context, cfg Config) {
 	}
 }
 
+const wsStopWait = 5 * time.Second
+
 // Stop signals the client to stop and waits for goroutines to exit.
 func (w *WSClient) Stop() {
 	if w.cancel != nil {
@@ -146,10 +148,22 @@ func (w *WSClient) Stop() {
 		w.conn = nil
 	}
 	w.connMu.Unlock()
-	w.wg.Wait()
+	done := make(chan struct{})
+	go func() {
+		w.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(wsStopWait):
+		log.Printf("wsclient: timed out after %s waiting for run goroutine to exit", wsStopWait)
+	}
 
 	// Close cmdCh to unblock runController if needed
-	close(w.cmdCh)
+	if w.cmdCh != nil {
+		close(w.cmdCh)
+		w.cmdCh = nil
+	}
 
 	// Reset context state so Start() can be called again
 	w.ctx = nil
@@ -275,6 +289,13 @@ func (w *WSClient) run() {
 		select {
 		case <-writeDone:
 		case <-time.After(1 * time.Second):
+		}
+
+		select {
+		case <-w.ctx.Done():
+			log.Printf("wsclient: run loop context done after disconnect, exiting")
+			return
+		default:
 		}
 
 		// loop and reconnect

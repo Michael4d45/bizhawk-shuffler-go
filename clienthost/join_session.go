@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/obslog"
@@ -36,6 +37,7 @@ type JoinSession struct {
 	bhController *BizHawkController
 	wsClient     *WSClient
 	bipc         *BizhawkIPC
+	stopOnce     sync.Once
 }
 
 // StartJoinSession connects as a player after dependencies are satisfied.
@@ -164,20 +166,25 @@ func StartJoinSession(parent context.Context, dataDir string, opts JoinOptions) 
 	return session, nil
 }
 
-// Stop shuts down the join session.
+// Stop shuts down the join session (safe to call more than once).
 func (s *JoinSession) Stop() {
-	if s.cancel != nil {
-		s.cancel()
+	if s == nil {
+		return
 	}
-	if s.wsClient != nil {
-		s.wsClient.Stop()
-	}
-	if s.bipc != nil {
-		_ = s.bipc.Close()
-	}
-	if s.bhController != nil {
-		s.bhController.Terminate()
-	}
+	s.stopOnce.Do(func() {
+		if s.cancel != nil {
+			s.cancel()
+		}
+		if s.wsClient != nil {
+			s.wsClient.Stop()
+		}
+		if s.bipc != nil {
+			_ = s.bipc.Close()
+		}
+		if s.bhController != nil {
+			s.bhController.Terminate()
+		}
+	})
 }
 
 // StopJoinSession stops a session after a brief settle delay (for re-join).

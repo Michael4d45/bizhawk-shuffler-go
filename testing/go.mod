@@ -21,6 +21,7 @@ require (
 	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
 	github.com/michael4d45/bizshuffle/assets v0.0.0 // indirect
+	github.com/michael4d45/bizshuffle/obslog v0.0.0 // indirect
 	github.com/otiai10/gosseract v2.2.1+incompatible // indirect
 	github.com/power-devops/perfstat v0.0.0-20240221224432-82ca36839d55 // indirect
 	github.com/robotn/xgb v0.10.0 // indirect
@@ -44,6 +45,7 @@ replace (
 	github.com/michael4d45/bizshuffle/assets => ../assets
 	github.com/michael4d45/bizshuffle/clienthost => ../clienthost
 	github.com/michael4d45/bizshuffle/domain => ../domain
+	github.com/michael4d45/bizshuffle/obslog => ../obslog
 	github.com/michael4d45/bizshuffle/protocol => ../protocol
 	github.com/michael4d45/bizshuffle/savestate => ../savestate
 	github.com/michael4d45/bizshuffle/serverhost => ../serverhost

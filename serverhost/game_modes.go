@@ -629,7 +629,7 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 }
 
 // categorizeInstances groups available instances by preference level for a player
-func (h *SaveModeHandler) categorizeInstances(player protocol.Player, preventSame bool) InstanceCategory {
+func (h *SaveModeHandler) categorizeInstances(player protocol.Player, _ bool) InstanceCategory {
 	completedInstances, completedGames := h.buildCompletedMaps(player)
 
 	playersByInstance := make(map[string]protocol.Player)

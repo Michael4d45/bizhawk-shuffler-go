@@ -21,39 +21,29 @@ type wsClient struct {
 	sendCh chan protocol.Command
 }
 
-// findPlayerNameForClient returns the player name associated with the given wsClient or
-// empty string if none. Caller must hold s.mu if concurrent access is possible.
-func (s *Server) findPlayerNameForClient(client *wsClient) string {
-	for n, pc := range s.playerClients {
-		if pc == client {
-			return n
-		}
-	}
-	return ""
-}
-
-// findAdminNameForClient returns the admin name associated with the given wsClient or
-// empty string if none. Caller must hold s.mu if concurrent access is possible.
-func (s *Server) findAdminNameForClient(client *wsClient) string {
-	for n, ac := range s.adminClients {
-		if ac == client {
-			return n
-		}
-	}
-	return ""
-}
+const wsWriterDrainWait = 2 * time.Second
 
 // handleWS upgrades to websocket and manages client lifecycle.
 func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
+	s.wsActive.Add(1)
+
 	c, err := s.upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		log.Printf("upgrade: %v", err)
+		s.wsActive.Done()
 		return
 	}
 	client := &wsClient{conn: c, sendCh: make(chan protocol.Command, 256)}
-	s.withLock(func() {
+	s.liveConns.Store(c, client)
+	s.withConnLock(func() {
 		s.conns[c] = client
 	})
+
+	go func() {
+		<-ctx.Done()
+		_ = c.Close()
+	}()
 
 	c.SetReadLimit(1024 * 16)
 	if err := c.SetReadDeadline(time.Now().Add(60 * time.Second)); err != nil {
@@ -72,9 +62,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			sent := time.Unix(0, ts)
 			rtt := time.Since(sent)
 			// Attempt to find player name for this client and store ping in server state
-			name := ""
-			s.withRLock(func() {
-				name = s.findPlayerNameForClient(client)
+			var name string
+			s.withConnRLock(func() {
+				name = s.findPlayerNameForClientLocked(client)
 			})
 			if name != "" {
 				s.UpdateStateAndPersist(func(st *protocol.ServerState) {
@@ -94,6 +84,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		defer func() { ticker.Stop(); writeWG.Done() }()
 		for {
 			select {
+			case <-ctx.Done():
+				return
 			case cmd, ok := <-client.sendCh:
 				if err := c.SetWriteDeadline(time.Now().Add(10 * time.Second)); err != nil {
 					log.Printf("SetWriteDeadline error: %v", err)
@@ -137,26 +129,18 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 
 	defer func() {
 		close(client.sendCh)
-		writeWG.Wait()
-		// remove connection and mark player/admin disconnected under lock
-		s.UpdateStateAndPersist(func(st *protocol.ServerState) {
-			if cl, ok := s.conns[c]; ok {
-				if name := s.findPlayerNameForClient(cl); name != "" {
-					pl := st.Players[name]
-					pl.Connected = false
-					pl.BizhawkReady = false
-					st.Players[name] = pl
-					s.clearPendingForPlayer(st, name)
-					delete(s.playerClients, name)
-					s.ClearAppliedSwap(name)
-				} else if adminName := s.findAdminNameForClient(cl); adminName != "" {
-					// Handle admin disconnection - could add admin state management here if needed
-					delete(s.adminClients, adminName)
-					log.Printf("Admin %s disconnected", adminName)
-				}
-				delete(s.conns, c)
-			}
-		})
+		writerDone := make(chan struct{})
+		go func() {
+			writeWG.Wait()
+			close(writerDone)
+		}()
+		select {
+		case <-writerDone:
+		case <-time.After(wsWriterDrainWait):
+			log.Printf("ws: writer drain timeout")
+		}
+		s.wsActive.Done()
+		s.removeWSClient(c, client)
 		if err := c.Close(); err != nil {
 			log.Printf("websocket close error: %v", err)
 		}
@@ -211,8 +195,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case protocol.CmdGamesUpdateAck:
 			// determine player name and update under locks
 			name := ""
-			s.withRLock(func() {
-				name = s.findPlayerNameForClient(client)
+			s.withConnRLock(func() {
+				name = s.findPlayerNameForClientLocked(client)
 			})
 			if name != "" {
 				if pl, ok := cmd.Payload.(map[string]any); ok {
@@ -241,6 +225,10 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if v, ok := pl["bizhawk_ready"].(bool); ok {
 					bizhawkReady = v
 				}
+				s.withConnLock(func() {
+					s.conns[c] = client
+					s.playerClients[name] = client
+				})
 				s.UpdateStateAndPersist(func(st *protocol.ServerState) {
 					if st.Players == nil {
 						st.Players = make(map[string]protocol.Player)
@@ -252,8 +240,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					p.Connected = true
 					p.BizhawkReady = bizhawkReady
 					st.Players[name] = p
-					s.conns[c] = client
-					s.playerClients[name] = client
 				})
 
 				player := s.AssignPlayerOnConnect(name)
@@ -284,8 +270,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 		case protocol.CmdStatusUpdate:
 			if pl, ok := cmd.Payload.(map[string]any); ok {
 				name := ""
-				s.withRLock(func() {
-					name = s.findPlayerNameForClient(client)
+				s.withConnRLock(func() {
+					name = s.findPlayerNameForClientLocked(client)
 				})
 				if name == "" {
 					continue
@@ -330,8 +316,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					continue
 				}
 
-				// Register the admin connection
-				s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+				s.withConnLock(func() {
 					s.conns[c] = client
 					s.adminClients[name] = client
 				})
@@ -377,8 +362,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					}
 				case protocol.LuaCmdSwapMe:
 					name := ""
-					s.withRLock(func() {
-						name = s.findPlayerNameForClient(client)
+					s.withConnRLock(func() {
+						name = s.findPlayerNameForClientLocked(client)
 					})
 					if name == "" {
 						fmt.Printf("[ERROR] LuaCmdSwapMe: could not determine player name for client\n")
@@ -396,8 +381,8 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 			// Handle config response from client
 			if pl, ok := cmd.Payload.(map[string]any); ok {
 				name := ""
-				s.withRLock(func() {
-					name = s.findPlayerNameForClient(client)
+				s.withConnRLock(func() {
+					name = s.findPlayerNameForClientLocked(client)
 				})
 				if name != "" {
 					if configValues, ok := pl["config_values"].(map[string]any); ok {
@@ -421,7 +406,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 // broadcastToPlayers sends a command to all currently connected players.
 func (s *Server) broadcastToPlayers(cmd protocol.Command) {
 	clients := make([]*wsClient, 0, len(s.playerClients))
-	s.withRLock(func() {
+	s.withConnRLock(func() {
 		for _, cl := range s.playerClients {
 			clients = append(clients, cl)
 		}
@@ -441,7 +426,7 @@ func (s *Server) broadcastToPlayers(cmd protocol.Command) {
 // broadcastToAdmins sends a command to all currently connected admins.
 func (s *Server) broadcastToAdmins(cmd protocol.Command) {
 	clients := make([]*wsClient, 0, len(s.adminClients))
-	s.withRLock(func() {
+	s.withConnRLock(func() {
 		for _, cl := range s.adminClients {
 			clients = append(clients, cl)
 		}
@@ -474,11 +459,79 @@ func (s *Server) broadcastGamesUpdate(player *protocol.Player) {
 	}
 }
 
+// removeWSClient unregisters a websocket client. Connection maps use connMu; player state uses UpdateStateAndPersist.
+func (s *Server) removeWSClient(conn *websocket.Conn, client *wsClient) {
+	s.liveConns.Delete(conn)
+
+	var playerName, adminName string
+	s.withConnLock(func() {
+		cl, ok := s.conns[conn]
+		if !ok || cl != client {
+			return
+		}
+		playerName = s.findPlayerNameForClientLocked(cl)
+		adminName = s.findAdminNameForClientLocked(cl)
+		if playerName != "" {
+			delete(s.playerClients, playerName)
+		} else if adminName != "" {
+			delete(s.adminClients, adminName)
+		}
+		delete(s.conns, conn)
+	})
+
+	if playerName != "" {
+		s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+			pl := st.Players[playerName]
+			pl.Connected = false
+			pl.BizhawkReady = false
+			st.Players[playerName] = pl
+			s.clearPendingForPlayer(st, playerName)
+		})
+		s.ClearAppliedSwap(playerName)
+	} else if adminName != "" {
+		log.Printf("Admin %s disconnected", adminName)
+	}
+}
+
+const closeWebSocketsWait = 2 * time.Second
+
+// CloseWebSockets closes all active websocket connections so HTTP shutdown can finish.
+// Upgraded /ws handlers do not exit on Server.Shutdown alone; callers must close conns first.
+// Connections are closed without holding s.mu: handleWS defer calls UpdateStateAndPersist
+// which also takes the write lock — closing while locked deadlocks shutdown.
+func (s *Server) CloseWebSockets() {
+	s.closeWebSocketsBounded(closeWebSocketsWait)
+}
+
+func (s *Server) closeWebSocketsBounded(wait time.Duration) {
+	var toClose []*websocket.Conn
+	s.liveConns.Range(func(key, _ any) bool {
+		toClose = append(toClose, key.(*websocket.Conn))
+		return true
+	})
+	if len(toClose) == 0 {
+		return
+	}
+	done := make(chan struct{})
+	go func() {
+		for _, conn := range toClose {
+			_ = conn.SetReadDeadline(time.Now())
+			_ = conn.Close()
+		}
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(wait):
+		log.Printf("serverhost: websocket close timed out (%d connections)", len(toClose))
+	}
+}
+
 // sendToPlayer enqueues a command to a player's websocket send queue.
 func (s *Server) sendToPlayer(player protocol.Player, cmd protocol.Command) error {
 	var client *wsClient
 	var ok bool
-	s.withRLock(func() {
+	s.withConnRLock(func() {
 		client, ok = s.playerClients[player.Name]
 	})
 	if !ok || client == nil {
@@ -491,29 +544,37 @@ func (s *Server) sendToPlayer(player protocol.Player, cmd protocol.Command) erro
 		ID:      cmd.ID,
 	})
 
-	select {
-	case client.sendCh <- cmd:
-		return nil
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("send queue full for player %s (timeout after 5s)", player.Name)
-	}
+	return enqueueWSCommand(client.sendCh, cmd, 5*time.Second, fmt.Sprintf("player %s", player.Name))
+}
+
+func enqueueWSCommand(ch chan protocol.Command, cmd protocol.Command, timeout time.Duration, label string) error {
+	var err error
+	func() {
+		defer func() {
+			if r := recover(); r != nil {
+				err = fmt.Errorf("%s disconnected", label)
+			}
+		}()
+		select {
+		case ch <- cmd:
+		case <-time.After(timeout):
+			err = fmt.Errorf("send queue full for %s (timeout after %s)", label, timeout)
+		}
+	}()
+	return err
 }
 
 func (s *Server) sendPing(player protocol.Player) error {
 	var client *wsClient
 	var ok bool
-	s.withRLock(func() {
+	s.withConnRLock(func() {
 		client, ok = s.playerClients[player.Name]
 	})
 	if !ok || client == nil {
 		return fmt.Errorf("no connection for player %s", player.Name)
 	}
-	select {
-	case client.sendCh <- protocol.Command{Cmd: protocol.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}:
-	case <-time.After(5 * time.Second):
-		return fmt.Errorf("send queue full for player %s (timeout after 5s)", player.Name)
-	}
-	return nil
+	ping := protocol.Command{Cmd: protocol.CmdPing, Payload: fmt.Sprintf("%d", time.Now().UnixNano()), ID: fmt.Sprintf("ping-%d", time.Now().UnixNano())}
+	return enqueueWSCommand(client.sendCh, ping, 5*time.Second, fmt.Sprintf("player %s", player.Name))
 }
 
 // broadcastPluginSettingsUpdate broadcasts plugin settings changes to all connected clients

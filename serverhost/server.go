@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"os"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -13,8 +14,15 @@ import (
 )
 
 // Server encapsulates all state and connected websocket clients.
+//
+// Lock ownership:
+//   - connMu: websocket registries (conns, playerClients, adminClients)
+//   - mu: server state, pending acks, swap tracking, plugins in memory
+//   - liveConns: lock-free snapshot for shutdown socket close
+//   - broadcaster: atomic.Pointer, stopped without mu
 type Server struct {
 	mu                   sync.RWMutex
+	connMu               sync.RWMutex
 	pendingInstancecount int
 	state                protocol.ServerState
 	conns                map[*websocket.Conn]*wsClient
@@ -23,13 +31,16 @@ type Server struct {
 	upgrader             websocket.Upgrader
 	pending              map[string]chan string
 	schedulerCh          chan struct{}
-	broadcaster          *DiscoveryBroadcaster
+	broadcaster          atomic.Pointer[DiscoveryBroadcaster]
 	saveChan             chan struct{}
 	saveTimer            *time.Timer
 	saveMutex            sync.Mutex
 	appliedSwapTarget    map[string]string
 	swapInFlight         map[string]struct{}
 	openInFileManager    func(path string) error // nil: use OS default (explorer/open/xdg-open)
+	wsActive             sync.WaitGroup
+	shuttingDown         int32
+	liveConns            sync.Map // *websocket.Conn -> *wsClient; used for shutdown without s.mu
 }
 
 // ErrTimeout is exported so callers can detect timeout waiting for a client ack/nack.
@@ -145,44 +156,32 @@ func (s *Server) SetPort(port int) {
 func (s *Server) PersistedPort() int { return s.SnapshotState().Port }
 
 func (s *Server) StartBroadcaster(ctx context.Context) error {
-	var startedErr error
-	s.withLock(func() {
-		if s.broadcaster != nil {
-			startedErr = s.broadcaster.Start(ctx)
-			return
-		}
-		// Create default discovery config
-		config := protocol.GetDefaultDiscoveryConfig()
-
-		// Get server info
-		host := s.state.Host
-		if host == "" {
-			host = "127.0.0.1" // fallback
-		}
-		port := s.state.Port
-		if port == 0 {
-			port = 8080 // fallback
-		}
-		serverName := s.GetServerName()
-
-		// Initialize broadcaster
-		s.broadcaster = NewDiscoveryBroadcaster(config, host, port, serverName)
-	})
-	if startedErr != nil {
-		return startedErr
+	if b := s.broadcaster.Load(); b != nil {
+		return b.Start(ctx)
 	}
-	return s.broadcaster.Start(ctx)
+	st := s.SnapshotState()
+	host := st.Host
+	if host == "" {
+		host = "127.0.0.1"
+	}
+	port := st.Port
+	if port == 0 {
+		port = 8080
+	}
+	nb := NewDiscoveryBroadcaster(protocol.GetDefaultDiscoveryConfig(), host, port, s.GetServerName())
+	if !s.broadcaster.CompareAndSwap(nil, nb) {
+		return s.broadcaster.Load().Start(ctx)
+	}
+	return nb.Start(ctx)
 }
 
-// StopBroadcaster stops the discovery broadcaster
+// StopBroadcaster stops the discovery broadcaster without taking s.mu.
 func (s *Server) StopBroadcaster() error {
-	var stopErr error
-	s.withLock(func() {
-		if s.broadcaster != nil {
-			stopErr = s.broadcaster.Stop()
-		}
-	})
-	return stopErr
+	b := s.broadcaster.Swap(nil)
+	if b == nil {
+		return nil
+	}
+	return b.Stop()
 }
 
 // GetServerName returns a human-readable name for this server

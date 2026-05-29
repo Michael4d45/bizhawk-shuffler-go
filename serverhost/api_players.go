@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/gorilla/websocket"
 	"github.com/michael4d45/bizshuffle/protocol"
 )
 
@@ -92,18 +93,25 @@ func (s *Server) apiRemovePlayer(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "missing player", http.StatusBadRequest)
 		return
 	}
-	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
-		delete(st.Players, b.Player)
+	var toClose *websocket.Conn
+	s.withConnLock(func() {
 		if cl, ok := s.playerClients[b.Player]; ok {
 			for c, client := range s.conns {
 				if client == cl {
+					toClose = c
 					delete(s.conns, c)
-					_ = c.Close()
+					s.liveConns.Delete(c)
 					break
 				}
 			}
 			delete(s.playerClients, b.Player)
 		}
+	})
+	if toClose != nil {
+		_ = toClose.Close()
+	}
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		delete(st.Players, b.Player)
 	})
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
