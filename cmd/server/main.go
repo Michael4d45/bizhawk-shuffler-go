@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -50,10 +49,6 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", chosenHost, chosenPort)
 	mux := http.NewServeMux()
 	s.RegisterRoutes(mux)
-
-	if err := s.StartBroadcaster(context.Background()); err != nil {
-		log.Printf("discovery broadcaster: %v", err)
-	}
 
 	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() {

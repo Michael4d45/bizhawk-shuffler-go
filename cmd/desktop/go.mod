@@ -6,7 +6,6 @@ require (
 	fyne.io/fyne/v2 v2.7.0
 	github.com/michael4d45/bizshuffle/clienthost v0.0.0
 	github.com/michael4d45/bizshuffle/obslog v0.0.0
-	github.com/michael4d45/bizshuffle/protocol v0.0.0
 	github.com/michael4d45/bizshuffle/serverhost v0.0.0
 )
 
@@ -41,6 +40,7 @@ require (
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
 	github.com/michael4d45/bizshuffle/assets v0.0.0 // indirect
+	github.com/michael4d45/bizshuffle/protocol v0.0.0 // indirect
 	github.com/michael4d45/bizshuffle/savestate v0.0.0 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect

@@ -21,7 +21,7 @@ type InspectorRow struct {
 func NewInspectorRow(labelText, detailText string, action fyne.CanvasObject) *InspectorRow {
 	label := widget.NewLabel(labelText)
 	label.Alignment = fyne.TextAlignTrailing
-	label.Wrapping = fyne.TextTruncate
+	label.Truncation = fyne.TextTruncateClip
 	labelPad := canvas.NewRectangle(color.Transparent)
 	labelPad.SetMinSize(fyne.NewSize(LabelWidth, 1))
 	labelCol := container.NewStack(labelPad, label)
@@ -57,31 +57,4 @@ func (r *InspectorRow) SetActionEnabled(enabled bool) {
 			b.Disable()
 		}
 	}
-}
-
-// DiscoveryRow is a list item template: primary label + muted URL.
-type DiscoveryRow struct {
-	fyne.CanvasObject
-	Title *widget.Label
-	URL   *widget.Label
-}
-
-// NewDiscoveryRow creates a discovery list row template.
-func NewDiscoveryRow() *DiscoveryRow {
-	title := widget.NewLabel("")
-	title.TextStyle = fyne.TextStyle{Bold: true}
-	url := widget.NewLabel("")
-	url.Importance = widget.LowImportance
-	url.Wrapping = fyne.TextTruncate
-	return &DiscoveryRow{
-		CanvasObject: container.NewVBox(title, url),
-		Title:        title,
-		URL:          url,
-	}
-}
-
-// UpdateDiscoveryRow sets row text from a discovery entry.
-func UpdateDiscoveryRow(row *DiscoveryRow, label, url string) {
-	row.Title.SetText(label)
-	row.URL.SetText(url)
 }

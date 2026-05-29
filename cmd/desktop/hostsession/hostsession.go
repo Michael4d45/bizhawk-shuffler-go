@@ -30,8 +30,7 @@ type Session struct {
 	sessionCancel context.CancelFunc
 	bindHost      string
 	bindPort      int
-	adminURL      string
-	broadcastC    context.CancelFunc
+	adminURL string
 }
 
 // NormalizeBindHost validates and normalizes a bind address.
@@ -113,16 +112,6 @@ func (s *Session) Start(ctx context.Context, bindHost string, hostPort int) (Sta
 	mux := http.NewServeMux()
 	s.server.RegisterRoutes(mux)
 
-	bcastCtx, cancel := context.WithCancel(ctx)
-	s.broadcastC = cancel
-	if err := s.server.StartBroadcaster(bcastCtx); err != nil {
-		sessionCancel()
-		s.sessionCtx = nil
-		s.sessionCancel = nil
-		s.server = nil
-		return StartResult{}, err
-	}
-
 	addr := fmt.Sprintf("%s:%d", listenHost, actualPort)
 	ln, err := net.Listen("tcp", addr)
 	if err != nil {
@@ -160,7 +149,7 @@ func (s *Session) Start(ctx context.Context, bindHost string, hostPort int) (Sta
 	}, nil
 }
 
-// Stop shuts down the embedded server and discovery broadcaster.
+// Stop shuts down the embedded server.
 func (s *Session) Stop() error {
 	if s == nil {
 		return nil
@@ -176,11 +165,6 @@ func (s *Session) Stop() error {
 		s.listener = nil
 	}
 
-	if s.broadcastC != nil {
-		s.broadcastC()
-		s.broadcastC = nil
-	}
-
 	// Cancel in-flight /ws request contexts (admin UI, players).
 	if s.sessionCancel != nil {
 		log.Printf("hostsession: cancelling session context")
@@ -193,10 +177,6 @@ func (s *Session) Stop() error {
 		log.Printf("hostsession: draining server")
 		s.server.Shutdown()
 		log.Printf("hostsession: server drained")
-		if err := s.server.StopBroadcaster(); err != nil {
-			log.Printf("hostsession: stop broadcaster: %v", err)
-		}
-		log.Printf("hostsession: broadcaster stopped")
 	}
 
 	if s.httpSrv != nil {

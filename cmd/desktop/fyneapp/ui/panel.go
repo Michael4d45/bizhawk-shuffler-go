@@ -104,13 +104,6 @@ func SetPageSections(box *fyne.Container, sections ...fyne.CanvasObject) {
 	box.Refresh()
 }
 
-// NewPageVBox stacks section panels with relaxed sectional spacing.
-func NewPageVBox(sections ...fyne.CanvasObject) fyne.CanvasObject {
-	box := container.NewVBox()
-	SetPageSections(box, sections...)
-	return container.NewPadded(box)
-}
-
 // NewHeaderSurface is the fixed window header (title + optional right content).
 func NewHeaderSurface(title string, right fyne.CanvasObject) fyne.CanvasObject {
 	left := NewTitle(title)

@@ -32,7 +32,7 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 | Player client   | HTTP + WebSocket (`/ws`)      | Player client ↔ session server          |
 | BizHawk control | TCP line protocol (localhost) | Player client ↔ `server.lua` in BizHawk |
 
-**Primary deployment:** LAN parties with UDP multicast discovery; Internet play uses manual server URLs and port forwarding. **No authentication** — players identify by username only.
+**Primary deployment:** LAN or Internet play via manual server URLs (and port forwarding when needed). **No authentication** — players identify by username only.
 
 ---
 
@@ -51,7 +51,7 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 - `POST /api/reset` — use pause, clear saves, and player management instead.
 - **Player-name hashing** for game assignment — save mode uses first-free instance, shuffled round-robin, and preference-based random selection.
 - **`fullscreen_toggle`**, **`check_config`**, **`update_config`** on the player client — ack-only stubs (no Alt+Enter, no config probe yet).
-- **`discovery_enabled`**, **`discovery_timeout_seconds`**, **`auto_open_bizhawk`** in `config.json` — defaults are written but not read by current runtime code.
+- **`auto_open_bizhawk`** in `config.json` — default is written but not read by current runtime code.
 - **Separate player CLI binary** — not shipped; use `cmd/desktop` **Join** for BizHawk + WebSocket player.
 
 ---
@@ -62,7 +62,7 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 
 | Component         | Artifact                                                         | Role                                                                                      |
 | ----------------- | ---------------------------------------------------------------- | ----------------------------------------------------------------------------------------- |
-| **Server**        | `cmd/server`, `serverhost/`                                      | HTTP API, admin UI, ROM/save/plugin serving, WebSocket hub, swap scheduler, LAN discovery |
+| **Server**        | `cmd/server`, `serverhost/`                                      | HTTP API, admin UI, ROM/save/plugin serving, WebSocket hub, swap scheduler |
 | **Player client** | `clienthost/` (library)                                          | WebSocket client, downloads, plugins; used by desktop Join                                |
 | **BizHawk + Lua** | `EmuHawk` + `server.lua`                                         | Emulation, swap/save, plugin hooks; TCP to player client on localhost                     |
 | **Web admin**     | `frontend/admin/` → `serverhost/static/`                         | React SPA; REST + admin WebSocket                                                         |
@@ -89,9 +89,6 @@ flowchart TB
     Client -->|TCP IPC| BH
   end
 
-  Discovery["UDP 239.255.255.250:1900"]
-  Server -.-> Discovery
-  Client -.-> Discovery
 ```
 
 ### 3.2 Directory layout
@@ -109,15 +106,13 @@ root/
 
 ### 3.3 Deployment topology
 
-**LAN:** Server binds `host`/`port` (flags, `state.json`, or default `127.0.0.1:8080`). UDP discovery on `239.255.255.250:1900` plus loopback `127.0.0.1:1901`. Firewall: inbound TCP on server port (default **8080**).
-
-**Internet:** Manual `http://` / `ws://` URLs; no built-in TLS. HTTPS/WSS only if user fronts with a proxy or uses ports 443/8443. Multicast discovery does not cross NAT.
+**LAN / Internet:** Server binds `host`/`port` (flags, `state.json`, or default `127.0.0.1:8080`). Players and the desktop shell connect using a manual `http://` base URL. Firewall: inbound TCP on server port (default **8080**). No built-in TLS; HTTPS/WSS only if user fronts with a proxy or uses ports 443/8443.
 
 ### 3.4 Concurrency model
 
 | Process | Mechanism                                                                                                              |
 | ------- | ---------------------------------------------------------------------------------------------------------------------- |
-| Server  | Goroutines + `net/http`; mutex/debounced persistence in `serverhost`; per-WS handlers; swap scheduler; discovery broadcaster |
+| Server  | Goroutines + `net/http`; mutex/debounced persistence in `serverhost`; per-WS handlers; swap scheduler |
 | Client  | WS reconnect loop; `Controller` handles swap/downloads; `BizhawkIpc` TCP client with ACK timeout                       |
 | Lua     | Single-threaded frame loop; synchronous IPC handling                                                                   |
 
@@ -134,7 +129,7 @@ root/
 
 ### 4.1 Server (`serverhost/`)
 
-**Owns:** Session lifecycle, player registry, game catalog, WebSocket routing, game-mode handlers, plugin metadata, debounced persistence, discovery broadcast.
+**Owns:** Session lifecycle, player registry, game catalog, WebSocket routing, game-mode handlers, plugin metadata, debounced persistence.
 
 **Does not own:** BizHawk process; receives `lua_command` from clients and may trigger swap actions.
 
@@ -188,7 +183,7 @@ root/
 1. Data directory defaults to `%USERPROFILE%\BizShuffle\` (or `~/BizShuffle`).
 2. **Host** — starts embedded `serverhost`, opens admin in a browser window. Does not launch BizHawk or the player client.
 3. **Join** — blocked until the dependencies panel reports BizHawk (and VC++ on Windows) OK. User installs via **Install BizHawk** / **Install VC++** (downloads official BizHawk zip into `{dataDir}/BizHawk`). Then: reserve Lua port → `lua_server_port.txt` → launch `EmuHawk` with `server.lua` → WebSocket player connects to the server URL.
-4. LAN discovery — shell lists discovered servers on refresh; user can pick a server or type a URL.
+4. Enter the server URL manually in the desktop **Join** form (or use the URL auto-filled after **Host** on the same machine).
 
 **Manual / headless:**
 
@@ -207,13 +202,8 @@ go run ./cmd/desktop   # Host and/or Join with GUI
 | `host_port`                 | Desktop Host port (`0` = pick a free port)    |
 | `server`                    | HTTP base; `ws://` normalized to `http://`    |
 | `name`                      | Player name for `hello`                       |
-| `bizhawk_path`              | Cached path to managed `EmuHawk` under `{dataDir}/BizHawk` (external paths are cleared) |
-| `discovery_enabled`         | Default `"true"` — **not read** by current client runtime                               |
-| `discovery_timeout_seconds` | Default `"5"` — **not read** by current client runtime                                  |
-| `multicast_address`         | Default `239.255.255.250:1900` — **not read** by current client runtime                 |
-| `auto_open_bizhawk`         | Default `"true"` — **not read** by current client runtime                               |
-
-**LAN discovery:** Server broadcasts every 5s on UDP multicast (+ loopback `127.0.0.1:1901`). **Desktop** shell lists discovered servers and accepts manual URLs.
+| `bizhawk_path`      | Cached path to managed `EmuHawk` under `{dataDir}/BizHawk` (external paths are cleared) |
+| `auto_open_bizhawk` | Default `"true"` — **not read** by current client runtime                               |
 
 ### 5.5 Web admin workflows
 
@@ -329,26 +319,6 @@ sequenceDiagram
 **Lua → controller:** `HELLO`, `ACK|id`, `NACK|id|reason`, `PING|ts`, `CMD|{kind}|{key=val;...}`
 
 **Timeout:** 10s per IPC command. Port: free port from 55355, written to `lua_server_port.txt` before BizHawk starts; client connects as TCP client.
-
-### 6.8 Discovery (UDP)
-
-**Broadcast (`DiscoveryMessage`):**
-
-```json
-{
-  "type": "bizshuffle_server",
-  "version": "1.0",
-  "server_name": "<hostname> Server",
-  "host": "<ip>",
-  "port": 8080,
-  "timestamp": "<RFC3339>",
-  "server_id": "<host>:<port>"
-}
-```
-
-- Multicast `239.255.255.250:1900` every 5s; copy to `127.0.0.1:1901`.
-- Valid if timestamp within **30 seconds**.
-- Client WebSocket URL: `ws://{host}:{port}/ws`.
 
 ---
 
@@ -548,8 +518,7 @@ GitHub Actions workflows under `.github/workflows/` (lint, test, release as conf
 
 | Traffic          | Port / protocol                                                 |
 | ---------------- | --------------------------------------------------------------- |
-| HTTP + WebSocket | TCP **8080** (default) inbound on host                          |
-| Discovery        | UDP multicast `239.255.255.250:1900`; loopback `127.0.0.1:1901` |
+| HTTP + WebSocket | TCP **8080** (default) inbound on host |
 
 **Security:** No TLS by default; no auth; any reachable client can use admin UI. Deploy on trusted networks or restrict by firewall/VPN.
 
@@ -565,7 +534,6 @@ GitHub Actions workflows under `.github/workflows/` (lint, test, release as conf
 | Symptom               | Check                                                                         |
 | --------------------- | ----------------------------------------------------------------------------- |
 | Cannot find server    | Same LAN; manual `http://HOST:8080`; firewall TCP 8080; server `0.0.0.0` bind |
-| Discovery empty       | Multicast blocked; use manual URL; server discovery logs                      |
 | Admin UI broken       | Run server from dir containing `web/`                                         |
 | Client disconnected   | `curl http://host:port/state.json`; verify WS URL                             |
 | BizHawk not launching | Install via desktop deps panel; `bizhawk_path` must be under `{dataDir}/BizHawk` |
@@ -593,7 +561,6 @@ GitHub Actions workflows under `.github/workflows/` (lint, test, release as conf
 | Game modes       | `serverhost/game_modes.go`                                                                 |
 | Saves            | `serverhost/api_saves.go`, `clienthost/api.go`, `savestate/verify.go`                      |
 | Plugins          | `serverhost/api_plugins.go`, `clienthost/plugin_sync.go`                                   |
-| Discovery        | `serverhost/discovery_broadcaster.go`, `clienthost/discovery_listener.go`                  |
 | BizHawk IPC      | `clienthost/bizhawk_ipc.go`, `assets/server.lua`                                           |
 | Admin UI         | `frontend/admin` (build → `serverhost/static/`)                                            |
 | Tests            | `testing/arch`, `testing/integration`, `testing/protocol`                                  |

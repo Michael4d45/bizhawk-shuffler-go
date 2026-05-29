@@ -14,7 +14,6 @@ import (
 	"github.com/michael4d45/bizshuffle/cmd/desktop/hostsession"
 	"github.com/michael4d45/bizshuffle/cmd/desktop/updates"
 	"github.com/michael4d45/bizshuffle/obslog"
-	"github.com/michael4d45/bizshuffle/protocol"
 )
 
 func main() {
@@ -38,23 +37,8 @@ func main() {
 	defer obslog.Close()
 
 	var hostSess hostsession.Session
-	var discoveryListener *clienthost.DiscoveryListener
-	var discoveryCancel context.CancelFunc
 	var joinSession *clienthost.JoinSession
 	var joinMu sync.Mutex
-
-	startDiscovery := func() {
-		if discoveryListener != nil {
-			return
-		}
-		ctx, cancel := context.WithCancel(context.Background())
-		discoveryCancel = cancel
-		discoveryListener = clienthost.NewDiscoveryListener(protocol.GetDefaultDiscoveryConfig())
-		if err := discoveryListener.Start(ctx); err != nil {
-			log.Printf("discovery: %v", err)
-		}
-	}
-	startDiscovery()
 
 	fyneapp.Run(fyneapp.Options{
 		DataDir:      dataDir,
@@ -159,27 +143,6 @@ func main() {
 		DepsSnapshot:   clienthost.GetDependenciesSnapshot,
 		InstallDep:     clienthost.InstallDependency,
 		InstallAllDeps: clienthost.InstallAllDependencies,
-		Discover: func() ([]fyneapp.DiscoveredServer, error) {
-			if discoveryListener == nil {
-				return nil, nil
-			}
-			raw := discoveryListener.GetDiscoveredServers()
-			hosted := hostSess.HostedURL()
-			label := "This session"
-			if hostSess.IsRunning() {
-				label = "Hosted session"
-			}
-			merged := clienthost.MergeDiscoveredServers(raw, hosted, label)
-			out := make([]fyneapp.DiscoveredServer, 0, len(merged))
-			for _, e := range merged {
-				lbl := e.Label
-				if e.IsHosted {
-					lbl += " (hosting)"
-				}
-				out = append(out, fyneapp.DiscoveredServer{Label: lbl, URL: e.URL})
-			}
-			return out, nil
-		},
 	})
 
 	joinMu.Lock()
@@ -188,12 +151,6 @@ func main() {
 	}
 	joinMu.Unlock()
 	_ = hostSess.Stop()
-	if discoveryCancel != nil {
-		discoveryCancel()
-	}
-	if discoveryListener != nil {
-		_ = discoveryListener.Stop()
-	}
 }
 
 // setupFileLogging sends standard library log output to dataDir/desktop.log.

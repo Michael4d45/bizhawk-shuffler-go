@@ -76,7 +76,7 @@ make check-all       # same, but continues after failures (triage)
 
 | Path | Role |
 |------|------|
-| `protocol/` | WS types, codec, KV, Lua, discovery |
+| `protocol/` | WS types, codec, KV, Lua |
 | `assets/` | BizHawk `server.lua` (embedded) + sample plugins |
 | `domain/` | Pure session logic |
 | `savestate/` | `.state` zip verification |

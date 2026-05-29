@@ -5,7 +5,6 @@
 1. Stop join session (`JoinSession.Stop` — WebSocket client, Lua IPC, BizHawk process)
 2. Flush pending saves / disconnect Lua
 3. Stop embedded server (desktop Host)
-4. Stop discovery listener
 
 ## Desktop Host
 
@@ -21,7 +20,7 @@ No player client or BizHawk on this path.
 3. `EnsureServerLua` → launch `EmuHawk` with `{dataDir}/server.lua`
 4. `StartJoinSession` → WebSocket `hello` to server URL
 
-To host and play on one machine: **Host**, then **Join** against the hosted URL (or pick it from discovery).
+To host and play on one machine: **Host**, then **Join** using the hosted URL (auto-filled when the server URL field is empty).
 
 ## Headless / release server
 

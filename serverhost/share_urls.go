@@ -86,21 +86,6 @@ func IsLocalOnlyBind(listenHost string) bool {
 	return isLoopbackHost(listenHost)
 }
 
-// DiscoveryAdvertiseHost picks a host string for UDP discovery when bind is wildcard.
-func DiscoveryAdvertiseHost(bindHost string) string {
-	if isLoopbackHost(bindHost) {
-		return bindHost
-	}
-	if isWildcardBind(bindHost) {
-		ips := lanIPv4Addresses()
-		if len(ips) > 0 {
-			return ips[0]
-		}
-		return "127.0.0.1"
-	}
-	return bindHost
-}
-
 // ResolveShareURLs builds LAN/WAN share URLs for the admin panel.
 func ResolveShareURLs(ctx context.Context, listenHost string, port int, fetchPublicIP PublicIPFetcher) (ShareUrls, error) {
 	if fetchPublicIP == nil {

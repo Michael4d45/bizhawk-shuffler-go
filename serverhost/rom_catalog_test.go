@@ -30,7 +30,6 @@ func TestSyncCatalogFromRoms(t *testing.T) {
 		t.Fatal(err)
 	}
 	s := New()
-	t.Cleanup(func() { _ = s.StopBroadcaster() })
 	updated, err := s.SyncCatalogFromRoms()
 	if err != nil {
 		t.Fatal(err)

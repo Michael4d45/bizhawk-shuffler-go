@@ -49,13 +49,3 @@ func TestResolveShareURLsLoopbackSkipsWAN(t *testing.T) {
 		t.Fatalf("got %+v", urls)
 	}
 }
-
-func TestDiscoveryAdvertiseHostWildcard(t *testing.T) {
-	host := DiscoveryAdvertiseHost("0.0.0.0")
-	if host == "0.0.0.0" {
-		t.Fatal("expected concrete advertise host")
-	}
-	if IsLocalOnlyBind(host) {
-		t.Fatal("expected non-loopback advertise host when possible")
-	}
-}

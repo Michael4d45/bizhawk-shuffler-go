@@ -45,11 +45,6 @@ func (s *shellState) apply(w *shellWidgets, depsBlocked func() bool) {
 	} else {
 		w.stopHostBtn.Hide()
 	}
-	if s.installing || s.busy {
-		w.refreshDiscoveryBtn.Disable()
-	} else {
-		w.refreshDiscoveryBtn.Enable()
-	}
 }
 
 // shellWidgets holds shell controls and section panels.
@@ -74,9 +69,5 @@ type shellWidgets struct {
 	hostJoinRow          fyne.CanvasObject
 	hostPanelRoot        fyne.CanvasObject
 	joinPanelRoot        fyne.CanvasObject
-	depsPanel            *ui.SectionPanel
-	discoveryPanel       *ui.SectionPanel
-	discoveryList        *widget.List
-	discoveryEmpty       *widget.Label
-	refreshDiscoveryBtn  *widget.Button
+	depsPanel *ui.SectionPanel
 }

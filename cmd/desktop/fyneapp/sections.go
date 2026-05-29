@@ -1,7 +1,6 @@
 package fyneapp
 
 import (
-	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
@@ -9,8 +8,7 @@ import (
 )
 
 // buildShell constructs the desktop layout and returns widget handles.
-// discovered is the backing slice for the discovery list length and updates.
-func buildShell(discovered *[]DiscoveredServer) *shellWidgets {
+func buildShell() *shellWidgets {
 	w := &shellWidgets{
 		status: ui.NewStatus("Host a session or join one as a player.", ui.StatusSeverityInfo),
 
@@ -25,7 +23,6 @@ func buildShell(discovered *[]DiscoveredServer) *shellWidgets {
 		updateBtn:       widget.NewButton("Download update", nil),
 		checkUpdatesBtn: widget.NewButton("Check updates", nil),
 		openDataBtn:     widget.NewButton("Open data folder", nil),
-		discoveryEmpty:  widget.NewLabel("No servers found — refresh or enter a URL above."),
 	}
 
 	w.serverURLEntry.SetPlaceHolder("http://127.0.0.1:8080")
@@ -36,10 +33,6 @@ func buildShell(discovered *[]DiscoveredServer) *shellWidgets {
 	w.hostBtn.Importance = widget.HighImportance
 	w.updateBtn.Importance = widget.HighImportance
 	w.updateBtn.Hide()
-	w.discoveryEmpty.Importance = widget.LowImportance
-
-	w.refreshDiscoveryBtn = widget.NewButton("Refresh", nil)
-	w.refreshDiscoveryBtn.Importance = widget.LowImportance
 
 	hostForm := widget.NewForm(
 		widget.NewFormItem("Bind host", w.hostEntry),
@@ -70,36 +63,8 @@ func buildShell(discovered *[]DiscoveredServer) *shellWidgets {
 
 	w.depsPanel = ui.NewSectionPanel("Dependencies", "Required before joining", nil, nil, nil)
 
-	w.discoveryList = widget.NewList(
-		func() int { return len(*discovered) },
-		func() fyne.CanvasObject { return ui.NewDiscoveryRow() },
-		func(i int, o fyne.CanvasObject) {
-			if i >= len(*discovered) {
-				return
-			}
-			row, ok := o.(*ui.DiscoveryRow)
-			if !ok {
-				return
-			}
-			s := (*discovered)[i]
-			ui.UpdateDiscoveryRow(row, s.Label, s.URL)
-		},
-	)
-
-	listScroll := container.NewScroll(w.discoveryList)
-	listScroll.SetMinSize(fyne.NewSize(0, ui.DiscoveryListMin))
-	discoveryStack := container.NewStack(listScroll, w.discoveryEmpty)
-	w.discoveryPanel = ui.NewSectionPanel(
-		"Nearby servers",
-		"LAN discovery and manual URL",
-		w.refreshDiscoveryBtn,
-		discoveryStack,
-		nil,
-	)
-
 	w.pageBox = container.NewVBox()
-	ui.SetPageSections(w.pageBox, w.hostJoinRow, w.discoveryPanel.Root)
-	page := container.NewPadded(w.pageBox)
+	ui.SetPageSections(w.pageBox, w.hostJoinRow)
 
 	header := ui.NewHeaderSurface("BizShuffle", nil)
 	footerLeft := container.NewHBox(w.versionLabel, w.checkUpdatesBtn, w.updateBtn)
@@ -114,7 +79,7 @@ func buildShell(discovered *[]DiscoveredServer) *shellWidgets {
 		bottom,
 		nil,
 		nil,
-		ui.NewScrollBody(page),
+		ui.NewScrollBody(container.NewPadded(w.pageBox)),
 	)
 	return w
 }

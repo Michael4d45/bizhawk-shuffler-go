@@ -9,8 +9,7 @@ const (
 	SwapWaitMs         = 20_000
 	IPCTimeoutMs       = 10_000
 	SaveReadyTimeoutMs = 30_000
-	PersistDebounceMs  = 500
-	DiscoveryValidMs   = 30_000
+	PersistDebounceMs = 500
 )
 
 // ServerConfig is runtime configuration for the session server.

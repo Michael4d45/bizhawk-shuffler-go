@@ -16,21 +16,6 @@ func BorderSubtle() color.Color {
 	return blend(theme.Color(theme.ColorNameBackground), theme.Color(theme.ColorNameForeground), 0.14)
 }
 
-// TextMuted is secondary metadata copy.
-func TextMuted() color.Color {
-	return blend(theme.Color(theme.ColorNameForeground), theme.Color(theme.ColorNameBackground), 0.45)
-}
-
-// TextSuccess is positive feedback (install complete, joined).
-func TextSuccess() color.Color {
-	return theme.Color(theme.ColorNameSuccess)
-}
-
-// TextWarning is blocking or caution copy.
-func TextWarning() color.Color {
-	return theme.Color(theme.ColorNameWarning)
-}
-
 func blend(a, b color.Color, t float64) color.Color {
 	ar, ag, ab, aa := a.RGBA()
 	br, bg, bb, _ := b.RGBA()

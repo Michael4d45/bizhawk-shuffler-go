@@ -64,19 +64,9 @@ func depsPanelNeeded(snap clienthost.DependenciesSnapshot, depsChecking bool) bo
 }
 
 func updateDepsPanelVisibility(w *shellWidgets, snap clienthost.DependenciesSnapshot, depsChecking bool) {
-	show := depsPanelNeeded(snap, depsChecking)
 	sections := []fyne.CanvasObject{w.hostJoinRow}
-	if show {
+	if depsPanelNeeded(snap, depsChecking) {
 		sections = append(sections, w.depsPanel.Root)
 	}
-	sections = append(sections, w.discoveryPanel.Root)
 	ui.SetPageSections(w.pageBox, sections...)
-}
-
-func setDiscoveryEmptyVisible(w *shellWidgets, empty bool) {
-	if empty {
-		w.discoveryEmpty.Show()
-	} else {
-		w.discoveryEmpty.Hide()
-	}
 }

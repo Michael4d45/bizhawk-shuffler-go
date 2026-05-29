@@ -39,13 +39,6 @@ type Options struct {
 	DepsSnapshot   func(dataDir string) clienthost.DependenciesSnapshot
 	InstallDep     func(dataDir string, id clienthost.DependencyID, progress func(string)) error
 	InstallAllDeps func(dataDir string, progress func(string)) error
-	Discover       func() ([]DiscoveredServer, error)
-}
-
-// DiscoveredServer is one LAN discovery entry.
-type DiscoveredServer struct {
-	Label string
-	URL   string
 }
 
 // Run starts the BizShuffle desktop shell (Host / Join).
@@ -56,8 +49,7 @@ func Run(opts Options) {
 	w := a.NewWindow("BizShuffle")
 	w.Resize(ui.WindowDefaultSize())
 
-	var discovered []DiscoveredServer
-	sh := buildShell(&discovered)
+	sh := buildShell()
 	st := &shellState{
 		statusText: "Host a session or join one as a player.",
 		statusSev:  ui.StatusSeverityInfo,
@@ -107,7 +99,6 @@ func Run(opts Options) {
 	}
 
 	var refreshDeps func()
-	var refreshDiscovery func()
 
 	installOne := func(it clienthost.DependencyItem) {
 		if st.installing || st.busy || opts.InstallDep == nil {
@@ -188,32 +179,6 @@ func Run(opts Options) {
 		applyUI()
 	}
 
-	refreshDiscovery = func() {
-		if opts.Discover == nil {
-			return
-		}
-		servers, err := opts.Discover()
-		if err != nil {
-			return
-		}
-		discovered = servers
-		sh.discoveryList.Refresh()
-		setDiscoveryEmptyVisible(sh, len(discovered) == 0)
-		if sh.serverURLEntry.Text == "" && opts.HostedURL != nil {
-			if u := opts.HostedURL(); u != "" {
-				sh.serverURLEntry.SetText(u)
-				scheduleSave()
-			}
-		}
-	}
-
-	sh.discoveryList.OnSelected = func(id widget.ListItemID) {
-		if int(id) < len(discovered) {
-			sh.serverURLEntry.SetText(discovered[id].URL)
-			scheduleSave()
-		}
-	}
-
 	onFieldChange := func() { scheduleSave() }
 	sh.hostEntry.OnChanged = func(string) { onFieldChange() }
 	sh.portEntry.OnChanged = func(string) { onFieldChange() }
@@ -258,7 +223,6 @@ func Run(opts Options) {
 					opts.OpenBrowser(adminURL)
 				}
 				applyUI()
-				refreshDiscovery()
 			})
 		}()
 	}
@@ -283,7 +247,6 @@ func Run(opts Options) {
 					sh.hostBtn.Enable()
 					st.setStatus("Host stopped", ui.StatusSeverityInfo)
 					applyUI()
-					refreshDiscovery()
 				})
 			}()
 			if stopFn != nil {
@@ -341,8 +304,6 @@ func Run(opts Options) {
 		}()
 	}
 
-	sh.refreshDiscoveryBtn.OnTapped = func() { refreshDiscovery() }
-
 	runUpdateCheck := func() {
 		if opts.CheckUpdates == nil {
 			return
@@ -387,16 +348,7 @@ func Run(opts Options) {
 	}
 	st.depsChecking = true
 	refreshDeps()
-	refreshDiscovery()
 	applyUI()
-
-	go func() {
-		t := time.NewTicker(5 * time.Second)
-		defer t.Stop()
-		for range t.C {
-			fyne.Do(refreshDiscovery)
-		}
-	}()
 
 	w.SetOnClosed(func() {
 		opts.StopJoin()

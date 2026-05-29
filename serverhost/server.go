@@ -1,12 +1,10 @@
 package serverhost
 
 import (
-	"context"
 	"fmt"
 	"net/http"
 	"os"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/gorilla/websocket"
@@ -19,7 +17,6 @@ import (
 //   - connMu: websocket registries (conns, playerClients, adminClients)
 //   - mu: server state, pending acks, swap tracking, plugins in memory
 //   - liveConns: lock-free snapshot for shutdown socket close
-//   - broadcaster: atomic.Pointer, stopped without mu
 type Server struct {
 	mu                   sync.RWMutex
 	connMu               sync.RWMutex
@@ -31,7 +28,6 @@ type Server struct {
 	upgrader             websocket.Upgrader
 	pending              map[string]chan string
 	schedulerCh          chan struct{}
-	broadcaster          atomic.Pointer[DiscoveryBroadcaster]
 	saveChan             chan struct{}
 	saveTimer            *time.Timer
 	saveMutex            sync.Mutex
@@ -154,35 +150,6 @@ func (s *Server) SetPort(port int) {
 }
 
 func (s *Server) PersistedPort() int { return s.SnapshotState().Port }
-
-func (s *Server) StartBroadcaster(ctx context.Context) error {
-	if b := s.broadcaster.Load(); b != nil {
-		return b.Start(ctx)
-	}
-	st := s.SnapshotState()
-	host := st.Host
-	if host == "" {
-		host = "127.0.0.1"
-	}
-	port := st.Port
-	if port == 0 {
-		port = 8080
-	}
-	nb := NewDiscoveryBroadcaster(protocol.GetDefaultDiscoveryConfig(), host, port, s.GetServerName())
-	if !s.broadcaster.CompareAndSwap(nil, nb) {
-		return s.broadcaster.Load().Start(ctx)
-	}
-	return nb.Start(ctx)
-}
-
-// StopBroadcaster stops the discovery broadcaster without taking s.mu.
-func (s *Server) StopBroadcaster() error {
-	b := s.broadcaster.Swap(nil)
-	if b == nil {
-		return nil
-	}
-	return b.Stop()
-}
 
 // GetServerName returns a human-readable name for this server
 func (s *Server) GetServerName() string {

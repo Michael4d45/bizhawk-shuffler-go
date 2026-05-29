@@ -70,18 +70,6 @@ func (c Config) normalizeServer() {
 func (c Config) EnsureDefaults() error {
 	// bizhawk_path should be set by installer or manually
 	// Client expects BizHawk to be pre-installed
-	if c["discovery_enabled"] == "" {
-		c["discovery_enabled"] = "true"
-	}
-	if c["discovery_timeout_seconds"] == "" {
-		c["discovery_timeout_seconds"] = "5"
-	}
-	if c["multicast_address"] == "" {
-		c["multicast_address"] = "239.255.255.250:1900"
-	}
-	if c["broadcast_interval_seconds"] == "" {
-		c["broadcast_interval_seconds"] = "5"
-	}
 	if c["auto_open_bizhawk"] == "" {
 		c["auto_open_bizhawk"] = "true"
 	}

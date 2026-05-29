@@ -22,8 +22,7 @@ const (
 	Join      Component = "join"
 	WS        Component = "ws"
 	Lua       Component = "lua"
-	Swap      Component = "swap"
-	Discovery Component = "discovery"
+	Swap Component = "swap"
 )
 
 var (

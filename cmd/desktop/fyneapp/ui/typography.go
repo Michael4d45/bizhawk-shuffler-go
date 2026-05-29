@@ -1,10 +1,7 @@
 package ui
 
 import (
-	"image/color"
-
 	"fyne.io/fyne/v2"
-	"fyne.io/fyne/v2/theme"
 	"fyne.io/fyne/v2/widget"
 )
 
@@ -71,18 +68,4 @@ func SetStatus(l *widget.Label, text string, sev StatusSeverity) {
 		l.Importance = widget.MediumImportance
 	}
 	l.Refresh()
-}
-
-// ColorForSeverity returns a canvas text color for custom status bars.
-func ColorForSeverity(sev StatusSeverity) color.Color {
-	switch sev {
-	case StatusSeveritySuccess:
-		return TextSuccess()
-	case StatusSeverityWarning:
-		return TextWarning()
-	case StatusSeverityError:
-		return theme.Color(theme.ColorNameError)
-	default:
-		return theme.Color(theme.ColorNameForeground)
-	}
 }
