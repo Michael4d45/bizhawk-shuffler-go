@@ -12,3 +12,7 @@ release-upload/
 # Admin build overwrites embedded assets (index.html stub is committed)
 serverhost/static/assets/*
 !serverhost/static/assets/.gitkeep
+
+# Runtime server state written when cwd is serverhost/ or testing/integration/
+serverhost/state.json
+testing/integration/state.json

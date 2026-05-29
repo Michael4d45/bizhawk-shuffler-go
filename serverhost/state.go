@@ -236,9 +236,7 @@ func (s *Server) loadState() {
 			"DisplayFps",
 		}
 	}
-	if tmp.UpdatedAt.IsZero() {
-		tmp.UpdatedAt = time.Now()
-	}
+	tmp.UpdatedAt = time.Now()
 	for name, player := range tmp.Players {
 		player.Connected = false
 		tmp.Players[name] = player
@@ -307,6 +305,7 @@ func (s *Server) saveState() error {
 		}
 	}
 	st.Plugins = nil // Don't persist plugins in state.json
+	st.UpdatedAt = time.Time{} // Don't persist updated_at (avoids noisy state.json diffs)
 	return s.saveJson(st, "state.json")
 }
 

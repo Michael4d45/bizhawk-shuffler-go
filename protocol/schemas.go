@@ -203,7 +203,8 @@ type ServerState struct {
 	// Plugins contains the current plugin configuration and status
 	Plugins   map[string]Plugin `json:"plugins,omitempty"`
 	Players   map[string]Player `json:"players"`
-	UpdatedAt time.Time         `json:"updated_at"`
+	// UpdatedAt is in-memory only (admin UI / state_update); omitted from state.json on disk.
+	UpdatedAt time.Time `json:"updated_at,omitempty"`
 
 	Games             []string           `json:"games,omitempty"`
 	GameSwapInstances []GameSwapInstance `json:"game_instances,omitempty"`
