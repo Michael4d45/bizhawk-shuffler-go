@@ -3,11 +3,11 @@
   "swap_enabled": true,
   "mode": "sync",
   "host": "127.0.0.1",
-  "port": 55228,
+  "port": 54433,
   "min_interval_secs": 5,
   "max_interval_secs": 300,
   "players": {},
-  "updated_at": "2026-05-29T11:18:01.951121-06:00",
+  "updated_at": "2026-05-29T14:28:58.9990468-06:00",
   "prevent_same_game_swap": false,
   "countdown_enabled": false,
   "config_keys": [

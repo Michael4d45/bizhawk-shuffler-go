@@ -15,9 +15,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"path/filepath"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/protocol"
@@ -345,21 +342,6 @@ func (h *SaveModeHandler) buildCompletedMaps(player protocol.Player) (map[string
 	return completedInstances, completedGames
 }
 
-// clearInstanceFromPlayer removes an instance assignment from a specific player
-func (h *SaveModeHandler) clearInstanceFromPlayer(instanceID string, excludePlayerName string) {
-	h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
-		for playerName, player := range st.Players {
-			if player.InstanceID == instanceID && playerName != excludePlayerName {
-				player.Game = ""
-				player.InstanceID = ""
-				st.Players[playerName] = player
-				log.Printf("[SaveMode] Cleared instance %s from player %s", instanceID, playerName)
-				break
-			}
-		}
-	})
-}
-
 // findAvailableInstanceForPlayer finds the best available instance for a player based on criteria
 func (h *SaveModeHandler) findAvailableInstanceForPlayer(
 	player protocol.Player,
@@ -411,51 +393,6 @@ func (h *SaveModeHandler) findAvailableInstanceForPlayer(
 	}
 
 	return -1, false
-}
-
-// canPlayerSwapToInstance validates whether a player can swap to a specific instance
-func (h *SaveModeHandler) canPlayerSwapToInstance(player protocol.Player, instance protocol.GameSwapInstance, hasOtherPlayer bool, otherPlayer protocol.Player) bool {
-	// Check if instance's game is completed for this player
-	for _, cg := range player.CompletedGames {
-		if cg == instance.Game {
-			return false
-		}
-	}
-
-	// Check if instance is completed for this player
-	for _, ci := range player.CompletedInstances {
-		if ci == instance.ID {
-			return false
-		}
-	}
-
-	// If swapping with another player, check if current player's game/instance is completed for the other player
-	if hasOtherPlayer {
-		var otherPlayerState protocol.Player
-		h.server.withRLock(func() {
-			if p, ok := h.server.state.Players[otherPlayer.Name]; ok {
-				otherPlayerState = p
-			}
-		})
-
-		// Check if current player's game is completed for other player
-		for _, cg := range otherPlayerState.CompletedGames {
-			if cg == player.Game {
-				return false
-			}
-		}
-
-		// Check if current player's instance is completed for other player
-		if player.InstanceID != "" {
-			for _, ci := range otherPlayerState.CompletedInstances {
-				if ci == player.InstanceID {
-					return false
-				}
-			}
-		}
-	}
-
-	return true
 }
 
 // waitForFileCheck waits until no pending save files or in-flight swap commands (TS parity: 30s).
@@ -905,42 +842,5 @@ func (s *Server) GetGameModeHandler() GameModeHandler {
 		}
 	default:
 		panic("unexpected game mode: \"" + mode + "\"")
-	}
-}
-
-// generateInstanceID creates a unique instance ID for a game file using counter-based naming
-func generateInstanceID(gameFile string, existingIDs map[string]bool) string {
-	// Extract a portion of the game file name (remove extension and take first part)
-	nameWithoutExt := strings.TrimSuffix(gameFile, filepath.Ext(gameFile))
-
-	// Take first 20 characters of the name, replace spaces/special chars with hyphens
-	cleanName := strings.Map(func(r rune) rune {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') {
-			return r
-		}
-		return '-'
-	}, nameWithoutExt)
-
-	// Limit to 20 characters
-	if len(cleanName) > 20 {
-		cleanName = cleanName[:20]
-	}
-
-	// Convert to lowercase for consistency
-	cleanName = strings.ToLower(cleanName)
-
-	// Check if base name exists, if not use it directly
-	if existingIDs == nil || !existingIDs[cleanName] {
-		return cleanName
-	}
-
-	// Increment counter until we find a free name
-	counter := 1
-	for {
-		candidate := cleanName + "-" + strconv.Itoa(counter)
-		if existingIDs == nil || !existingIDs[candidate] {
-			return candidate
-		}
-		counter++
 	}
 }
