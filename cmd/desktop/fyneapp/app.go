@@ -3,17 +3,16 @@ package fyneapp
 import (
 	"context"
 	"fmt"
-	"log"
 	"strconv"
 	"sync"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
-	"fyne.io/fyne/v2/container"
 	"fyne.io/fyne/v2/widget"
 
 	"github.com/michael4d45/bizshuffle/clienthost"
+	"github.com/michael4d45/bizshuffle/cmd/desktop/fyneapp/ui"
 )
 
 // UpdateInfo is the app update footer state.
@@ -52,44 +51,32 @@ type DiscoveredServer struct {
 // Run starts the BizShuffle desktop shell (Host / Join).
 func Run(opts Options) {
 	a := app.NewWithID("com.bizshuffle.desktop")
+	a.Settings().SetTheme(ui.NewTheme())
+
 	w := a.NewWindow("BizShuffle")
-	w.Resize(fyne.NewSize(540, 580))
-
-	var serverStop func()
-	var installing bool
-	var busy bool
-	var depsChecking = true
-	var saveTimer *time.Timer
-	var saveMu sync.Mutex
-
-	status := widget.NewLabel("Host a session or join one as a player.")
-	hostEntry := widget.NewEntry()
-	portEntry := widget.NewEntry()
-	serverURLEntry := widget.NewEntry()
-	serverURLEntry.SetPlaceHolder("http://127.0.0.1:8080")
-	playerNameEntry := widget.NewEntry()
-	playerNameEntry.SetPlaceHolder("Player name")
-	depsBox := container.NewVBox()
-	versionLabel := widget.NewLabel("")
-	updateBtn := widget.NewButton("Update", nil)
-	updateBtn.Hide()
+	w.Resize(ui.WindowDefaultSize())
 
 	var discovered []DiscoveredServer
-	discoveredList := widget.NewList(
-		func() int { return len(discovered) },
-		func() fyne.CanvasObject { return widget.NewButton("", nil) },
-		func(i int, o fyne.CanvasObject) {
-			if i >= len(discovered) {
-				return
-			}
-			o.(*widget.Button).SetText(discovered[i].Label + " — " + discovered[i].URL)
-		},
-	)
+	sh := buildShell(&discovered)
+	st := &shellState{
+		statusText: "Host a session or join one as a player.",
+		statusSev:  ui.StatusSeverityInfo,
+	}
+	w.SetContent(sh.root)
 
-	joinBtn := widget.NewButton("Join", nil)
-	hostBtn := widget.NewButton("Host (server + admin)", nil)
-	stopHostBtn := widget.NewButton("Stop host", nil)
-	stopHostBtn.Hide()
+	var serverStop func()
+	var saveTimer *time.Timer
+	var saveMu sync.Mutex
+	depsBlocked := func() bool {
+		if opts.DepsSnapshot == nil {
+			return false
+		}
+		return opts.DepsSnapshot(opts.DataDir).PlayBlocked
+	}
+
+	applyUI := func() {
+		st.apply(sh, depsBlocked)
+	}
 
 	scheduleSave := func() {
 		if opts.SaveSettings == nil {
@@ -101,9 +88,9 @@ func Run(opts Options) {
 			saveTimer.Stop()
 		}
 		saveTimer = time.AfterFunc(400*time.Millisecond, func() {
-			port, _ := strconv.Atoi(portEntry.Text)
+			port, _ := strconv.Atoi(sh.portEntry.Text)
 			fyne.Do(func() {
-				opts.SaveSettings(hostEntry.Text, serverURLEntry.Text, playerNameEntry.Text, port)
+				opts.SaveSettings(sh.hostEntry.Text, sh.serverURLEntry.Text, sh.playerNameEntry.Text, port)
 			})
 		})
 	}
@@ -113,226 +100,92 @@ func Run(opts Options) {
 			return
 		}
 		s := opts.LoadSettings()
-		hostEntry.SetText(s.BindHost)
-		portEntry.SetText(strconv.Itoa(s.HostPort))
-		serverURLEntry.SetText(s.ServerURL)
-		playerNameEntry.SetText(s.PlayerName)
+		sh.hostEntry.SetText(s.BindHost)
+		sh.portEntry.SetText(strconv.Itoa(s.HostPort))
+		sh.serverURLEntry.SetText(s.ServerURL)
+		sh.playerNameEntry.SetText(s.PlayerName)
 	}
 
 	var refreshDeps func()
 	var refreshDiscovery func()
 
-	updateJoinEnabled := func() {
-		blocked := depsChecking
-		if !blocked && opts.DepsSnapshot != nil {
-			blocked = opts.DepsSnapshot(opts.DataDir).PlayBlocked
+	installOne := func(it clienthost.DependencyItem) {
+		if st.installing || st.busy || opts.InstallDep == nil {
+			return
 		}
-		if installing || blocked || busy {
-			joinBtn.Disable()
-		} else {
-			joinBtn.Enable()
+		st.installing = true
+		st.setStatus("Installing "+string(it.ID)+"…", ui.StatusSeverityInfo)
+		applyUI()
+		go func() {
+			err := opts.InstallDep(opts.DataDir, it.ID, func(msg string) {
+				fyne.Do(func() {
+					st.setStatus(msg, ui.StatusSeverityInfo)
+					applyUI()
+				})
+			})
+			st.installing = false
+			fyne.Do(func() {
+				if err != nil {
+					st.setStatus("Install failed: "+err.Error(), ui.StatusSeverityError)
+				} else {
+					st.setStatus("Install complete", ui.StatusSeveritySuccess)
+				}
+				refreshDeps()
+				applyUI()
+			})
+		}()
+	}
+
+	installAll := func() {
+		if st.installing || st.busy || opts.InstallAllDeps == nil {
+			return
 		}
-		if busy {
-			hostBtn.Disable()
-		} else {
-			hostBtn.Enable()
-		}
+		st.installing = true
+		st.setStatus("Installing dependencies…", ui.StatusSeverityInfo)
+		applyUI()
+		go func() {
+			err := opts.InstallAllDeps(opts.DataDir, func(msg string) {
+				fyne.Do(func() {
+					st.setStatus(msg, ui.StatusSeverityInfo)
+					applyUI()
+				})
+			})
+			st.installing = false
+			fyne.Do(func() {
+				if err != nil {
+					st.setStatus("Install failed: "+err.Error(), ui.StatusSeverityError)
+				} else {
+					st.setStatus("Install complete", ui.StatusSeveritySuccess)
+				}
+				refreshDeps()
+				applyUI()
+			})
+		}()
 	}
 
 	refreshDeps = func() {
 		if opts.DepsSnapshot == nil {
-			depsChecking = false
-			depsBox.Objects = nil
-			updateJoinEnabled()
+			st.depsChecking = false
+			updateDepsPanelVisibility(sh, clienthost.DependenciesSnapshot{}, false)
+			applyUI()
 			return
 		}
-		if depsChecking {
-			depsBox.Objects = []fyne.CanvasObject{widget.NewLabel("Checking dependencies…")}
-			depsBox.Refresh()
-			updateJoinEnabled()
+		if st.depsChecking {
+			renderDepsPanel(sh, clienthost.DependenciesSnapshot{}, true, st.installing, nil, nil)
+			updateDepsPanelVisibility(sh, clienthost.DependenciesSnapshot{}, true)
+			applyUI()
 		}
 		snap := opts.DepsSnapshot(opts.DataDir)
-		depsChecking = false
-		var rows []fyne.CanvasObject
+		st.depsChecking = false
+		var onAll func()
 		if len(snap.Items) >= 2 && opts.InstallAllDeps != nil {
-			rows = append(rows, widget.NewButton("Install all", func() {
-				if installing || busy {
-					return
-				}
-				installing = true
-				updateJoinEnabled()
-				go func() {
-					err := opts.InstallAllDeps(opts.DataDir, func(msg string) {
-						fyne.Do(func() { status.SetText(msg) })
-					})
-					installing = false
-					fyne.Do(func() {
-						if err != nil {
-							status.SetText("Install failed: " + err.Error())
-						} else {
-							status.SetText("Install complete")
-						}
-						refreshDeps()
-					})
-				}()
-			}))
+			onAll = installAll
 		}
-		for _, item := range snap.Items {
-			it := item
-			btn := widget.NewButton(it.ActionLabel, func() {
-				if installing || busy || opts.InstallDep == nil {
-					return
-				}
-				installing = true
-				updateJoinEnabled()
-				status.SetText("Installing " + string(it.ID) + "…")
-				go func() {
-					err := opts.InstallDep(opts.DataDir, it.ID, func(msg string) {
-						fyne.Do(func() { status.SetText(msg) })
-					})
-					installing = false
-					fyne.Do(func() {
-						if err != nil {
-							status.SetText("Install failed: " + err.Error())
-						} else {
-							status.SetText("Install complete")
-						}
-						refreshDeps()
-					})
-				}()
-			})
-			rows = append(rows, widget.NewLabel(it.Label+": "+it.Detail), btn)
+		if depsPanelNeeded(snap, false) {
+			renderDepsPanel(sh, snap, false, st.installing, onAll, installOne)
 		}
-		if snap.PlayBlocked && len(snap.Items) > 0 {
-			rows = append(rows, widget.NewLabel(clienthost.PlayBlockedMessage(snap)))
-		}
-		depsBox.Objects = rows
-		depsBox.Refresh()
-		updateJoinEnabled()
-	}
-
-	onFieldChange := func() {
-		scheduleSave()
-	}
-	hostEntry.OnChanged = func(string) { onFieldChange() }
-	portEntry.OnChanged = func(string) { onFieldChange() }
-	serverURLEntry.OnChanged = func(string) { onFieldChange() }
-	playerNameEntry.OnChanged = func(string) { onFieldChange() }
-
-	hostBtn.OnTapped = func() {
-		if busy {
-			return
-		}
-		port, _ := strconv.Atoi(portEntry.Text)
-		busy = true
-		updateJoinEnabled()
-		status.SetText("Starting host…")
-		prevStop := serverStop
-		serverStop = nil
-		go func() {
-			opts.StopJoin()
-			if prevStop != nil {
-				prevStop()
-			}
-			adminURL, bindHost, hostPort, stop, err := opts.StartServer(hostEntry.Text, port)
-			fyne.Do(func() {
-				busy = false
-				if err != nil {
-					status.SetText("Host failed: " + err.Error())
-					updateJoinEnabled()
-					return
-				}
-				serverStop = stop
-				hostEntry.SetText(bindHost)
-				portEntry.SetText(strconv.Itoa(hostPort))
-				scheduleSave()
-				joinURL := fmt.Sprintf("http://127.0.0.1:%d", hostPort)
-				if serverURLEntry.Text == "" {
-					serverURLEntry.SetText(joinURL)
-					scheduleSave()
-				}
-				stopHostBtn.Show()
-				status.SetText(fmt.Sprintf("Hosting at %s (listening on %s:%d)", adminURL, bindHost, hostPort))
-				if opts.OpenBrowser != nil {
-					opts.OpenBrowser(adminURL)
-				}
-				updateJoinEnabled()
-				refreshDiscovery()
-			})
-		}()
-	}
-
-	stopHostBtn.OnTapped = func() {
-		if busy {
-			return
-		}
-		busy = true
-		stopHostBtn.Disable()
-		hostBtn.Disable()
-		updateJoinEnabled()
-		status.SetText("Stopping host…")
-		stopFn := serverStop
-		serverStop = nil
-		go func() {
-			defer func() {
-				fyne.Do(func() {
-					busy = false
-					stopHostBtn.Hide()
-					stopHostBtn.Enable()
-					hostBtn.Enable()
-					status.SetText("Host stopped")
-					updateJoinEnabled()
-					refreshDiscovery()
-				})
-			}()
-			if stopFn != nil {
-				stopFn()
-			}
-			joinDone := make(chan struct{})
-			go func() {
-				opts.StopJoin()
-				close(joinDone)
-			}()
-			select {
-			case <-joinDone:
-			case <-time.After(6 * time.Second):
-				log.Printf("desktop: join cleanup timed out during host stop")
-			}
-		}()
-	}
-
-	joinBtn.OnTapped = func() {
-		if opts.StartJoin == nil {
-			status.SetText("Join not configured")
-			return
-		}
-		serverURL := serverURLEntry.Text
-		playerName := playerNameEntry.Text
-		if serverURL == "" || playerName == "" {
-			status.SetText("Server URL and player name are required")
-			return
-		}
-		if snap := opts.DepsSnapshot(opts.DataDir); snap.PlayBlocked {
-			status.SetText(clienthost.PlayBlockedMessage(snap))
-			return
-		}
-		scheduleSave()
-		busy = true
-		updateJoinEnabled()
-		go func() {
-			onStatus := func(msg string) { fyne.Do(func() { status.SetText(msg) }) }
-			onLost := func(msg string) { fyne.Do(func() { status.SetText(msg) }) }
-			_, err := opts.StartJoin(context.Background(), serverURL, playerName, onStatus, onLost)
-			fyne.Do(func() {
-				busy = false
-				if err != nil {
-					status.SetText("Join failed: " + err.Error())
-				} else {
-					status.SetText("Joined " + serverURL + " as " + playerName)
-				}
-				updateJoinEnabled()
-			})
-		}()
+		updateDepsPanelVisibility(sh, snap, false)
+		applyUI()
 	}
 
 	refreshDiscovery = func() {
@@ -344,22 +197,153 @@ func Run(opts Options) {
 			return
 		}
 		discovered = servers
-		discoveredList.Refresh()
-		if serverURLEntry.Text == "" && opts.HostedURL != nil {
+		sh.discoveryList.Refresh()
+		setDiscoveryEmptyVisible(sh, len(discovered) == 0)
+		if sh.serverURLEntry.Text == "" && opts.HostedURL != nil {
 			if u := opts.HostedURL(); u != "" {
-				serverURLEntry.SetText(u)
+				sh.serverURLEntry.SetText(u)
 				scheduleSave()
 			}
 		}
 	}
-	discoveredList.OnSelected = func(id widget.ListItemID) {
+
+	sh.discoveryList.OnSelected = func(id widget.ListItemID) {
 		if int(id) < len(discovered) {
-			serverURLEntry.SetText(discovered[id].URL)
+			sh.serverURLEntry.SetText(discovered[id].URL)
 			scheduleSave()
 		}
 	}
 
-	updateBtn.OnTapped = func() {
+	onFieldChange := func() { scheduleSave() }
+	sh.hostEntry.OnChanged = func(string) { onFieldChange() }
+	sh.portEntry.OnChanged = func(string) { onFieldChange() }
+	sh.serverURLEntry.OnChanged = func(string) { onFieldChange() }
+	sh.playerNameEntry.OnChanged = func(string) { onFieldChange() }
+
+	sh.hostBtn.OnTapped = func() {
+		if st.busy {
+			return
+		}
+		port, _ := strconv.Atoi(sh.portEntry.Text)
+		st.busy = true
+		st.setStatus("Starting host…", ui.StatusSeverityInfo)
+		applyUI()
+		prevStop := serverStop
+		serverStop = nil
+		go func() {
+			opts.StopJoin()
+			if prevStop != nil {
+				prevStop()
+			}
+			adminURL, bindHost, hostPort, stop, err := opts.StartServer(sh.hostEntry.Text, port)
+			fyne.Do(func() {
+				st.busy = false
+				if err != nil {
+					st.setStatus("Host failed: "+err.Error(), ui.StatusSeverityError)
+					applyUI()
+					return
+				}
+				serverStop = stop
+				st.hosting = true
+				sh.hostEntry.SetText(bindHost)
+				sh.portEntry.SetText(strconv.Itoa(hostPort))
+				scheduleSave()
+				joinURL := fmt.Sprintf("http://127.0.0.1:%d", hostPort)
+				if sh.serverURLEntry.Text == "" {
+					sh.serverURLEntry.SetText(joinURL)
+					scheduleSave()
+				}
+				st.setStatus(fmt.Sprintf("Hosting at %s (listening on %s:%d)", adminURL, bindHost, hostPort), ui.StatusSeveritySuccess)
+				if opts.OpenBrowser != nil {
+					opts.OpenBrowser(adminURL)
+				}
+				applyUI()
+				refreshDiscovery()
+			})
+		}()
+	}
+
+	sh.stopHostBtn.OnTapped = func() {
+		if st.busy {
+			return
+		}
+		st.busy = true
+		sh.stopHostBtn.Disable()
+		sh.hostBtn.Disable()
+		st.setStatus("Stopping host…", ui.StatusSeverityInfo)
+		applyUI()
+		stopFn := serverStop
+		serverStop = nil
+		go func() {
+			defer func() {
+				fyne.Do(func() {
+					st.busy = false
+					st.hosting = false
+					sh.stopHostBtn.Enable()
+					sh.hostBtn.Enable()
+					st.setStatus("Host stopped", ui.StatusSeverityInfo)
+					applyUI()
+					refreshDiscovery()
+				})
+			}()
+			if stopFn != nil {
+				stopFn()
+			}
+			opts.StopJoin()
+		}()
+	}
+
+	sh.joinBtn.OnTapped = func() {
+		if opts.StartJoin == nil {
+			st.setStatus("Join not configured", ui.StatusSeverityError)
+			applyUI()
+			return
+		}
+		serverURL := sh.serverURLEntry.Text
+		playerName := sh.playerNameEntry.Text
+		if serverURL == "" || playerName == "" {
+			st.setStatus("Server URL and player name are required", ui.StatusSeverityWarning)
+			applyUI()
+			return
+		}
+		if snap := opts.DepsSnapshot(opts.DataDir); snap.PlayBlocked {
+			st.setStatus(clienthost.PlayBlockedMessage(snap), ui.StatusSeverityWarning)
+			applyUI()
+			return
+		}
+		scheduleSave()
+		st.busy = true
+		st.setStatus("Joining…", ui.StatusSeverityInfo)
+		applyUI()
+		go func() {
+			onStatus := func(msg string) {
+				fyne.Do(func() {
+					st.setStatus(msg, ui.StatusSeverityInfo)
+					applyUI()
+				})
+			}
+			onLost := func(msg string) {
+				fyne.Do(func() {
+					st.setStatus(msg, ui.StatusSeverityWarning)
+					applyUI()
+				})
+			}
+			_, err := opts.StartJoin(context.Background(), serverURL, playerName, onStatus, onLost)
+			fyne.Do(func() {
+				st.busy = false
+				if err != nil {
+					st.setStatus("Join failed: "+err.Error(), ui.StatusSeverityError)
+				} else {
+					st.setStatus("Joined "+serverURL+" as "+playerName, ui.StatusSeveritySuccess)
+				}
+				applyUI()
+			})
+		}()
+	}
+
+	sh.refreshDiscoveryBtn.OnTapped = func() { refreshDiscovery() }
+
+	runUpdateCheck := func() {
 		if opts.CheckUpdates == nil {
 			return
 		}
@@ -367,52 +351,44 @@ func Run(opts Options) {
 			info, err := opts.CheckUpdates(context.Background())
 			fyne.Do(func() {
 				if err != nil {
-					status.SetText("Update check failed: " + err.Error())
+					st.setStatus("Update check failed: "+err.Error(), ui.StatusSeverityError)
+					applyUI()
 					return
 				}
-				versionLabel.SetText(info.Label)
+				sh.versionLabel.SetText(info.Label)
 				if info.Available && info.DownloadURL != "" {
-					updateBtn.Show()
-					if opts.OpenBrowser != nil {
-						opts.OpenBrowser(info.DownloadURL)
+					sh.updateBtn.Show()
+					sh.updateBtn.OnTapped = func() {
+						if opts.OpenBrowser != nil {
+							opts.OpenBrowser(info.DownloadURL)
+						}
 					}
+				} else {
+					sh.updateBtn.Hide()
 				}
+				applyUI()
 			})
 		}()
 	}
 
-	w.SetContent(container.NewVBox(
-		widget.NewLabel("BizShuffle"),
-		widget.NewForm(
-			widget.NewFormItem("Bind host", hostEntry),
-			widget.NewFormItem("Port (0 = free)", portEntry),
-		),
-		container.NewHBox(hostBtn, stopHostBtn),
-		widget.NewSeparator(),
-		widget.NewLabel("Join session"),
-		widget.NewForm(
-			widget.NewFormItem("Server URL", serverURLEntry),
-			widget.NewFormItem("Player name", playerNameEntry),
-		),
-		depsBox,
-		joinBtn,
-		widget.NewButton("Refresh servers", func() { refreshDiscovery() }),
-		discoveredList,
-		status,
-		container.NewHBox(versionLabel, widget.NewButton("Check updates", func() { updateBtn.OnTapped() })),
-		widget.NewButton("Open data folder", func() {
-			if opts.OpenDataDir != nil {
-				opts.OpenDataDir()
-			}
-		}),
-	))
+	sh.checkUpdatesBtn.OnTapped = runUpdateCheck
+	sh.updateBtn.OnTapped = nil
+
+	sh.openDataBtn.OnTapped = func() {
+		if opts.OpenDataDir != nil {
+			opts.OpenDataDir()
+		}
+	}
+	sh.openDataBtn.Importance = widget.LowImportance
 
 	applySettings()
 	if opts.VersionLabel != nil {
-		versionLabel.SetText(opts.VersionLabel())
+		sh.versionLabel.SetText(opts.VersionLabel())
 	}
+	st.depsChecking = true
 	refreshDeps()
 	refreshDiscovery()
+	applyUI()
 
 	go func() {
 		t := time.NewTicker(5 * time.Second)
