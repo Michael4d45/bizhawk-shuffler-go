@@ -114,12 +114,13 @@ func (s *Session) Start(ctx context.Context, bindHost string, hostPort int) (Sta
 
 	addr := fmt.Sprintf("%s:%d", listenHost, actualPort)
 	s.httpSrv = &http.Server{Addr: addr, Handler: mux}
+	srv := s.httpSrv
 	go func() {
 		ln2, err := net.Listen("tcp", addr)
 		if err != nil {
 			return
 		}
-		_ = s.httpSrv.Serve(ln2)
+		_ = srv.Serve(ln2)
 	}()
 
 	if _, err := s.server.SyncCatalogFromRoms(); err != nil {

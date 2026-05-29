@@ -15,6 +15,13 @@ GOBIN := $(subst \,/,$(shell $(GO) env GOPATH))/bin
 endif
 export PATH := $(GOBIN):$(PATH)
 
+# scripts/lint-step.sh needs POSIX sh (Git Bash on Windows; /bin/sh on Linux CI).
+ifeq ($(OS),Windows_NT)
+RUN_SH := C:/Program Files/Git/bin/sh.exe
+else
+RUN_SH := sh
+endif
+
 # Pinned in tools/go.mod; reinstall with `make tools-install` after Go upgrades.
 GOLANGCI_LINT ?= golangci-lint
 GOVULNCHECK ?= govulncheck
@@ -35,7 +42,10 @@ else
 ensure_coverage_dir = mkdir -p $(COVERAGE_DIR)
 endif
 
-.PHONY: all test test-race lint vet fmt fix mod-tidy tools-install coverage coverage-html vuln deadcode check check-all \
+.PHONY: all test test-race lint lint-prereq lint-vet lint-timed lint-modules lint-one \
+	lint-protocol lint-domain lint-savestate lint-serverhost lint-clienthost lint-testing \
+	lint-cmd-server lint-cmd-desktop \
+	vet fmt fix mod-tidy tools-install coverage coverage-html vuln deadcode check check-all \
 	build-admin build-server build-desktop sync-server-lua clean
 
 # --- default build (run this with plain `make`) ---
@@ -118,13 +128,46 @@ mod-tidy:
 		(cd $$dir && $(GO) mod tidy); \
 	done
 
-lint: vet
+# Per-module lint: make lint-protocol, lint-cmd-desktop, … (see lint-one).
+.PHONY: lint-one lint-protocol lint-domain lint-savestate lint-serverhost \
+	lint-clienthost lint-testing lint-cmd-server lint-cmd-desktop
+
+LINT_MOD_TARGETS := lint-protocol lint-domain lint-savestate lint-serverhost \
+	lint-clienthost lint-testing lint-cmd-server lint-cmd-desktop
+
+lint-one:
+	@"$(RUN_SH)" scripts/lint-step.sh "$(DIR)" "$(RUN_SH)" -c 'cd "$(DIR)" && export CGO_ENABLED=1 && exec $(GOLANGCI_LINT) run ./...'
+
+lint-protocol:
+	@$(MAKE) lint-one DIR=protocol
+lint-domain:
+	@$(MAKE) lint-one DIR=domain
+lint-savestate:
+	@$(MAKE) lint-one DIR=savestate
+lint-serverhost:
+	@$(MAKE) lint-one DIR=serverhost
+lint-clienthost:
+	@$(MAKE) lint-one DIR=clienthost
+lint-testing:
+	@$(MAKE) lint-one DIR=testing
+lint-cmd-server:
+	@$(MAKE) lint-one DIR=cmd/server
+lint-cmd-desktop:
+	@$(MAKE) lint-one DIR=cmd/desktop
+
+lint-prereq:
 	@command -v $(GOLANGCI_LINT) >/dev/null 2>&1 || (echo "golangci-lint not found; run: make tools-install (installs to $(GOBIN))" && exit 1)
-	CGO_ENABLED=1 $(GOLANGCI_LINT) version
-	@set -e; for dir in $(GO_MOD_DIRS); do \
-		echo "==> $$dir"; \
-		(cd $$dir && CGO_ENABLED=1 $(GOLANGCI_LINT) run ./...); \
-	done
+	@export CGO_ENABLED=1 && $(GOLANGCI_LINT) version
+
+lint-vet:
+	@"$(RUN_SH)" scripts/lint-step.sh vet $(GO) vet $(GO_PKGS)
+
+lint-modules: lint-prereq $(LINT_MOD_TARGETS)
+
+# Full lint with per-step timings (CI-safe; same checks as before).
+lint: lint-prereq lint-vet $(LINT_MOD_TARGETS)
+
+lint-timed: lint
 
 coverage:
 	@$(ensure_coverage_dir)

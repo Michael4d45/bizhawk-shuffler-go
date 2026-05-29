@@ -54,7 +54,9 @@ make mod-tidy        # go mod tidy in tools + every workspace module (fixes dire
 make fmt             # gofmt via `go fmt` (writes files)
 make fix             # golangci-lint --fix per module (partial auto-fixes)
 make test
-make lint            # go vet + golangci-lint per module (bodyclose, errorlint, govet, …)
+make lint            # go vet + golangci-lint per module; prints seconds per step
+make lint-vet        # vet only (timed)
+make lint-protocol   # one module (timed); also lint-cmd-desktop, lint-modules, …
 make coverage        # atomic profile + summary (see coverage/profile)
 make vuln            # govulncheck per workspace module
 make deadcode        # unreachable funcs from cmd/server and cmd/desktop mains
@@ -66,7 +68,7 @@ make check-all       # same, but continues after failures (triage)
 
 **golangci-lint and Go 1.26:** the linter binary must be built with Go ≥ your workspace version. After upgrading Go, run `make tools-install` again. Pinned versions live in [tools/go.mod](tools/go.mod).
 
-**Windows:** GNU Make runs recipes in `/bin/sh`; dev tools are on `PATH` (not full `C:\...` paths). `make lint` runs golangci-lint **once per workspace module** (avoids `path_relativity` noise and matches `go.work`).
+**Windows:** GNU Make runs recipes in `/bin/sh`; dev tools are on `PATH` (not full `C:\...` paths). `make lint` runs golangci-lint **once per workspace module** (avoids `path_relativity` noise and matches `go.work`). Lint timings use Git Bash (`C:/Program Files/Git/bin/sh.exe`) via [scripts/lint-step.sh](scripts/lint-step.sh).
 
 **IDE vs `make lint`:** VS Code runs `golangci-lint` on save (`go.lintTool`); gopls staticcheck is off so rules match [.golangci.yml](.golangci.yml) (e.g. `QF1012` on, `ST1000` package comments off). gopls may still show a few analysis hints (`writestring`, `scannererr`) not yet in golangci-lint.
 

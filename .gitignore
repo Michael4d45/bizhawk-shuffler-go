@@ -7,6 +7,7 @@ frontend/admin/node_modules/
 data/
 release-staging/
 release-upload/
+.vscode/
 
 # Admin build overwrites embedded assets (index.html stub is committed)
 serverhost/static/assets/*
