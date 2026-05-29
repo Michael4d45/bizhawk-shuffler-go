@@ -1,0 +1,26 @@
+{
+  "running": false,
+  "swap_enabled": true,
+  "mode": "sync",
+  "min_interval_secs": 5,
+  "max_interval_secs": 300,
+  "players": {
+    "joiner": {
+      "name": "joiner",
+      "has_files": false,
+      "connected": false,
+      "bizhawk_ready": false,
+      "game": "mario.zip"
+    }
+  },
+  "updated_at": "2026-05-29T12:50:45.5105905-06:00",
+  "games": [
+    "mario.zip"
+  ],
+  "prevent_same_game_swap": false,
+  "countdown_enabled": false,
+  "swap_seed": 1780080645,
+  "config_keys": [
+    "DisplayFps"
+  ]
+}

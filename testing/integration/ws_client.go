@@ -13,10 +13,13 @@ import (
 
 // WSTestClient is a minimal WebSocket client for protocol integration tests.
 type WSTestClient struct {
-	conn  *websocket.Conn
-	inbox []protocol.Command
-	wsURL string
-	mu    sync.Mutex
+	conn    *websocket.Conn
+	inbox   []protocol.Command
+	wsURL   string
+	mu      sync.Mutex
+	writeMu sync.Mutex // gorilla/websocket allows one writer at a time
+	// SaveUploadBase, when set, uploads a minimal save on request_save before acking.
+	SaveUploadBase string
 }
 
 // NewWSTestClient builds a client for the server's /ws endpoint.
@@ -53,6 +56,13 @@ func (c *WSTestClient) Connect() error {
 			if json.Unmarshal(data, &cmd) != nil {
 				continue
 			}
+			if cmd.Cmd == protocol.CmdRequestSave && c.SaveUploadBase != "" {
+				c.mu.Lock()
+				c.inbox = append(c.inbox, cmd)
+				c.mu.Unlock()
+				go c.respondRequestSave(cmd)
+				continue
+			}
 			if cmd.ID != "" && cmd.Cmd != protocol.CmdAck && cmd.Cmd != protocol.CmdNack {
 				_ = c.Send(protocol.Command{Cmd: protocol.CmdAck, ID: cmd.ID})
 			}
@@ -73,6 +83,8 @@ func (c *WSTestClient) Send(cmd protocol.Command) error {
 	if err != nil {
 		return err
 	}
+	c.writeMu.Lock()
+	defer c.writeMu.Unlock()
 	return c.conn.WriteMessage(websocket.TextMessage, data)
 }
 
@@ -114,6 +126,21 @@ func (c *WSTestClient) WaitFor(match func(protocol.Command) bool, timeout time.D
 		time.Sleep(50 * time.Millisecond)
 	}
 	return protocol.Command{}, fmt.Errorf("timeout waiting for command")
+}
+
+func (c *WSTestClient) respondRequestSave(cmd protocol.Command) {
+	instanceID := ""
+	if m, ok := cmd.Payload.(map[string]any); ok {
+		if id, ok := m["instance_id"].(string); ok {
+			instanceID = id
+		}
+	}
+	if instanceID != "" && c.SaveUploadBase != "" {
+		_ = UploadMinimalSave(c.SaveUploadBase, instanceID)
+	}
+	if cmd.ID != "" {
+		_ = c.Send(protocol.Command{Cmd: protocol.CmdAck, ID: cmd.ID})
+	}
 }
 
 // Close ends the connection.

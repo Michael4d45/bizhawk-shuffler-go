@@ -182,13 +182,23 @@ func (a *API) UploadSaveState(instanceID string) error {
 		return nil
 	}
 	defer func() { _ = f.Close() }()
+	data, err := io.ReadAll(io.LimitReader(f, clientSaveMaxBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > clientSaveMaxBytes {
+		return fmt.Errorf("save file too large")
+	}
+	if err := verifySaveFileBytes(data); err != nil {
+		return err
+	}
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	fw, err := w.CreateFormFile("save", filepath.Base(localPath))
 	if err != nil {
 		return err
 	}
-	if _, err := io.Copy(fw, f); err != nil {
+	if _, err := fw.Write(data); err != nil {
 		return err
 	}
 	_ = w.WriteField("filename", filepath.Base(localPath))
@@ -288,7 +298,17 @@ func (a *API) EnsureSaveState(instanceID string) error {
 	}
 
 	defer func() { _ = out.Close() }()
-	_, err = io.Copy(out, resp.Body)
+	data, err := io.ReadAll(io.LimitReader(resp.Body, clientSaveMaxBytes+1))
+	if err != nil {
+		return err
+	}
+	if len(data) > clientSaveMaxBytes {
+		return fmt.Errorf("downloaded save too large")
+	}
+	if err := verifySaveFileBytes(data); err != nil {
+		return fmt.Errorf("downloaded save invalid: %w", err)
+	}
+	_, err = out.Write(data)
 	return err
 }
 

@@ -1,6 +1,7 @@
 package serverhost
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
@@ -9,7 +10,10 @@ import (
 	"time"
 
 	"github.com/michael4d45/bizshuffle/protocol"
+	"github.com/michael4d45/bizshuffle/savestate"
 )
+
+const saveUploadMaxBytes = 32 << 20
 
 // handleSaveUpload receives multipart save file upload and writes to ./saves directory
 func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
@@ -18,8 +22,7 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	err := r.ParseMultipartForm(32 << 20) // 32MB limit
-	if err != nil {
+	if err := r.ParseMultipartForm(saveUploadMaxBytes); err != nil {
 		http.Error(w, "parse multipart: "+err.Error(), http.StatusBadRequest)
 		return
 	}
@@ -31,19 +34,40 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() { _ = file.Close() }()
 
-	// Use filename from form field if provided, otherwise use uploaded filename
 	filename := r.FormValue("filename")
 	if filename == "" {
 		filename = header.Filename
 	}
+	filename = filepath.Base(filename)
 
-	// Extract instance ID from filename (remove .state extension)
 	instanceID := filename
 	if len(filename) > 6 && filename[len(filename)-6:] == ".state" {
 		instanceID = filename[:len(filename)-6]
 	}
 
-	// Ensure saves directory exists
+	data, err := io.ReadAll(io.LimitReader(file, saveUploadMaxBytes+1))
+	if err != nil {
+		http.Error(w, "read save: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if len(data) > saveUploadMaxBytes {
+		http.Error(w, "file too large", http.StatusRequestEntityTooLarge)
+		return
+	}
+
+	verified := savestate.VerifyBizHawkSavestate(data, savestate.VerifyOptions{MaxFileBytes: saveUploadMaxBytes})
+	if !verified.OK {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"error":   "INVALID_SAVESTATE",
+			"code":    verified.Code,
+			"message": verified.Message,
+			"detail":  verified.Detail,
+		})
+		return
+	}
+
 	savesDir := "./saves"
 	if err := os.MkdirAll(savesDir, 0755); err != nil {
 		s.setInstanceFileState(instanceID, protocol.FileStateNone)
@@ -51,18 +75,8 @@ func (s *Server) handleSaveUpload(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Create destination file
-	dstPath := filepath.Join(savesDir, filepath.Base(filename))
-	out, err := os.Create(dstPath)
-	if err != nil {
-		s.setInstanceFileState(instanceID, protocol.FileStateNone)
-		http.Error(w, "create save file: "+err.Error(), http.StatusInternalServerError)
-		return
-	}
-	defer func() { _ = out.Close() }()
-
-	// Copy file content
-	if _, err := io.Copy(out, file); err != nil {
+	dstPath := filepath.Join(savesDir, filename)
+	if err := os.WriteFile(dstPath, data, 0o644); err != nil {
 		s.setInstanceFileState(instanceID, protocol.FileStateNone)
 		http.Error(w, "write save file: "+err.Error(), http.StatusInternalServerError)
 		return

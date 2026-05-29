@@ -1,7 +1,6 @@
 package clienthost
 
 import (
-	"archive/zip"
 	"context"
 	"errors"
 	"fmt"
@@ -688,48 +687,28 @@ func savePluginSettingsToFile(pluginName string, settings map[string]string) err
 	return nil
 }
 
-// verifySaveWithRetry checks if the save file exists, has size > 0, and is a valid zip file.
-// It retries up to 3 times with 200ms delays between attempts.
+// verifySaveWithRetry waits for BizHawk to write a valid savestate after SAVE.
 func (c *Controller) verifySaveWithRetry(instanceID string) error {
+	if instanceID == "" {
+		return fmt.Errorf("missing instance id for save verification")
+	}
 	filename := "./saves/" + instanceID + ".state"
 
+	var lastErr error
 	for attempt := range 3 {
 		if attempt > 0 {
 			time.Sleep(200 * time.Millisecond)
 		}
-
-		// file exists?
-		if _, err := os.Stat(filename); err != nil {
-			log.Printf("save file does not exist for instanceID=%s (attempt %d)", instanceID, attempt+1)
+		if err := verifySaveFilePath(filename); err != nil {
+			lastErr = err
+			log.Printf("save verify instanceID=%s attempt %d: %v", instanceID, attempt+1, err)
 			continue
 		}
-
-		// file size > 0?
-		info, err := os.Stat(filename)
-		if err != nil {
-			log.Printf("failed to stat save file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
-			continue
-		}
-		if info.Size() == 0 {
-			log.Printf("save file size is 0 for instanceID=%s (attempt %d)", instanceID, attempt+1)
-			continue
-		}
-
-		// valid zip file?
-		if file, err := os.Open(filename); err != nil {
-			log.Printf("failed to open save file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
-			continue
-		} else {
-			defer func() { _ = file.Close() }()
-			if _, err := zip.NewReader(file, info.Size()); err != nil {
-				log.Printf("save file is not a valid zip file for instanceID=%s (attempt %d): %v", instanceID, attempt+1, err)
-				continue
-			}
-		}
-
 		log.Printf("save file verification successful for instanceID=%s", instanceID)
 		return nil
 	}
-
+	if lastErr != nil {
+		return fmt.Errorf("save file verification failed for instanceID=%s: %w", instanceID, lastErr)
+	}
 	return fmt.Errorf("save file verification failed after 3 attempts for instanceID=%s", instanceID)
 }

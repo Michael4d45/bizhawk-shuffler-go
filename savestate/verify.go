@@ -168,6 +168,23 @@ func VerifyBizHawkSavestate(input []byte, opts VerifyOptions) VerifyResult {
 	}
 }
 
+// BuildNonBizHawkZip returns a valid ZIP that is not a BizHawk savestate.
+func BuildNonBizHawkZip() ([]byte, error) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	f, err := w.Create("readme.txt")
+	if err != nil {
+		return nil, err
+	}
+	if _, err := f.Write([]byte("not a savestate")); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
 func BuildMinimalBizHawkSavestate() ([]byte, error) {
 	var buf bytes.Buffer
 	w := zip.NewWriter(&buf)

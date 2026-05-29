@@ -14,11 +14,11 @@ func (s *Server) AssignPlayerOnConnect(name string) protocol.Player {
 			p = protocol.Player{Name: name}
 		}
 		changed := false
-		if assigned.Game != "" && p.Game != assigned.Game {
+		if assigned.Game != "" && p.Game == "" {
 			p.Game = assigned.Game
 			changed = true
 		}
-		if assigned.InstanceID != "" && p.InstanceID != assigned.InstanceID {
+		if assigned.InstanceID != "" && p.InstanceID == "" {
 			p.InstanceID = assigned.InstanceID
 			changed = true
 		}

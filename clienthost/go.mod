@@ -6,6 +6,7 @@ require (
 	github.com/go-vgo/robotgo v0.110.8
 	github.com/gorilla/websocket v1.5.3
 	github.com/michael4d45/bizshuffle/protocol v0.0.0
+	github.com/michael4d45/bizshuffle/savestate v0.0.0
 	golang.org/x/sys v0.43.0
 )
 
@@ -16,6 +17,7 @@ require (
 	github.com/go-ole/go-ole v1.3.0 // indirect
 	github.com/godbus/dbus/v5 v5.1.0 // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
 	github.com/otiai10/gosseract v2.2.1+incompatible // indirect
 	github.com/otiai10/mint v1.6.3 // indirect
@@ -37,4 +39,7 @@ require (
 	golang.org/x/net v0.53.0 // indirect
 )
 
-replace github.com/michael4d45/bizshuffle/protocol => ../protocol
+replace (
+	github.com/michael4d45/bizshuffle/protocol => ../protocol
+	github.com/michael4d45/bizshuffle/savestate => ../savestate
+)

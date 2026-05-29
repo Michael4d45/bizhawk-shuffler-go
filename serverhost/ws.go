@@ -145,6 +145,7 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					pl.Connected = false
 					st.Players[name] = pl
 					delete(s.playerClients, name)
+					s.ClearAppliedSwap(name)
 				} else if adminName := s.findAdminNameForClient(cl); adminName != "" {
 					// Handle admin disconnection - could add admin state management here if needed
 					delete(s.adminClients, adminName)
@@ -570,19 +571,17 @@ func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
 	}(player, opts)
 }
 
-func (s *Server) sendSwapAll() {
-	// capture local copy of instances for sending without holding lock while network operations run
+func (s *Server) sendSwapAll(opts SwapSendOptions) {
 	playersMap := map[string]protocol.Player{}
 	s.withRLock(func() {
 		maps.Copy(playersMap, s.state.Players)
 	})
 
-	// Send swap command to each connected player. Include instance_id when player has an assigned instance.
 	for _, p := range playersMap {
 		if !p.Connected {
 			continue
 		}
-		s.sendSwap(p, SwapSendOptions{})
+		s.sendSwap(p, opts)
 	}
 }
 

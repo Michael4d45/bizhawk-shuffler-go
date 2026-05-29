@@ -223,7 +223,7 @@ func (h *SyncModeHandler) HandleSwap() error {
 		}
 	})
 
-	h.server.sendSwapAll()
+	h.server.sendSwapAll(SwapSendOptions{})
 	return nil
 }
 
@@ -509,6 +509,11 @@ func (h *SaveModeHandler) HandleSwap() error {
 	log.Printf("[SaveMode] Starting full swap (preventSame=%v)", preventSame)
 
 	h.server.SetPendingAllFiles()
+	h.server.RequestPendingSaves()
+	if h.server.WaitForPendingSaves(60 * time.Second) {
+		log.Printf("[SaveMode] timed out waiting for players to upload saves before mass swap")
+		return nil
+	}
 
 	// Collect player names and current assignments
 	var players []string
@@ -578,7 +583,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 		}
 	})
 
-	h.server.sendSwapAll()
+	h.server.sendSwapAll(SwapSendOptions{SkipSave: true})
 	return nil
 }
 
@@ -702,9 +707,13 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 		return errors.New("instance not found")
 	}
 
-	// Set instance state to pending before upload starts
 	if foundPlayer != nil {
 		h.server.setInstanceFileStateWithPlayer(foundInst.ID, protocol.FileStatePending, foundPlayer.Name)
+		h.server.RequestPendingSaves()
+		if h.server.WaitForPendingSaves(60 * time.Second) {
+			log.Printf("[SaveMode] timed out waiting for displaced player %s save", foundPlayer.Name)
+			return nil
+		}
 		h.server.sendSwap(*foundPlayer, SwapSendOptions{SkipSave: true})
 	} else {
 		h.server.setInstanceFileState(foundInst.ID, protocol.FileStateNone)

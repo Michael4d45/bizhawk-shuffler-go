@@ -132,7 +132,7 @@ func (s *Server) apiSwapAllToGame(w http.ResponseWriter, r *http.Request) {
 			st.Players[name] = player
 		}
 	})
-	s.sendSwapAll()
+	s.sendSwapAll(SwapSendOptions{})
 	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)
 	}

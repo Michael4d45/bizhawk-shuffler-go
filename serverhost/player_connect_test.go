@@ -23,6 +23,19 @@ func TestAssignPlayerOnConnectSyncMode(t *testing.T) {
 	}
 }
 
+func TestAssignPlayerOnConnectFillOnly(t *testing.T) {
+	s := New()
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		st.Games = []string{"other.zip"}
+		st.Players["joiner"] = protocol.Player{Name: "joiner", Game: "kept.zip", InstanceID: "inst-1"}
+	})
+
+	p := s.AssignPlayerOnConnect("joiner")
+	if p.Game != "kept.zip" || p.InstanceID != "inst-1" {
+		t.Fatalf("got game=%q instance=%q", p.Game, p.InstanceID)
+	}
+}
+
 func TestShouldSendSwapDedupes(t *testing.T) {
 	s := New()
 	p := protocol.Player{Name: "p1", Game: "a.zip"}
