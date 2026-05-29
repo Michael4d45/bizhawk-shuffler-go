@@ -5,10 +5,12 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+
+	"github.com/michael4d45/bizshuffle/assets"
 )
 
 func TestEnsureServerLuaFromEmbed(t *testing.T) {
-	if len(embeddedServerLua) == 0 {
+	if len(assets.ServerLua) == 0 {
 		t.Fatal("embedded server.lua is empty")
 	}
 	dir := t.TempDir()
@@ -23,14 +25,14 @@ func TestEnsureServerLuaFromEmbed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !bytes.Equal(b, embeddedServerLua) {
+	if !bytes.Equal(b, assets.ServerLua) {
 		t.Fatal("dest does not match embedded asset")
 	}
 }
 
 // TestEnsureServerLuaAfterChdir mirrors StartJoinSession: chdir into dataDir with no assets/ nearby.
 func TestEnsureServerLuaAfterChdir(t *testing.T) {
-	if len(embeddedServerLua) == 0 {
+	if len(assets.ServerLua) == 0 {
 		t.Fatal("embedded server.lua is empty")
 	}
 	dataDir := t.TempDir()

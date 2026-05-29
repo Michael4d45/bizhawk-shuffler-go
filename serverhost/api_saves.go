@@ -216,8 +216,18 @@ func (s *Server) RequestPendingSaves() {
 		}
 	})
 
-	// Now perform the requests outside the lock
+	// Only request saves from connected players.
 	for _, save := range pendingSaves {
+		var connected bool
+		s.withRLock(func() {
+			if p, ok := s.state.Players[save.player]; ok {
+				connected = p.Connected
+			}
+		})
+		if !connected {
+			s.clearPendingInstance(save.instanceID)
+			continue
+		}
 		fmt.Println("Requesting save from player", save.player, "for instance", save.instanceID)
 		if err := s.RequestSave(save.player, save.instanceID); err != nil {
 			fmt.Printf("Failed to request save from player %s for instance %s: %v\n", save.player, save.instanceID, err)

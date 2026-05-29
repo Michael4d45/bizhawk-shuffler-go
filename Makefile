@@ -1,4 +1,4 @@
-# Default: build server + desktop (not just sync-server-lua).
+# Default: build server + desktop.
 .DEFAULT_GOAL := all
 
 GO := go
@@ -29,11 +29,9 @@ DEADCODE ?= deadcode
 
 SERVER_BIN := $(BIN)/bizshuffle-server$(EXE)
 DESKTOP_BIN := $(BIN)/bizshuffle-desktop$(EXE)
-CLIENTHOST_ASSETS := clienthost/assets/server.lua
-
 # go.work has no root module; quality targets use explicit package/module lists.
-GO_PKGS := ./protocol/... ./domain/... ./savestate/... ./serverhost/... ./clienthost/... ./testing/... ./cmd/server/... ./cmd/desktop/...
-GO_MOD_DIRS := protocol domain savestate serverhost clienthost testing cmd/server cmd/desktop
+GO_PKGS := ./assets/... ./protocol/... ./domain/... ./savestate/... ./serverhost/... ./clienthost/... ./testing/... ./cmd/server/... ./cmd/desktop/...
+GO_MOD_DIRS := assets protocol domain savestate serverhost clienthost testing cmd/server cmd/desktop
 
 # Portable directory create (Windows make may not have mkdir in PATH).
 ifeq ($(OS),Windows_NT)
@@ -46,7 +44,7 @@ endif
 	lint-protocol lint-domain lint-savestate lint-serverhost lint-clienthost lint-testing \
 	lint-cmd-server lint-cmd-desktop \
 	vet fmt fix mod-tidy tools-install coverage coverage-html vuln deadcode check check-all \
-	build-admin build-server build-desktop sync-server-lua clean
+	build-admin build-server build-desktop clean
 
 # --- default build (run this with plain `make`) ---
 
@@ -55,7 +53,7 @@ all: $(SERVER_BIN) $(DESKTOP_BIN)
 
 # --- binaries ---
 
-$(SERVER_BIN): build-admin sync-server-lua
+$(SERVER_BIN): build-admin
 	@$(if $(filter Windows_NT,$(OS)),powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(BIN)' | Out-Null",mkdir -p $(BIN))
 	@echo building $@
 	CGO_ENABLED=0 $(GO) build -o $@ ./cmd/server
@@ -67,7 +65,7 @@ ifeq ($(or $(GOOS),$(shell go env GOOS)),windows)
 DESKTOP_LDFLAGS += -H windowsgui
 endif
 
-$(DESKTOP_BIN): build-admin sync-server-lua
+$(DESKTOP_BIN): build-admin
 	@$(if $(filter Windows_NT,$(OS)),powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(BIN)' | Out-Null",mkdir -p $(BIN))
 	@echo building $@
 	CGO_ENABLED=1 $(GO) build -ldflags "$(DESKTOP_LDFLAGS)" -o $@ ./cmd/desktop
@@ -81,13 +79,6 @@ build-desktop: $(DESKTOP_BIN)
 
 build-admin:
 	cd $(ADMIN) && bun install && bun run build
-
-sync-server-lua: $(CLIENTHOST_ASSETS)
-	@echo synced server.lua -\> $(CLIENTHOST_ASSETS)
-
-$(CLIENTHOST_ASSETS): assets/server.lua
-	@$(if $(filter Windows_NT,$(OS)),powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path 'clienthost/assets' | Out-Null",mkdir -p clienthost/assets)
-	cp assets/server.lua $(CLIENTHOST_ASSETS)
 
 # --- quality (run from repo root; requires CGO for clienthost/desktop tests) ---
 
@@ -129,10 +120,10 @@ mod-tidy:
 	done
 
 # Per-module lint: make lint-protocol, lint-cmd-desktop, … (see lint-one).
-.PHONY: lint-one lint-protocol lint-domain lint-savestate lint-serverhost \
+.PHONY: lint-one lint-protocol lint-domain lint-savestate lint-assets lint-serverhost \
 	lint-clienthost lint-testing lint-cmd-server lint-cmd-desktop
 
-LINT_MOD_TARGETS := lint-protocol lint-domain lint-savestate lint-serverhost \
+LINT_MOD_TARGETS := lint-protocol lint-domain lint-savestate lint-assets lint-serverhost \
 	lint-clienthost lint-testing lint-cmd-server lint-cmd-desktop
 
 lint-one:
@@ -144,6 +135,8 @@ lint-domain:
 	@$(MAKE) lint-one DIR=domain
 lint-savestate:
 	@$(MAKE) lint-one DIR=savestate
+lint-assets:
+	@$(MAKE) lint-one DIR=assets
 lint-serverhost:
 	@$(MAKE) lint-one DIR=serverhost
 lint-clienthost:

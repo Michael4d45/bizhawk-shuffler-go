@@ -97,15 +97,15 @@ flowchart TB
 ### 3.2 Directory layout
 
 ```
-BizShuffle3/
+root/
 ├── cmd/server, desktop/
-├── protocol/, domain/, savestate/, serverhost/, clienthost/, testing/
-├── frontend/admin/, assets/server.lua
+├── protocol/, domain/, savestate/, assets/, serverhost/, clienthost/, testing/
+├── frontend/admin/, assets/server.lua (embedded via assets/embed.go)
 ├── roms/, saves/, plugins/, state.json, config.json, BizHawk/   (runtime, ~/BizShuffle)
 └── docs/SPEC.md, docs/contracts/
 ```
 
-**Package direction:** `cmd/*` → `serverhost` / `clienthost` → `domain` + `protocol`. Server and client packages do not import each other.
+**Package direction:** `cmd/*` → `serverhost` / `clienthost` → `domain` + `protocol` + `assets` (BizHawk Lua embed). Server and client packages do not import each other.
 
 ### 3.3 Deployment topology
 

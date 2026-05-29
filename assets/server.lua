@@ -660,9 +660,8 @@ local function safe_exec_and_ack(id, fn)
 end
 
 local function split_pipe(s)
-    -- Split on '|' and preserve empty fields. The previous implementation
-    -- used "([^|]+)" which skipped empty segments (consecutive pipes),
-    -- causing argument positions to shift when fields are empty.
+    -- Split on '|' and preserve empty fields. Patterns like "([^|]+)" skip empty
+    -- segments (consecutive pipes), which shifts argument positions.
     local parts = {}
     local last = 1
     while true do

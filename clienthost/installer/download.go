@@ -74,6 +74,6 @@ func (d *Downloader) DownloadFile(url, dest string, progress func(current, total
 
 // GetAssetNameForPlatform returns the expected asset name for the current platform
 func GetAssetNameForPlatform(component string) string {
-	// Assets are named like: bizshuffle-server-windows-amd64.zip or bizshuffle-client-windows-amd64.zip
+	// Assets are named like: bizshuffle-server-windows-amd64.zip or bizshuffle-desktop-windows-amd64.zip
 	return fmt.Sprintf("bizshuffle-%s-%s-%s.zip", component, runtime.GOOS, runtime.GOARCH)
 }

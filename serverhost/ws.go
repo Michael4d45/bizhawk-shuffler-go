@@ -143,7 +143,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				if name := s.findPlayerNameForClient(cl); name != "" {
 					pl := st.Players[name]
 					pl.Connected = false
+					pl.BizhawkReady = false
 					st.Players[name] = pl
+					s.clearPendingForPlayer(st, name)
 					delete(s.playerClients, name)
 					s.ClearAppliedSwap(name)
 				} else if adminName := s.findAdminNameForClient(cl); adminName != "" {

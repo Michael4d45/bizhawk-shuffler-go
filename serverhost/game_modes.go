@@ -15,7 +15,6 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
-	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
@@ -459,34 +458,39 @@ func (h *SaveModeHandler) canPlayerSwapToInstance(player protocol.Player, instan
 	return true
 }
 
+// waitForFileCheck waits until no pending save files or in-flight swap commands (TS parity: 30s).
 func (h *SaveModeHandler) waitForFileCheck() bool {
-	var waitingForPendingFiles bool
-	var waitingForPendingCommands bool
-	ticker := time.NewTicker(100 * time.Millisecond)
-	defer ticker.Stop()
-	for range 3 {
+	return h.waitForSwapGate(30 * time.Second)
+}
+
+func (h *SaveModeHandler) waitForSwapGate(timeout time.Duration) bool {
+	if timeout <= 0 {
+		timeout = 30 * time.Second
+	}
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		var waitingFiles, waitingCmds bool
 		h.server.withRLock(func() {
-			waitingForPendingFiles = h.server.pendingInstancecount > 0
-			waitingForPendingCommands = len(h.server.pending) > 0
+			waitingFiles = h.server.pendingInstancecount > 0
+			waitingCmds = len(h.server.pending) > 0
 		})
-		if waitingForPendingFiles {
-			h.server.RequestPendingSaves()
-		} else if !waitingForPendingCommands {
-			break
+		if !waitingFiles && !waitingCmds {
+			return false
 		}
-		<-ticker.C
+		if waitingFiles {
+			h.server.RequestPendingSaves()
+		}
+		time.Sleep(200 * time.Millisecond)
 	}
-	if waitingForPendingFiles {
-		log.Printf("waiting for %d pending file checks to complete\n", h.server.pendingInstancecount)
-	}
-	if waitingForPendingCommands {
-		h.server.withRLock(func() {
-			for name, p := range h.server.pending {
-				log.Printf("waiting for pending command check: %s: %v\n", name, p)
-			}
-		})
-	}
-	return waitingForPendingFiles || waitingForPendingCommands
+	var still bool
+	h.server.withRLock(func() {
+		still = h.server.pendingInstancecount > 0 || len(h.server.pending) > 0
+		if still {
+			log.Printf("[SaveMode] waitForSwapGate timed out: pendingInstancecount=%d pendingCmds=%d",
+				h.server.pendingInstancecount, len(h.server.pending))
+		}
+	})
+	return still
 }
 
 // HandleSwap performs a full swap of all players to different game instances in save mode.
@@ -588,38 +592,24 @@ func (h *SaveModeHandler) HandleSwap() error {
 }
 
 func (h *SaveModeHandler) GetPlayer(player string) protocol.Player {
-	// In save mode, prefer returning the first unassigned game instance.
-	// We consider an instance unassigned when no player currently has its InstanceID.
 	var result protocol.Player
-	h.server.UpdateStateAndPersist(func(state *protocol.ServerState) {
-		if len(state.GameSwapInstances) > 0 {
-			// build a set of assigned instance IDs
-			assigned := map[string]struct{}{}
-			for _, p := range state.Players {
-				if p.InstanceID != "" {
-					assigned[p.InstanceID] = struct{}{}
-				}
+	h.server.withRLock(func() {
+		assigned := map[string]struct{}{}
+		for _, p := range h.server.state.Players {
+			if p.InstanceID != "" {
+				assigned[p.InstanceID] = struct{}{}
 			}
-			// find first instance that is not assigned
-			for i, inst := range state.GameSwapInstances {
-				if _, ok := assigned[inst.ID]; !ok {
-					// Check if save state file exists and update FileState accordingly
-					savePath := filepath.Join("./saves", inst.ID+".state")
-					if _, err := os.Stat(savePath); err == nil {
-						// File exists, mark as ready
-						state.GameSwapInstances[i].FileState = protocol.FileStateReady
-					} else {
-						// File doesn't exist, mark as none
-						state.GameSwapInstances[i].FileState = protocol.FileStateNone
-					}
-					result = protocol.Player{
-						Name:       player,
-						Game:       inst.Game,
-						InstanceID: inst.ID,
-					}
-					return
-				}
+		}
+		for _, inst := range h.server.state.GameSwapInstances {
+			if _, ok := assigned[inst.ID]; ok {
+				continue
 			}
+			result = protocol.Player{
+				Name:       player,
+				Game:       inst.Game,
+				InstanceID: inst.ID,
+			}
+			return
 		}
 	})
 	if result.Name != "" {
@@ -629,46 +619,32 @@ func (h *SaveModeHandler) GetPlayer(player string) protocol.Player {
 }
 
 func (h *SaveModeHandler) SetupState() error {
-	// Ensure there are instances for all games in the catalog
 	h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
-		existing := make(map[string]bool)
-		for _, inst := range st.GameSwapInstances {
-			existing[inst.Game] = true
-		}
-
-		// Build a map of existing instance IDs for counter-based naming
-		existingIDs := make(map[string]bool)
-		for _, inst := range st.GameSwapInstances {
-			existingIDs[inst.ID] = true
-		}
-
-		for _, entry := range st.MainGames {
-			if !existing[entry.File] {
-				newInst := protocol.GameSwapInstance{
-					ID:        generateInstanceID(entry.File, existingIDs),
-					Game:      entry.File,
-					FileState: protocol.FileStateNone,
-				}
-				// Track the new ID so subsequent instances of the same game can increment
-				existingIDs[newInst.ID] = true
-				st.GameSwapInstances = append(st.GameSwapInstances, newInst)
-				existing[entry.File] = true
-			}
-		}
+		updated := protocol.SetupSaveState(*st)
+		st.GameSwapInstances = updated.GameSwapInstances
 	})
 	return nil
 }
 
 func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
+	if instanceID == "" {
+		h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
+			p, ok := st.Players[player]
+			if !ok {
+				return
+			}
+			p.Game = ""
+			p.InstanceID = ""
+			st.Players[player] = p
+		})
+		return nil
+	}
+
 	var foundInst *protocol.GameSwapInstance
 	var foundPlayer *protocol.Player
 	var ok bool
 	var p protocol.Player
 	h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
-		// If instance ID provided, assign that instance to the player (players now store InstanceID)
-		if instanceID == "" {
-			return
-		}
 		for i, inst := range st.GameSwapInstances {
 			if inst.ID == instanceID {
 				// capture instance
@@ -699,10 +675,6 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 			st.Players[player] = p
 		}
 	})
-	// If instance was not provided, return an error
-	if instanceID == "" {
-		return errors.New("instance ID is required")
-	}
 	if foundInst == nil {
 		return errors.New("instance not found")
 	}
@@ -841,74 +813,77 @@ func (h *SaveModeHandler) getRandomInstanceForPlayer(player protocol.Player) (pr
 	return instance, true, otherPlayer, hasOtherPlayer
 }
 
-// HandleRandomSwapForPlayer performs a random swap for a specific player in save mode.
-// In save mode, this can result in a chain of swaps if players need to exchange instances.
+// HandleRandomSwapForPlayer performs a random swap for a specific player in save mode (TS parity).
 func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 	if h.waitForFileCheck() {
 		return nil
 	}
 
-	var swappedPlayers = make(map[string]bool)
+	pending := make(map[string]bool)
 	h.server.withRLock(func() {
 		for name := range h.server.state.Players {
-			swappedPlayers[name] = false
+			pending[name] = true
 		}
 	})
 
-	for {
+	current := playerName
+	playerCount := len(pending)
+	for step := 0; step < playerCount+1; step++ {
 		var player protocol.Player
 		var found bool
 		h.server.withRLock(func() {
-			player, found = h.server.state.Players[playerName]
+			player, found = h.server.state.Players[current]
 		})
 		if !found {
-			return fmt.Errorf("player %s not found", playerName)
+			return fmt.Errorf("player %s not found", current)
 		}
 
 		instance, hasInstance, otherPlayer, hasOtherPlayer := h.getRandomInstanceForPlayer(player)
 		if !hasInstance {
-			log.Printf("[SaveMode] Player %s has no available instances for random swap (all completed)", playerName)
+			log.Printf("[SaveMode] Player %s has no available instances for random swap", current)
 			break
 		}
 
-		// Validate that this swap is allowed
-		if !h.canPlayerSwapToInstance(player, instance, hasOtherPlayer, otherPlayer) {
-			log.Printf("[SaveMode] Player %s cannot swap to instance %s (game %s) - validation failed",
-				playerName, instance.ID, instance.Game)
-			break
+		if hasOtherPlayer && otherPlayer.Connected && otherPlayer.InstanceID != "" {
+			h.server.setInstanceFileStateWithPlayer(
+				otherPlayer.InstanceID, protocol.FileStatePending, otherPlayer.Name)
 		}
-
-		log.Printf("[SaveMode] Swapping player %s to instance %s (game %s)",
-			playerName, instance.ID, instance.Game)
-
 		h.server.setPlayerFilePending(player)
+		h.server.RequestPendingSaves()
+		if h.server.WaitForPendingSaves(60 * time.Second) {
+			log.Printf("[SaveMode] timed out waiting for random-swap saves")
+			return nil
+		}
 
 		player.InstanceID = instance.ID
 		player.Game = instance.Game
-
 		h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
-			// Clear instance from previous owner if swapping with another player
 			if hasOtherPlayer {
-				h.clearInstanceFromPlayer(instance.ID, playerName)
+				for name, pl := range st.Players {
+					if pl.InstanceID == instance.ID && name != player.Name {
+						pl.Game = ""
+						pl.InstanceID = ""
+						st.Players[name] = pl
+					}
+				}
 			}
-			// Assign to current player
 			st.Players[player.Name] = player
-			// Validate no duplicates after assignment
 			if err := validateNoDuplicateInstanceAssignments(st); err != nil {
 				log.Printf("[SaveMode] WARNING: State validation failed: %v", err)
 			}
 		})
 
 		h.server.sendSwap(player, SwapSendOptions{SkipSave: true})
-		swappedPlayers[player.Name] = true
+		delete(pending, player.Name)
 
 		if !hasOtherPlayer {
 			break
 		}
-		playerName = otherPlayer.Name
-		if swappedPlayers[playerName] {
+		chain := otherPlayer.Name
+		if !pending[chain] {
 			break
 		}
+		current = chain
 	}
 
 	return nil

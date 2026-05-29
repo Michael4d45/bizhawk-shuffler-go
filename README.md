@@ -25,7 +25,7 @@ make clean && make
 
 On Windows without Make: `.\build.ps1` (same outputs under `dist\`).
 
-Plain `make` used to only sync `server.lua` (first Makefile target). It now defaults to **full builds** via `.DEFAULT_GOAL := all`.
+`make` defaults to **full builds** (`bizshuffle-server` + `bizshuffle-desktop`) via `.DEFAULT_GOAL := all`.
 
 ## Run
 
@@ -77,6 +77,7 @@ make check-all       # same, but continues after failures (triage)
 | Path | Role |
 |------|------|
 | `protocol/` | WS types, codec, KV, Lua, discovery |
+| `assets/` | BizHawk `server.lua` (embedded) + sample plugins |
 | `domain/` | Pure session logic |
 | `savestate/` | `.state` zip verification |
 | `serverhost/` | HTTP/WS server + embedded admin |

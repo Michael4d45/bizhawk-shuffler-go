@@ -36,8 +36,11 @@ require (
 	github.com/jeandeaual/go-locale v0.0.0-20250612000132-0ef82f21eade // indirect
 	github.com/jezek/xgb v1.1.1 // indirect
 	github.com/jsummers/gobmp v0.0.0-20230614200233-a9de23ed2e25 // indirect
+	github.com/klauspost/compress v1.18.0 // indirect
 	github.com/kr/pretty v0.3.1 // indirect
 	github.com/lufia/plan9stats v0.0.0-20250317134145-8bc96cf8fc35 // indirect
+	github.com/michael4d45/bizshuffle/assets v0.0.0 // indirect
+	github.com/michael4d45/bizshuffle/savestate v0.0.0 // indirect
 	github.com/nfnt/resize v0.0.0-20180221191011-83c6a9932646 // indirect
 	github.com/nicksnyder/go-i18n/v2 v2.5.1 // indirect
 	github.com/otiai10/gosseract v2.2.1+incompatible // indirect
@@ -71,7 +74,9 @@ require (
 )
 
 replace (
+	github.com/michael4d45/bizshuffle/assets => ../../assets
 	github.com/michael4d45/bizshuffle/clienthost => ../../clienthost
 	github.com/michael4d45/bizshuffle/protocol => ../../protocol
+	github.com/michael4d45/bizshuffle/savestate => ../../savestate
 	github.com/michael4d45/bizshuffle/serverhost => ../../serverhost
 )

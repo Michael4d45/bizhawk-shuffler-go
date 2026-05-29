@@ -481,8 +481,8 @@ func (b *BizhawkIPC) SendSave(ctx context.Context) error {
 	return b.SendCommand(ctx, "SAVE")
 }
 
-// SendSwap loads the given ROM in BizHawk. Callers must run SendSave / save orchestration
-// when needed; initial connect swaps use skip_save and must not save first (TS parity).
+// SendSwap loads the given ROM in BizHawk. Callers must run SendSave when appropriate;
+// initial connect swaps use skip_save and must not save first.
 func (b *BizhawkIPC) SendSwap(ctx context.Context, game string, instanceID string) error {
 	b.instanceID = instanceID
 	b.game = game
