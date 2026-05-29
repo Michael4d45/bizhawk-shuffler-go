@@ -21,9 +21,7 @@ func (s *Server) WaitForPendingSaves(timeout time.Duration) bool {
 		if !waitingFiles && !waitingCmds {
 			return false
 		}
-		if waitingFiles {
-			s.RequestPendingSaves()
-		}
+		// TS parity: requestPendingSaves() runs once before this wait loop, not on every tick.
 		time.Sleep(200 * time.Millisecond)
 	}
 	var stillWaiting bool

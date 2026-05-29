@@ -5,6 +5,12 @@
   "min_interval_secs": 5,
   "max_interval_secs": 300,
   "players": {
+    "bob": {
+      "name": "bob",
+      "has_files": false,
+      "connected": true,
+      "bizhawk_ready": false
+    },
     "joiner": {
       "name": "joiner",
       "has_files": false,
@@ -13,9 +19,17 @@
       "game": "mario.zip"
     }
   },
-  "updated_at": "2026-05-29T12:50:45.5105905-06:00",
+  "updated_at": "2026-05-29T15:08:21.4280101-06:00",
   "games": [
     "mario.zip"
+  ],
+  "game_instances": [
+    {
+      "id": "inst-a",
+      "game": "a.zip",
+      "file_state": "pending",
+      "pending_player": "bob"
+    }
   ],
   "prevent_same_game_swap": false,
   "countdown_enabled": false,

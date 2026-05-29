@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/michael4d45/bizshuffle/obslog"
 	"github.com/michael4d45/bizshuffle/protocol"
 )
 
@@ -78,6 +79,16 @@ func (w *WSClient) GetController() *Controller {
 
 // SendBizhawkReadinessUpdate sends an update to the server about BizHawk readiness status.
 func (w *WSClient) SendBizhawkReadinessUpdate(ready bool) error {
+	connected, _ := w.GetConnectionStatus()
+	obslog.Event(obslog.WS, "bizhawk_ready_update", map[string]string{
+		"ready":         fmt.Sprintf("%v", ready),
+		"ws_connected":  fmt.Sprintf("%v", connected),
+		"player":        w.name,
+	})
+	if !connected {
+		// Hello on connect includes bizhawk_ready; avoid queueing status_update before WS is up.
+		return nil
+	}
 	update := protocol.Command{
 		Cmd: protocol.CmdStatusUpdate,
 		Payload: map[string]any{
@@ -200,6 +211,10 @@ func (w *WSClient) run() {
 		conn, resp, err := dialer.Dial(w.wsURL, nil)
 		if err != nil {
 			log.Printf("wsclient: dial error: %v; retrying in 2s", err)
+			obslog.Event(obslog.WS, "dial_failed", map[string]string{
+				"ws_url": w.wsURL,
+				"error":  err.Error(),
+			})
 			select {
 			case <-time.After(2 * time.Second):
 				continue
@@ -211,6 +226,7 @@ func (w *WSClient) run() {
 			_ = resp.Body.Close()
 		}
 		log.Printf("wsclient: connected to %s", w.wsURL)
+		obslog.Event(obslog.WS, "connected", map[string]string{"ws_url": w.wsURL})
 
 		// record active connection
 		w.connMu.Lock()
@@ -233,12 +249,16 @@ func (w *WSClient) run() {
 				"bizhawk_ready": bizhawkReady,
 			},
 		}
-		if err := conn.WriteJSON(hello); err != nil {
+		if err := w.Send(hello); err != nil {
 			log.Printf("wsclient: failed to send hello: %v", err)
 			_ = conn.Close()
 			continue
 		}
 		log.Printf("wsclient: sent hello as %s (bizhawk_ready: %v)", w.name, bizhawkReady)
+		obslog.Event(obslog.WS, "hello_sent", map[string]string{
+			"player":        w.name,
+			"bizhawk_ready": fmt.Sprintf("%v", bizhawkReady),
+		})
 
 		// run reader loop (blocking)
 		w.reader(conn)
@@ -331,6 +351,11 @@ func (w *WSClient) runController(ctx context.Context, controller *Controller) {
 				return
 			}
 			log.Printf("server->client cmd: %s", cmd.Cmd)
+			if cmd.Cmd == protocol.CmdSwap {
+				obslog.Event(obslog.Swap, "received", map[string]string{
+					"payload": fmt.Sprintf("%v", cmd.Payload),
+				})
+			}
 			log.Printf("cmd payload: %+v", cmd.Payload)
 			func() {
 				defer func() {

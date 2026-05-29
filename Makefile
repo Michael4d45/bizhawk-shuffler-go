@@ -30,8 +30,8 @@ DEADCODE ?= deadcode
 SERVER_BIN := $(BIN)/bizshuffle-server$(EXE)
 DESKTOP_BIN := $(BIN)/bizshuffle-desktop$(EXE)
 # go.work has no root module; quality targets use explicit package/module lists.
-GO_PKGS := ./assets/... ./protocol/... ./domain/... ./savestate/... ./serverhost/... ./clienthost/... ./testing/... ./cmd/server/... ./cmd/desktop/...
-GO_MOD_DIRS := assets protocol domain savestate serverhost clienthost testing cmd/server cmd/desktop
+GO_PKGS := ./assets/... ./protocol/... ./domain/... ./obslog/... ./savestate/... ./serverhost/... ./clienthost/... ./testing/... ./cmd/server/... ./cmd/desktop/...
+GO_MOD_DIRS := assets protocol domain obslog savestate serverhost clienthost testing cmd/server cmd/desktop
 
 # Portable directory create (Windows make may not have mkdir in PATH).
 ifeq ($(OS),Windows_NT)

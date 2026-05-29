@@ -13,6 +13,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/michael4d45/bizshuffle/obslog"
 	"github.com/michael4d45/bizshuffle/protocol"
 )
 
@@ -37,6 +38,9 @@ type Controller struct {
 
 	// pendingSwap holds a swap command received before BizHawk IPC is ready.
 	pendingSwap protocol.Command
+
+	// ipcMu serializes BizHawk IPC (swap, request_save) — TS commandChain parity.
+	ipcMu sync.Mutex
 
 	// restartBizhawk is called to restart BizHawk after config updates
 	restartBizhawk func()
@@ -151,7 +155,14 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 		}(cmd.ID)
 	case protocol.CmdSwap:
 		go func(swapCmd protocol.Command) {
+			c.ipcMu.Lock()
+			defer c.ipcMu.Unlock()
 			if c.bipc != nil && !c.bipc.IsReady() {
+				log.Printf("swap deferred until Lua HELLO (game=%v)", swapCmd.Payload)
+				obslog.Event(obslog.Swap, "deferred", map[string]string{
+					"reason": "lua_not_ready",
+					"game":   fmt.Sprintf("%v", swapCmd.Payload),
+				})
 				c.mu.Lock()
 				c.pendingSwap = swapCmd
 				c.mu.Unlock()
@@ -170,6 +181,10 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 				}
 			}
 			if game == "" {
+				log.Printf("swap command has empty game — acking without sending SWAP to Lua (check server assignment / admin games)")
+				obslog.Event(obslog.Swap, "skip", map[string]string{
+					"reason": "empty_game_from_server",
+				})
 				sendAck(id)
 				return
 			}
@@ -213,6 +228,9 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 				c.mu.Unlock()
 			}
 			log.Printf("sending swap to lua for game=%s", game)
+			obslog.Event(obslog.Swap, "lua_send", map[string]string{
+				"game": game, "instance_id": instanceID, "skip_save": fmt.Sprintf("%v", skipSave),
+			})
 
 			if c.bipc.IsReady() && !skipSave {
 				_ = c.bipc.SendSave(ctx)
@@ -393,6 +411,8 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 		}(cmd.ID)
 	case protocol.CmdRequestSave:
 		go func(id string) {
+			c.ipcMu.Lock()
+			defer c.ipcMu.Unlock()
 			log.Printf("handling request_save command")
 			instanceID := ""
 			if m, ok := cmd.Payload.(map[string]any); ok {

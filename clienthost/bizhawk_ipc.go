@@ -559,6 +559,16 @@ func (b *BizhawkIPC) SetBizhawkLaunched(launched bool) {
 }
 
 // IsBizhawkLaunched returns whether BizHawk has been launched by the client.
+// Port returns the TCP port BizHawk Lua listens on (tests).
+func (b *BizhawkIPC) Port() int {
+	_, portStr, err := net.SplitHostPort(b.addr)
+	if err != nil {
+		return 0
+	}
+	port, _ := strconv.Atoi(portStr)
+	return port
+}
+
 func (b *BizhawkIPC) IsBizhawkLaunched() bool {
 	b.bizhawkLaunchedMu.Lock()
 	v := b.bizhawkLaunched

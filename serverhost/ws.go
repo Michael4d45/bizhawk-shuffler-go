@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/gorilla/websocket"
+	"github.com/michael4d45/bizshuffle/obslog"
 	"github.com/michael4d45/bizshuffle/protocol"
 )
 
@@ -262,6 +263,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				s.broadcastGamesUpdate(&player)
 				if player.Game != "" && bizhawkReady {
 					s.sendSwap(player, SwapSendOptions{SkipSave: true})
+				} else if bizhawkReady && player.Game == "" {
+					log.Printf("[ws] hello from %q with bizhawk_ready but no game/instance assigned", name)
+					obslog.Event(obslog.Swap, "skip_no_assignment", map[string]string{
+						"player": name, "reason": "hello_bizhawk_ready_no_game",
+					})
+				} else if !bizhawkReady && player.Game == "" {
+					log.Printf("[ws] hello from %q (bizhawk_ready=false); swap deferred until Lua HELLO / status_update", name)
+					obslog.Event(obslog.Swap, "deferred", map[string]string{
+						"player": name, "reason": "hello_bizhawk_not_ready",
+					})
 				}
 				if err := s.sendPing(player); err != nil {
 					log.Printf("failed to send ping to player %s: %v", player.Name, err)
@@ -294,9 +305,16 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					st.Players[name] = p
 				})
 				if becameReady {
-					player := s.currentPlayer(name)
+					player := s.AssignPlayerOnConnect(name)
+					player.Connected = true
+					player.BizhawkReady = true
 					if player.Game != "" && s.ShouldSendSwap(player, false) {
 						s.sendSwap(player, SwapSendOptions{SkipSave: true})
+					} else if player.Game == "" {
+						log.Printf("[ws] player %q bizhawk ready but no game/instance assigned — configure games in admin before join", name)
+						obslog.Event(obslog.Swap, "skip_no_assignment", map[string]string{
+							"player": name, "reason": "status_update_bizhawk_ready_no_game",
+						})
 					}
 				}
 			}
@@ -534,9 +552,18 @@ func (s *Server) sendAndWait(player protocol.Player, cmd protocol.Command, timeo
 
 func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
 	if player.Game == "" {
+		log.Printf("[swap] skip %s: no game in player state", player.Name)
+		obslog.Event(obslog.Swap, "skip", map[string]string{
+			"player": player.Name, "reason": "no_game",
+		})
 		return
 	}
 	if !s.ShouldSendSwap(player, opts.Force) {
+		log.Printf("[swap] skip %s: target unchanged (game=%q instance=%q)", player.Name, player.Game, player.InstanceID)
+		obslog.Event(obslog.Swap, "skip", map[string]string{
+			"player": player.Name, "reason": "unchanged",
+			"game":   player.Game, "instance_id": player.InstanceID,
+		})
 		return
 	}
 	skip := false
@@ -548,6 +575,10 @@ func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
 		s.swapInFlight[player.Name] = struct{}{}
 	})
 	if skip {
+		log.Printf("[swap] skip %s: another swap in flight", player.Name)
+		obslog.Event(obslog.Swap, "skip", map[string]string{
+			"player": player.Name, "reason": "in_flight",
+		})
 		return
 	}
 
@@ -566,6 +597,13 @@ func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
 			Payload: payload,
 			ID:      fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), p.Name),
 		}
+		log.Printf("[swap] -> %s game=%q instance=%q skip_save=%v", p.Name, p.Game, p.InstanceID, o.SkipSave)
+		obslog.Event(obslog.Swap, "send", map[string]string{
+			"player":      p.Name,
+			"game":        p.Game,
+			"instance_id": p.InstanceID,
+			"skip_save":   fmt.Sprintf("%v", o.SkipSave),
+		})
 		res, err := s.sendAndWait(p, cmd, 20*time.Second)
 		if err == nil && res == "ack" {
 			s.recordSwapApplied(p.Name, p)

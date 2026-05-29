@@ -6,7 +6,10 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
 	"time"
+
+	"github.com/michael4d45/bizshuffle/obslog"
 )
 
 const joinConnectTimeout = 30 * time.Second
@@ -90,6 +93,14 @@ func StartJoinSession(parent context.Context, dataDir string, opts JoinOptions) 
 	if err != nil {
 		return nil, err
 	}
+	obslog.Event(obslog.Join, "start", map[string]string{
+		"server_url":  opts.ServerURL,
+		"http_base":   serverHTTP,
+		"ws_url":      wsURL,
+		"player":      opts.PlayerName,
+		"lua_port":    strconv.Itoa(bipc.Port()),
+		"data_dir":    dataDir,
+	})
 	api := NewAPI(serverHTTP, httpClient, cfg)
 	bhController := NewBizHawkController(api, httpClient, cfg, bipc, nil)
 	bhController.initialized = true

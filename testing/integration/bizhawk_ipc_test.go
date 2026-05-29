@@ -21,10 +21,9 @@ func TestFakeLuaPeerAcceptsLines(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer conn.Close()
-	_, _ = fmt.Fprintf(conn, "PING\n")
+	_, _ = fmt.Fprintf(conn, "CMD|1|PING\n")
 	time.Sleep(50 * time.Millisecond)
-	lines := peer.Lines()
-	if len(lines) != 1 || lines[0] != "PING" {
-		t.Fatalf("got %v", lines)
+	if !peer.WaitForCommand("PING", 2*time.Second) {
+		t.Fatalf("got lines %v cmds %v", peer.Lines(), peer.ReceivedCommands())
 	}
 }

@@ -5,6 +5,7 @@ go 1.26.0
 require (
 	fyne.io/fyne/v2 v2.7.0
 	github.com/michael4d45/bizshuffle/clienthost v0.0.0
+	github.com/michael4d45/bizshuffle/obslog v0.0.0
 	github.com/michael4d45/bizshuffle/protocol v0.0.0
 	github.com/michael4d45/bizshuffle/serverhost v0.0.0
 )
@@ -76,6 +77,7 @@ require (
 replace (
 	github.com/michael4d45/bizshuffle/assets => ../../assets
 	github.com/michael4d45/bizshuffle/clienthost => ../../clienthost
+	github.com/michael4d45/bizshuffle/obslog => ../../obslog
 	github.com/michael4d45/bizshuffle/protocol => ../../protocol
 	github.com/michael4d45/bizshuffle/savestate => ../../savestate
 	github.com/michael4d45/bizshuffle/serverhost => ../../serverhost

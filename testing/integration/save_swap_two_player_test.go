@@ -141,15 +141,15 @@ func TestSaveModeTwoPlayerSwap(t *testing.T) {
 		}
 	}
 
-	bob.mu.Lock()
-	requestSaveCount := 0
-	for _, cmd := range bob.inbox {
-		if cmd.Cmd == protocol.CmdRequestSave {
-			requestSaveCount++
+	for name, c := range map[string]*WSTestClient{"bob": bob, "test": testClient} {
+		n := c.CountInbox(func(cmd protocol.Command) bool {
+			return cmd.Cmd == protocol.CmdRequestSave
+		})
+		if n == 0 {
+			t.Fatalf("%s never received request_save during mass swap", name)
 		}
-	}
-	bob.mu.Unlock()
-	if requestSaveCount == 0 {
-		t.Fatal("bob never received request_save during mass swap")
+		if n > 1 {
+			t.Fatalf("%s received %d request_save during mass swap (TS sends once before wait, not per poll tick)", name, n)
+		}
 	}
 }

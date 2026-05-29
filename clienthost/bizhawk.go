@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/michael4d45/bizshuffle/clienthost/installer"
+	"github.com/michael4d45/bizshuffle/obslog"
 	"github.com/michael4d45/bizshuffle/protocol"
 )
 
@@ -604,6 +605,10 @@ func (c *BizHawkController) StartIPCGoroutine(ctx context.Context) {
 				log.Printf("lua incoming: %s", line)
 				if strings.HasPrefix(line, msgHELLO) {
 					log.Printf("ipc handler: received HELLO from lua")
+					wsConnected, _ := c.wsClient.GetConnectionStatus()
+					obslog.Event(obslog.Lua, "hello", map[string]string{
+						"ws_connected": fmt.Sprintf("%v", wsConnected),
+					})
 					c.bipc.SetReady(true)
 
 					// Disable restart mode now that BizHawk is connected and ready

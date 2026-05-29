@@ -143,6 +143,31 @@ func (c *WSTestClient) respondRequestSave(cmd protocol.Command) {
 	}
 }
 
+// CountInbox returns how many inbox commands match cmd.
+func (c *WSTestClient) CountInbox(match func(protocol.Command) bool) int {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	n := 0
+	for _, cmd := range c.inbox {
+		if match(cmd) {
+			n++
+		}
+	}
+	return n
+}
+
+// WaitNoSwap fails if a swap command appears before the deadline.
+func (c *WSTestClient) WaitNoSwap(timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if c.CountInbox(func(cmd protocol.Command) bool { return cmd.Cmd == protocol.CmdSwap }) > 0 {
+			return fmt.Errorf("unexpected swap command")
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	return nil
+}
+
 // Close ends the connection.
 func (c *WSTestClient) Close() {
 	if c.conn != nil {

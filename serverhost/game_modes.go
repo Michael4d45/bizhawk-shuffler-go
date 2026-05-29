@@ -414,9 +414,6 @@ func (h *SaveModeHandler) waitForSwapGate(timeout time.Duration) bool {
 		if !waitingFiles && !waitingCmds {
 			return false
 		}
-		if waitingFiles {
-			h.server.RequestPendingSaves()
-		}
 		time.Sleep(200 * time.Millisecond)
 	}
 	var still bool

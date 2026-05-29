@@ -13,6 +13,7 @@ import (
 	"github.com/michael4d45/bizshuffle/cmd/desktop/fyneapp"
 	"github.com/michael4d45/bizshuffle/cmd/desktop/hostsession"
 	"github.com/michael4d45/bizshuffle/cmd/desktop/updates"
+	"github.com/michael4d45/bizshuffle/obslog"
 	"github.com/michael4d45/bizshuffle/protocol"
 )
 
@@ -31,6 +32,10 @@ func main() {
 	if logFile != nil {
 		defer logFile.Close()
 	}
+	if err := obslog.Init(dataDir); err != nil {
+		log.Printf("obslog init: %v", err)
+	}
+	defer obslog.Close()
 
 	var hostSess hostsession.Session
 	var discoveryListener *clienthost.DiscoveryListener
@@ -77,13 +82,28 @@ func main() {
 			if err != nil {
 				return "", "", 0, nil, err
 			}
-			stopFn := func() { _ = hostSess.Stop() }
+			hosted := hostSess.HostedURL()
+			obslog.Event(obslog.Host, "started", map[string]string{
+				"admin_url":  res.AdminURL,
+				"bind_host":  res.BindHost,
+				"port":       obslog.FormatIntPort(res.HostPort),
+				"hosted_url": hosted,
+				"requested":  obslog.FormatIntPort(port),
+			})
+			stopFn := func() {
+				obslog.Event(obslog.Host, "stopped", nil)
+				_ = hostSess.Stop()
+			}
 			return res.AdminURL, res.BindHost, res.HostPort, stopFn, nil
 		},
-		StopServer:  func() { _ = hostSess.Stop() },
+		StopServer: func() {
+			obslog.Event(obslog.Host, "stopped", nil)
+			_ = hostSess.Stop()
+		},
 		HostedURL:   func() string { return hostSess.HostedURL() },
 		OpenBrowser: openBrowser,
 		StartJoin: func(ctx context.Context, serverURL, playerName string, onStatus, onLost func(string)) (*clienthost.JoinSession, error) {
+			obslog.WarnJoinHostPortMismatch(serverURL, hostSess.HostedURL())
 			joinMu.Lock()
 			if joinSession != nil {
 				clienthost.StopJoinSession(joinSession)
@@ -102,8 +122,17 @@ func main() {
 			}
 			sess, err := clienthost.StartJoinSession(ctx, dataDir, opts)
 			if err != nil {
+				obslog.Event(obslog.Join, "failed", map[string]string{
+					"server_url": serverURL,
+					"player":     playerName,
+					"error":      err.Error(),
+				})
 				return nil, err
 			}
+			obslog.Event(obslog.Join, "session_active", map[string]string{
+				"server_url": serverURL,
+				"player":     playerName,
+			})
 			joinMu.Lock()
 			joinSession = sess
 			joinMu.Unlock()

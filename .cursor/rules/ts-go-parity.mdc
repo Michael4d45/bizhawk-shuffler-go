@@ -1,0 +1,22 @@
+---
+description: TS (TSBunShuffle) vs Go (BizShuffle3) port parity — avoid behavioral drift
+globs:
+  - "**/*.go"
+  - "packages/**/*.ts"
+---
+
+# TS ↔ Go parity
+
+Authoritative behavior: `TSBunShuffle/packages/server-host`, `packages/client-host`, `packages/testing`.
+
+## Porting checklist (each feature)
+
+1. Read the **TS source** and **TS integration test** for that feature before marking Go done.
+2. Port the **integration test**, not only unit tests. Prefer `FakeLuaPeer` + real `clienthost` over `WSTestClient` stubs when the bug touches BizHawk IPC.
+3. Diff **wait/poll loops**: TS `waitForPendingSaves` only sleeps; it does **not** call `requestPendingSaves` on every tick. Call `requestPendingSaves` once, then wait.
+4. Client: TS uses `commandChain` to serialize `swap` and `request_save` on BizHawk IPC; Go must use equivalent serialization (`ipcMu` or chain).
+5. Assert **counts** (e.g. at most one `request_save` per mass-swap wave, at most one `SAVE` per instance on Lua), not just “command happened”.
+
+## Known stub gap
+
+`testing/integration/WSTestClient` auto-acks `request_save` without Lua — it will **not** catch SAVE spam or client IPC races. Use `save_mass_swap_lua_test.go` / `join_flow_test.go` patterns for save-mode paths.
