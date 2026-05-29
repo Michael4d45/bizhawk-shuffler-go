@@ -254,10 +254,11 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					obslog.Event(obslog.Swap, "skip_no_assignment", map[string]string{
 						"player": name, "reason": "hello_bizhawk_ready_no_game",
 					})
-				} else if !bizhawkReady && player.Game == "" {
-					log.Printf("[ws] hello from %q (bizhawk_ready=false); swap deferred until Lua HELLO / status_update", name)
+				} else if !bizhawkReady {
+					log.Printf("[ws] hello from %q (bizhawk_ready=false); swap deferred until ready", name)
 					obslog.Event(obslog.Swap, "deferred", map[string]string{
 						"player": name, "reason": "hello_bizhawk_not_ready",
+						"game":   player.Game,
 					})
 				}
 				if err := s.sendPing(player); err != nil {
@@ -291,6 +292,9 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 					st.Players[name] = p
 				})
 				if becameReady {
+					s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+						s.clearPendingForPlayer(st, name)
+					})
 					player := s.AssignPlayerOnConnect(name)
 					player.Connected = true
 					player.BizhawkReady = true
@@ -612,10 +616,25 @@ func (s *Server) sendAndWait(player protocol.Player, cmd protocol.Command, timeo
 }
 
 func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
+	player = s.currentPlayer(player.Name)
 	if player.Game == "" {
 		log.Printf("[swap] skip %s: no game in player state", player.Name)
 		obslog.Event(obslog.Swap, "skip", map[string]string{
 			"player": player.Name, "reason": "no_game",
+		})
+		return
+	}
+	if !s.PlayerReadyForSwap(player) {
+		log.Printf("[swap] skip %s: not ready (connected=%v bizhawk_ready=%v)", player.Name, player.Connected, player.BizhawkReady)
+		obslog.Event(obslog.Swap, "deferred", map[string]string{
+			"player":        player.Name,
+			"reason":        "not_ready",
+			"connected":     fmt.Sprintf("%v", player.Connected),
+			"bizhawk_ready": fmt.Sprintf("%v", player.BizhawkReady),
+			"game":          player.Game,
+		})
+		s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+			s.clearPendingForPlayer(st, player.Name)
 		})
 		return
 	}
@@ -645,6 +664,18 @@ func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
 
 	go func(p protocol.Player, o SwapSendOptions) {
 		defer s.withLock(func() { delete(s.swapInFlight, p.Name) })
+
+		p = s.currentPlayer(p.Name)
+		if !s.PlayerReadyForSwap(p) {
+			log.Printf("[swap] skip %s: not ready before send", p.Name)
+			obslog.Event(obslog.Swap, "deferred", map[string]string{
+				"player": p.Name, "reason": "not_ready_before_send",
+			})
+			s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+				s.clearPendingForPlayer(st, p.Name)
+			})
+			return
+		}
 
 		payload := map[string]any{"game": p.Game}
 		if p.InstanceID != "" {
@@ -687,10 +718,11 @@ func (s *Server) sendSwapAll(opts SwapSendOptions) {
 }
 
 func (s *Server) setPlayerFilePending(player protocol.Player) {
-	if !player.Connected || player.InstanceID == "" {
+	p := s.currentPlayer(player.Name)
+	if !s.PlayerReadyForSwap(p) || p.InstanceID == "" {
 		return
 	}
-	s.setInstanceFileStateWithPlayer(player.InstanceID, protocol.FileStatePending, player.Name)
+	s.setInstanceFileStateWithPlayer(p.InstanceID, protocol.FileStatePending, p.Name)
 }
 
 func (s *Server) SetPendingAllFiles() {

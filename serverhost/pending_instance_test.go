@@ -70,6 +70,66 @@ func TestClearPendingForPlayerKeepsReadyWhenSaveOnDisk(t *testing.T) {
 	}
 }
 
+func TestRequestPendingSavesSkipsNotReady(t *testing.T) {
+	s := New()
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		st.GameSwapInstances = []protocol.GameSwapInstance{{
+			ID:            "inst-a",
+			Game:          "a.zip",
+			FileState:     protocol.FileStatePending,
+			PendingPlayer: "bob",
+		}}
+		st.Players["bob"] = protocol.Player{Name: "bob", Connected: true, BizhawkReady: false}
+		s.pendingInstancecount = 1
+	})
+
+	s.RequestPendingSaves()
+
+	st := s.SnapshotState()
+	if st.GameSwapInstances[0].FileState == protocol.FileStatePending {
+		t.Fatal("expected pending cleared for not-ready player")
+	}
+}
+
+func TestSetPlayerFilePendingSkipsNotReady(t *testing.T) {
+	s := New()
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		st.GameSwapInstances = []protocol.GameSwapInstance{{
+			ID:   "inst-a",
+			Game: "a.zip",
+		}}
+		st.Players["bob"] = protocol.Player{
+			Name: "bob", Connected: true, BizhawkReady: false, InstanceID: "inst-a",
+		}
+	})
+
+	s.setPlayerFilePending(s.currentPlayer("bob"))
+	if st := s.SnapshotState(); st.GameSwapInstances[0].FileState == protocol.FileStatePending {
+		t.Fatal("expected instance not marked pending")
+	}
+}
+
+func TestReleaseUnresolvedPendingInstances(t *testing.T) {
+	s := New()
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		st.GameSwapInstances = []protocol.GameSwapInstance{{
+			ID:            "inst-a",
+			Game:          "a.zip",
+			FileState:     protocol.FileStatePending,
+			PendingPlayer: "bob",
+		}}
+		s.pendingInstancecount = 1
+	})
+	s.releaseUnresolvedPendingInstances()
+	st := s.SnapshotState()
+	if st.GameSwapInstances[0].FileState == protocol.FileStatePending {
+		t.Fatal("expected pending released")
+	}
+	if s.PendingInstanceCount() != 0 {
+		t.Fatalf("pendingInstancecount %d", s.PendingInstanceCount())
+	}
+}
+
 func TestRequestPendingSavesSkipsDisconnected(t *testing.T) {
 	s := New()
 	s.UpdateStateAndPersist(func(st *protocol.ServerState) {

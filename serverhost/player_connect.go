@@ -33,6 +33,21 @@ func (s *Server) swapTargetKey(player protocol.Player) string {
 	return player.Game + "\x00" + player.InstanceID
 }
 
+// PlayerReadyForSwap reports whether the player is connected, registered on /ws, and BizHawk is ready.
+func (s *Server) PlayerReadyForSwap(player protocol.Player) bool {
+	if player.Name == "" {
+		return false
+	}
+	if !player.Connected || !player.BizhawkReady {
+		return false
+	}
+	var hasClient bool
+	s.withConnRLock(func() {
+		_, hasClient = s.playerClients[player.Name]
+	})
+	return hasClient
+}
+
 // ShouldSendSwap reports whether the client still needs a swap for this assignment.
 func (s *Server) ShouldSendSwap(player protocol.Player, force bool) bool {
 	if force {

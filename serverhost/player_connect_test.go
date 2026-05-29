@@ -36,6 +36,24 @@ func TestAssignPlayerOnConnectFillOnly(t *testing.T) {
 	}
 }
 
+func TestPlayerReadyForSwap(t *testing.T) {
+	s := New()
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		st.Players["p1"] = protocol.Player{Name: "p1", Game: "a.zip", Connected: true, BizhawkReady: false}
+	})
+	if s.PlayerReadyForSwap(s.currentPlayer("p1")) {
+		t.Fatal("expected not ready without bizhawk")
+	}
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		p := st.Players["p1"]
+		p.BizhawkReady = true
+		st.Players["p1"] = p
+	})
+	if s.PlayerReadyForSwap(s.currentPlayer("p1")) {
+		t.Fatal("expected not ready without ws client")
+	}
+}
+
 func TestShouldSendSwapDedupes(t *testing.T) {
 	s := New()
 	p := protocol.Player{Name: "p1", Game: "a.zip"}

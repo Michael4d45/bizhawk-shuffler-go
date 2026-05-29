@@ -32,5 +32,8 @@ func (s *Server) WaitForPendingSaves(timeout time.Duration) bool {
 				s.pendingInstancecount, len(s.pending))
 		}
 	})
+	if stillWaiting {
+		s.releaseUnresolvedPendingInstances()
+	}
 	return stillWaiting
 }

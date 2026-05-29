@@ -614,13 +614,16 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	}
 
 	if foundPlayer != nil {
-		h.server.setInstanceFileStateWithPlayer(foundInst.ID, protocol.FileStatePending, foundPlayer.Name)
-		h.server.RequestPendingSaves()
-		if h.server.WaitForPendingSaves(60 * time.Second) {
-			log.Printf("[SaveMode] timed out waiting for displaced player %s save", foundPlayer.Name)
-			return nil
+		displaced := h.server.currentPlayer(foundPlayer.Name)
+		if h.server.PlayerReadyForSwap(displaced) {
+			h.server.setInstanceFileStateWithPlayer(foundInst.ID, protocol.FileStatePending, displaced.Name)
+			h.server.RequestPendingSaves()
+			if h.server.WaitForPendingSaves(60 * time.Second) {
+				log.Printf("[SaveMode] timed out waiting for displaced player %s save", displaced.Name)
+				return nil
+			}
+			h.server.sendSwap(displaced, SwapSendOptions{SkipSave: true})
 		}
-		h.server.sendSwap(*foundPlayer, SwapSendOptions{SkipSave: true})
 	} else {
 		h.server.setInstanceFileState(foundInst.ID, protocol.FileStateNone)
 	}
@@ -778,9 +781,12 @@ func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 			break
 		}
 
-		if hasOtherPlayer && otherPlayer.Connected && otherPlayer.InstanceID != "" {
-			h.server.setInstanceFileStateWithPlayer(
-				otherPlayer.InstanceID, protocol.FileStatePending, otherPlayer.Name)
+		if hasOtherPlayer {
+			other := h.server.currentPlayer(otherPlayer.Name)
+			if h.server.PlayerReadyForSwap(other) && other.InstanceID != "" {
+				h.server.setInstanceFileStateWithPlayer(
+					other.InstanceID, protocol.FileStatePending, other.Name)
+			}
 		}
 		h.server.setPlayerFilePending(player)
 		h.server.RequestPendingSaves()

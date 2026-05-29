@@ -28,6 +28,23 @@ func instanceFileStateFromDisk(instanceID string) protocol.FileState {
 	return protocol.FileStateNone
 }
 
+// releaseUnresolvedPendingInstances clears every instance still marked pending (e.g. wait timeout).
+func (s *Server) releaseUnresolvedPendingInstances() {
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		for i, inst := range st.GameSwapInstances {
+			if inst.FileState != protocol.FileStatePending {
+				continue
+			}
+			s.pendingInstancecount--
+			st.GameSwapInstances[i].FileState = instanceFileStateFromDisk(inst.ID)
+			st.GameSwapInstances[i].PendingPlayer = ""
+		}
+		if s.pendingInstancecount < 0 {
+			s.pendingInstancecount = 0
+		}
+	})
+}
+
 // clearPendingInstance clears a single pending instance (e.g. owner offline during RequestPendingSaves).
 func (s *Server) clearPendingInstance(instanceID string) {
 	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
