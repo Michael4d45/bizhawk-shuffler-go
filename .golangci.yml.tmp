@@ -1,0 +1,39 @@
+version: "2"
+
+run:
+  relative-path-mode: gitroot
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - frontend/
+
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - frontend/
+
+
+

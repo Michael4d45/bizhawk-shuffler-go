@@ -1,29 +1,13 @@
-# Binaries
-/dist/
-/*.exe
-/*.dll
-/*.so
-/*.dylib
+dist/
+coverage/
+node_modules/
+frontend/admin/node_modules/
+*.exe
+*.zip
+data/
+release-staging/
+release-upload/
 
-# Build
-/build/
-
-# IDE
-.vscode/
-
-# Config
-config.yaml
-client_config.json
-
-# Mac
-.DS_Store
-
-# Logs
-*.log
-
-# Files
-web/BizhawkFiles/*
-
-# Server artifacts
-state.json
-files/
+# Admin build overwrites embedded assets (index.html stub is committed)
+serverhost/static/assets/*
+!serverhost/static/assets/.gitkeep

@@ -1,0 +1,16 @@
+{
+  "running": false,
+  "swap_enabled": true,
+  "mode": "sync",
+  "host": "127.0.0.1",
+  "port": 55228,
+  "min_interval_secs": 5,
+  "max_interval_secs": 300,
+  "players": {},
+  "updated_at": "2026-05-29T11:18:01.951121-06:00",
+  "prevent_same_game_swap": false,
+  "countdown_enabled": false,
+  "config_keys": [
+    "DisplayFps"
+  ]
+}

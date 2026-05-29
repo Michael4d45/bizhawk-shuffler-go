@@ -1,0 +1,48 @@
+version: "2"
+
+run:
+  relative-path-mode: gomod
+
+linters:
+  default: standard
+  enable:
+    - errcheck
+    - staticcheck
+    - ineffassign
+    - bodyclose
+    - errorlint
+    - copyloopvar
+    - govet
+  exclusions:
+    generated: lax
+    presets:
+      - comments
+      - common-false-positives
+      - legacy
+      - std-error-handling
+    rules:
+      - linters:
+          - errcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - frontend/
+
+linters-settings:
+  govet:
+    enable-all: true
+  staticcheck:
+    # QF1012: WriteString(a+b) -> separate WriteString calls (matches gopls writestring).
+    # -ST1000: skip mandatory package comments (not used in this repo).
+    checks: ["all", "-ST1000", "QF1012"]
+
+formatters:
+  exclusions:
+    generated: lax
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - frontend/

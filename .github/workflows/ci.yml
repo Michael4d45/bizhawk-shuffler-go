@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.26"
+          cache-dependency-path: go.work.sum
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: "1.3"
+
+      - name: Install admin deps
+        run: bun install --frozen-lockfile
+        working-directory: frontend/admin
+
+      - name: Build admin UI
+        run: make build-admin
+
+      - name: Sync workspace
+        run: go work sync
+
+      - name: Install CGO deps (desktop / clienthost tests)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libglfw3-dev pkg-config libxtst-dev
+
+      - name: Install dev tools
+        run: make tools-install
+
+      - name: Lint
+        env:
+          CGO_ENABLED: "1"
+        run: make lint
+
+      - name: Test
+        env:
+          CGO_ENABLED: "1"
+        run: make test
+
+      - name: Coverage
+        env:
+          CGO_ENABLED: "1"
+        run: make coverage
+
+      - name: Vulnerability scan
+        run: make vuln
+
+      - name: Dead code (main entrypoints)
+        env:
+          CGO_ENABLED: "1"
+        run: make deadcode

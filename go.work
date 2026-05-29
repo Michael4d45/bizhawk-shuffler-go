@@ -1,0 +1,13 @@
+go 1.26.0
+
+use (
+	./clienthost
+	./cmd/desktop
+	./cmd/server
+	./domain
+	./protocol
+	./savestate
+	./serverhost
+	./testing
+	./tools
+)

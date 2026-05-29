@@ -6,41 +6,32 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"os/exec"
-	"runtime"
-	"time"
+	"os"
+	"os/signal"
+	"syscall"
 
-	"github.com/michael4d45/bizshuffle/internal/server"
+	"github.com/michael4d45/bizshuffle/clienthost"
+	"github.com/michael4d45/bizshuffle/serverhost"
 )
 
-// openBrowser opens the default browser to the specified URL
-func openBrowser(url string) {
-	var err error
-	switch runtime.GOOS {
-	case "windows":
-		err = exec.Command("cmd", "/c", "start", url).Start()
-	case "darwin":
-		err = exec.Command("open", url).Start()
-	case "linux":
-		err = exec.Command("xdg-open", url).Start()
-	default:
-		log.Printf("Unsupported platform to open browser: %s", runtime.GOOS)
-		return
-	}
-	if err != nil {
-		log.Printf("Failed to open browser: %v", err)
-	} else {
-		log.Printf("Opened browser to %s", url)
-	}
-}
-
 func main() {
-	host := flag.String("host", "127.0.0.1", "host to bind")
+	defaultDir, err := clienthost.DefaultDataDir()
+	if err != nil {
+		log.Fatal(err)
+	}
+	dataDir := flag.String("data-dir", defaultDir, "server data directory")
+	host := flag.String("host", "0.0.0.0", "host to bind")
 	port := flag.Int("port", 8080, "port to bind")
 	flag.Parse()
 
-	s := server.New()
+	if err := os.MkdirAll(*dataDir, 0o755); err != nil {
+		log.Fatal(err)
+	}
+	if err := os.Chdir(*dataDir); err != nil {
+		log.Fatal(err)
+	}
 
+	s := serverhost.New()
 	chosenHost := *host
 	if chosenHost == "127.0.0.1" {
 		if persisted := s.PersistedHost(); persisted != "" {
@@ -48,7 +39,6 @@ func main() {
 		}
 	}
 	s.SetHost(chosenHost)
-
 	chosenPort := *port
 	if chosenPort == 8080 {
 		if persisted := s.PersistedPort(); persisted != 0 {
@@ -60,21 +50,21 @@ func main() {
 	addr := fmt.Sprintf("%s:%d", chosenHost, chosenPort)
 	mux := http.NewServeMux()
 	s.RegisterRoutes(mux)
-	protocol := "http"
-	if chosenPort == 443 || chosenPort == 8443 {
-		protocol = "https"
-	}
-	url := fmt.Sprintf("%s://%s", protocol, addr)
-	log.Printf("Starting server on %s", url)
+
 	if err := s.StartBroadcaster(context.Background()); err != nil {
-		log.Printf("Failed to start discovery broadcaster: %v", err)
+		log.Printf("discovery broadcaster: %v", err)
 	}
 
-	// Open browser after a short delay to ensure server is ready
+	srv := &http.Server{Addr: addr, Handler: mux}
 	go func() {
-		time.Sleep(500 * time.Millisecond)
-		openBrowser(url)
+		log.Printf("BizShuffle server listening at http://%s", addr)
+		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Fatal(err)
+		}
 	}()
 
-	log.Fatal(http.ListenAndServe(addr, mux))
+	sig := make(chan os.Signal, 1)
+	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
+	<-sig
+	_ = srv.Close()
 }
