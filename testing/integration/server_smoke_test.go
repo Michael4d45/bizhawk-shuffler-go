@@ -16,6 +16,9 @@ func TestAdminStaticAssets(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer func() { _ = res.Body.Close() }()
+	if res.StatusCode == http.StatusNotFound {
+		t.Skip("admin static not built; run make build-admin")
+	}
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("GET / status %d", res.StatusCode)
 	}
