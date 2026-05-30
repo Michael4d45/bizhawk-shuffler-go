@@ -1,0 +1,29 @@
+{
+  "running": false,
+  "swap_enabled": true,
+  "mode": "sync",
+  "min_interval_secs": 5,
+  "max_interval_secs": 300,
+  "players": {
+    "bob": {
+      "name": "bob",
+      "has_files": false,
+      "connected": false,
+      "bizhawk_ready": false
+    }
+  },
+  "updated_at": "0001-01-01T00:00:00Z",
+  "game_instances": [
+    {
+      "id": "inst-a",
+      "game": "a.zip",
+      "file_state": "none"
+    }
+  ],
+  "prevent_same_game_swap": false,
+  "countdown_enabled": false,
+  "swap_seed": 1780096269,
+  "config_keys": [
+    "DisplayFps"
+  ]
+}
