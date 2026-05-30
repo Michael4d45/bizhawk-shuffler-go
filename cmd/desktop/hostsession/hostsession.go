@@ -8,6 +8,7 @@ import (
 	"net"
 	"net/http"
 	"regexp"
+	"sync"
 
 	"github.com/michael4d45/bizshuffle/serverhost"
 )
@@ -28,9 +29,10 @@ type Session struct {
 	listener      net.Listener
 	sessionCtx    context.Context
 	sessionCancel context.CancelFunc
+	serveWG       sync.WaitGroup
 	bindHost      string
 	bindPort      int
-	adminURL string
+	adminURL      string
 }
 
 // NormalizeBindHost validates and normalizes a bind address.
@@ -120,14 +122,17 @@ func (s *Session) Start(ctx context.Context, bindHost string, hostPort int) (Sta
 	}
 	s.listener = ln
 
-	s.httpSrv = &http.Server{
+	httpSrv := &http.Server{
 		Handler: mux,
 		BaseContext: func(net.Listener) context.Context {
 			return sessionCtx
 		},
 	}
+	s.httpSrv = httpSrv
+	s.serveWG.Add(1)
 	go func() {
-		err := s.httpSrv.Serve(ln)
+		defer s.serveWG.Done()
+		err := httpSrv.Serve(ln)
 		if err != nil && !errors.Is(err, http.ErrServerClosed) {
 			log.Printf("hostsession: serve ended: %v", err)
 		}
@@ -187,6 +192,7 @@ func (s *Session) Stop() error {
 		}
 		s.httpSrv = nil
 	}
+	s.serveWG.Wait()
 
 	s.server = nil
 	s.bindHost = ""
