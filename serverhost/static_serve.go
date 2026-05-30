@@ -4,7 +4,6 @@ import (
 	"embed"
 	"io/fs"
 	"net/http"
-	"os"
 	"strings"
 )
 
@@ -12,12 +11,9 @@ import (
 var embeddedStatic embed.FS
 
 func adminHTTPFS() http.FileSystem {
-	if dir := os.Getenv("BIZSHUFFLE_STATIC_DIR"); dir != "" {
-		return http.Dir(dir)
-	}
 	sub, err := fs.Sub(embeddedStatic, "static")
 	if err != nil {
-		return http.Dir("static")
+		panic("embedded admin static: " + err.Error())
 	}
 	return http.FS(sub)
 }

@@ -510,9 +510,11 @@ Server: WebSocket maps, `pending` ack channels. Client: download progress, IPC r
 | `go run ./cmd/desktop` | Fyne desktop (Host + Join)                    |
 | `make test`            | Go packages listed in `go.work`               |
 
-### 11.2 CI
+### 11.2 CI and releases
 
-GitHub Actions workflows under `.github/workflows/` (lint, test, release as configured).
+GitHub Actions workflows under `.github/workflows/` (lint, test, release on version tags).
+
+Tagged releases publish four assets: `bizshuffle-server` and `bizshuffle-desktop` on Linux, and the same names with `.exe` on Windows. The admin UI is embedded in `bizshuffle-server` at build time (`make build-admin` in CI).
 
 ### 11.3 Network requirements
 
@@ -534,7 +536,7 @@ GitHub Actions workflows under `.github/workflows/` (lint, test, release as conf
 | Symptom               | Check                                                                         |
 | --------------------- | ----------------------------------------------------------------------------- |
 | Cannot find server    | Same LAN; manual `http://HOST:8080`; firewall TCP 8080; server `0.0.0.0` bind |
-| Admin UI broken       | Run server from dir containing `web/`                                         |
+| Admin UI broken       | Dev: run `make build-admin` before `go run ./cmd/server`; release binaries embed the UI |
 | Client disconnected   | `curl http://host:port/state.json`; verify WS URL                             |
 | BizHawk not launching | Install via desktop deps panel; `bizhawk_path` must be under `{dataDir}/BizHawk` |
 | Games not loading     | ROMs in host `./roms/`; catalog; sync mode game checkboxes                    |

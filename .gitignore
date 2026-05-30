@@ -5,8 +5,6 @@ frontend/admin/node_modules/
 *.exe
 *.zip
 data/
-release-staging/
-release-upload/
 .vscode/
 
 # Admin UI build output (make build-admin)
