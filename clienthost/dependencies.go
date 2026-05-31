@@ -3,6 +3,7 @@ package clienthost
 import (
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/michael4d45/bizshuffle/clienthost/deps"
@@ -15,6 +16,8 @@ type DependencyID string
 const (
 	DependencyBizHawk  DependencyID = "bizhawk"
 	DependencyVCRedist DependencyID = "vcredist"
+	DependencyMono       DependencyID = "mono"
+	DependencyLuaSocket  DependencyID = "luasocket"
 )
 
 // DependencyItem is one row in the dependencies panel.
@@ -57,6 +60,14 @@ func GetDependenciesSnapshot(dataDir string) DependenciesSnapshot {
 			Detail:      fmt.Sprintf("v%s installed — v%s or newer required", installed, SupportedBizHawkVersion),
 			ActionLabel: fmt.Sprintf("Update to %s", SupportedBizHawkVersion),
 		})
+	} else if root, err := bizHawkRootFromDataDir(dataDir); err == nil && !BizHawkLuaSocketInstalled(root) {
+		items = append(items, DependencyItem{
+			ID:          DependencyLuaSocket,
+			Label:       "LuaSocket",
+			Status:      "missing",
+			Detail:      "BizHawk Linux builds need socket.core (TCP for server.lua)",
+			ActionLabel: "Install LuaSocket",
+		})
 	}
 
 	if runtime.GOOS == "windows" {
@@ -70,6 +81,16 @@ func GetDependenciesSnapshot(dataDir string) DependenciesSnapshot {
 				ActionLabel: "Install VC++ runtime",
 			})
 		}
+	}
+
+	if runtime.GOOS == "linux" && !deps.IsMonoInstalled() {
+		items = append(items, DependencyItem{
+			ID:          DependencyMono,
+			Label:       "Mono runtime",
+			Status:      "missing",
+			Detail:      deps.MonoInstallHint(),
+			ActionLabel: "Recheck",
+		})
 	}
 
 	return DependenciesSnapshot{Items: items, PlayBlocked: len(items) > 0}
@@ -86,6 +107,12 @@ func PlayBlockedMessage(snap DependenciesSnapshot) string {
 		}
 		if item.ID == DependencyVCRedist {
 			return "Install the Visual C++ runtime using the button above before joining."
+		}
+		if item.ID == DependencyMono {
+			return "Install Mono using your package manager, then click Recheck."
+		}
+		if item.ID == DependencyLuaSocket {
+			return "Install LuaSocket using the button above before joining."
 		}
 	}
 	return "Resolve dependencies above before joining."
@@ -107,6 +134,14 @@ func InstallDependency(dataDir string, id DependencyID, progress func(string)) e
 		return installBizHawkManaged(dataDir, progress)
 	case DependencyVCRedist:
 		return deps.NewVCRedistInstaller().InstallVCRedist(progress)
+	case DependencyMono:
+		return deps.InstallMono(progress)
+	case DependencyLuaSocket:
+		root, err := bizHawkRootFromDataDir(dataDir)
+		if err != nil {
+			return err
+		}
+		return EnsureBizHawkLuaSocket(root, progress)
 	default:
 		return fmt.Errorf("unknown dependency %q", id)
 	}
@@ -154,6 +189,9 @@ func installBizHawkManaged(dataDir string, progress func(string)) error {
 	if err := bh.InstallBizHawk(url, installDir, progress); err != nil {
 		return err
 	}
-	_, err = ResolveEmuHawkPath(dataDir)
-	return err
+	root, err := ResolveEmuHawkPath(dataDir)
+	if err != nil {
+		return err
+	}
+	return EnsureBizHawkLuaSocket(filepath.Dir(root), progress)
 }

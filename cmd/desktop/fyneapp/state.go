@@ -65,9 +65,8 @@ type shellWidgets struct {
 	checkUpdatesBtn *widget.Button
 	openDataBtn     *widget.Button
 
-	pageBox              *fyne.Container
-	hostJoinRow          fyne.CanvasObject
-	hostPanelRoot        fyne.CanvasObject
+	pageBox       *fyne.Container
+	hostPanelRoot fyne.CanvasObject
 	joinPanelRoot        fyne.CanvasObject
 	depsPanel *ui.SectionPanel
 }

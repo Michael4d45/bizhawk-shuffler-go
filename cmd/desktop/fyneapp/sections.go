@@ -59,12 +59,11 @@ func buildShell() *shellWidgets {
 		ui.NewActionBar(w.joinBtn),
 	)
 	w.joinPanelRoot = joinPanel.Root
-	w.hostJoinRow = container.NewGridWithColumns(2, w.hostPanelRoot, w.joinPanelRoot)
 
 	w.depsPanel = ui.NewSectionPanel("Dependencies", "Required before joining", nil, nil, nil)
 
 	w.pageBox = container.NewVBox()
-	ui.SetPageSections(w.pageBox, w.hostJoinRow)
+	ui.SetPageSections(w.pageBox, container.NewGridWithColumns(2, w.hostPanelRoot, w.joinPanelRoot))
 
 	header := ui.NewHeaderSurface("BizShuffle", nil)
 	footerLeft := container.NewHBox(w.versionLabel, w.checkUpdatesBtn, w.updateBtn)

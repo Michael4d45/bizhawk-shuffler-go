@@ -44,7 +44,7 @@ endif
 	lint-protocol lint-domain lint-savestate lint-serverhost lint-clienthost lint-testing \
 	lint-cmd-server lint-cmd-desktop \
 	vet fmt fix mod-tidy tools-install coverage coverage-html vuln deadcode check check-all \
-	build-admin build-server build-desktop clean
+	build-admin build-server build-desktop build-luasocket-linux-amd64 clean
 
 # --- default build (run this with plain `make`) ---
 
@@ -61,11 +61,22 @@ $(SERVER_BIN): build-admin
 
 DESKTOP_VERSION ?= dev
 DESKTOP_LDFLAGS := -X github.com/michael4d45/bizshuffle/cmd/desktop/updates.Version=$(DESKTOP_VERSION)
-ifeq ($(or $(GOOS),$(shell go env GOOS)),windows)
+HOST_GOOS := $(or $(GOOS),$(shell $(GO) env GOOS))
+HOST_GOARCH := $(or $(GOARCH),$(shell $(GO) env GOARCH))
+LUASOCKET_CORE := assets/luasocket/linux-amd64/core.so
+ifeq ($(HOST_GOOS),windows)
 DESKTOP_LDFLAGS += -H windowsgui
 endif
 
-$(DESKTOP_BIN): build-admin
+# BizHawk Linux desktop embeds socket.core (see scripts/build-luasocket-linux-amd64.sh).
+build-luasocket-linux-amd64:
+ifeq ($(HOST_GOOS)_$(HOST_GOARCH),linux_amd64)
+	@test -s "$(LUASOCKET_CORE)" || $(RUN_SH) scripts/build-luasocket-linux-amd64.sh
+else
+	@:
+endif
+
+$(DESKTOP_BIN): build-admin build-luasocket-linux-amd64
 	@$(if $(filter Windows_NT,$(OS)),powershell -NoProfile -Command "New-Item -ItemType Directory -Force -Path '$(BIN)' | Out-Null",mkdir -p $(BIN))
 	@echo building $@
 	CGO_ENABLED=1 $(GO) build -ldflags "$(DESKTOP_LDFLAGS)" -o $@ ./cmd/desktop
@@ -81,6 +92,9 @@ build-admin:
 	cd $(ADMIN) && bun install && bun run build
 
 # --- quality (run from repo root; requires CGO for clienthost/desktop tests) ---
+
+# linux/amd64 compiles assets with //go:embed luasocket core.so
+test test-race coverage lint lint-modules check check-all: build-luasocket-linux-amd64
 
 # Install tools pinned in tools/go.mod (tool block). Run tidy so gopls/IDE match module graph.
 tools-install:

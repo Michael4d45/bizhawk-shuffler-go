@@ -1,4 +1,5 @@
 dist/
+assets/luasocket/linux-amd64/core.so
 coverage/
 node_modules/
 frontend/admin/node_modules/

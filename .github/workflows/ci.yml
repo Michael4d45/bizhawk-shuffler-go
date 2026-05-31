@@ -39,7 +39,7 @@ jobs:
       - name: Install CGO deps (desktop / clienthost tests)
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libglfw3-dev pkg-config libxtst-dev
+          sudo apt-get install -y libgl1-mesa-dev libx11-dev libxcursor-dev libxrandr-dev libxinerama-dev libxi-dev libxxf86vm-dev libglfw3-dev pkg-config libxtst-dev gcc git curl
 
       - name: Install dev tools
         run: make tools-install

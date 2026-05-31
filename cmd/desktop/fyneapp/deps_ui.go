@@ -28,7 +28,7 @@ func renderDepsPanel(
 	var rows []fyne.CanvasObject
 	if len(snap.Items) >= 2 && onInstallAll != nil {
 		btn := widget.NewButton("Install all", onInstallAll)
-		btn.Importance = widget.MediumImportance
+		btn.Importance = widget.HighImportance
 		if installing {
 			btn.Disable()
 		}
@@ -36,20 +36,34 @@ func renderDepsPanel(
 	}
 	for _, item := range snap.Items {
 		it := item
-		action := widget.NewButton(it.ActionLabel, func() { onInstallOne(it) })
-		action.Importance = widget.LowImportance
-		if installing {
-			action.Disable()
-		}
-		rows = append(rows, ui.NewInspectorRow(it.Label, it.Detail, action))
+		rows = append(rows, dependencyRow(it, installing, onInstallOne))
+	}
+	if len(rows) == 0 && snap.PlayBlocked {
+		rows = append(rows, ui.NewMuted(clienthost.PlayBlockedMessage(snap)))
 	}
 	w.depsPanel.SetBody(container.NewVBox(rows...))
 
-	if snap.PlayBlocked && len(snap.Items) > 0 {
+	if snap.PlayBlocked {
 		w.depsPanel.SetFooter(ui.NewMuted(clienthost.PlayBlockedMessage(snap)))
 	} else {
 		w.depsPanel.SetFooter(nil)
 	}
+}
+
+// dependencyRow is a stacked label, detail, and install action (readable on narrow layouts).
+func dependencyRow(item clienthost.DependencyItem, installing bool, onInstallOne func(clienthost.DependencyItem)) fyne.CanvasObject {
+	title := widget.NewLabel(item.Label)
+	title.TextStyle = fyne.TextStyle{Bold: true}
+	parts := []fyne.CanvasObject{title, ui.NewMuted(item.Detail)}
+	if onInstallOne != nil {
+		action := widget.NewButton(item.ActionLabel, func() { onInstallOne(item) })
+		action.Importance = widget.HighImportance
+		if installing {
+			action.Disable()
+		}
+		parts = append(parts, action)
+	}
+	return container.NewVBox(parts...)
 }
 
 // depsPanelNeeded reports whether the dependencies section should appear.
@@ -64,9 +78,9 @@ func depsPanelNeeded(snap clienthost.DependenciesSnapshot, depsChecking bool) bo
 }
 
 func updateDepsPanelVisibility(w *shellWidgets, snap clienthost.DependenciesSnapshot, depsChecking bool) {
-	sections := []fyne.CanvasObject{w.hostJoinRow}
+	right := w.joinPanelRoot
 	if depsPanelNeeded(snap, depsChecking) {
-		sections = append(sections, w.depsPanel.Root)
+		right = w.depsPanel.Root
 	}
-	ui.SetPageSections(w.pageBox, sections...)
+	ui.SetPageSections(w.pageBox, container.NewGridWithColumns(2, w.hostPanelRoot, right))
 }
