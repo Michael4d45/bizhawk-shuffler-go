@@ -11,7 +11,6 @@ const (
 
 // Layout constants.
 const (
-	LabelWidth     float32 = 120
 	WindowDefaultW float32 = 900
 	WindowDefaultH float32 = 640
 )
