@@ -71,7 +71,7 @@ endif
 # BizHawk Linux desktop embeds socket.core (see scripts/build-luasocket-linux-amd64.sh).
 build-luasocket-linux-amd64:
 ifeq ($(HOST_GOOS)_$(HOST_GOARCH),linux_amd64)
-	@test -s "$(LUASOCKET_CORE)" || $(RUN_SH) scripts/build-luasocket-linux-amd64.sh
+	@test -s "$(LUASOCKET_CORE)" || bash scripts/build-luasocket-linux-amd64.sh
 else
 	@:
 endif
