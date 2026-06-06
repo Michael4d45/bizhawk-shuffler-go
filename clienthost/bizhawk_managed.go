@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+
+	"github.com/michael4d45/bizshuffle/clienthost/datadir"
 )
 
 // BizHawkInstallDir returns the managed BizHawk root: {dataDir}/BizHawk.
@@ -147,11 +149,7 @@ func GetBizHawkStatus(dataDir string) BizHawkStatus {
 
 // DefaultDataDir returns the standard user data directory (~/BizShuffle).
 func DefaultDataDir() (string, error) {
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return "", err
-	}
-	return filepath.Join(home, "BizShuffle"), nil
+	return datadir.Default()
 }
 
 // EnsureDataDirs creates roms, saves, plugins under dataDir.

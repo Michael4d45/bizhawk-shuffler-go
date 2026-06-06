@@ -9,12 +9,12 @@ import (
 	"os/signal"
 	"syscall"
 
-	"github.com/michael4d45/bizshuffle/clienthost"
+	"github.com/michael4d45/bizshuffle/clienthost/datadir"
 	"github.com/michael4d45/bizshuffle/serverhost"
 )
 
 func main() {
-	defaultDir, err := clienthost.DefaultDataDir()
+	defaultDir, err := datadir.Default()
 	if err != nil {
 		log.Fatal(err)
 	}

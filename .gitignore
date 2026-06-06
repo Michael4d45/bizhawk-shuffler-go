@@ -1,17 +1,16 @@
 dist/
+assets/luasocket/linux-amd64/core.so
 coverage/
 node_modules/
 frontend/admin/node_modules/
 *.exe
 *.zip
 data/
-release-staging/
-release-upload/
 .vscode/
 
-# Admin build overwrites embedded assets (index.html stub is committed)
-serverhost/static/assets/*
-!serverhost/static/assets/.gitkeep
+# Admin UI build output (make build-admin)
+serverhost/static/*
+!serverhost/static/.gitkeep
 
 # Runtime server state written when cwd is serverhost/ or testing/integration/
 serverhost/state.json

@@ -347,7 +347,8 @@ func Run(opts Options) {
 		sh.versionLabel.SetText(opts.VersionLabel())
 	}
 	st.depsChecking = true
-	refreshDeps()
+	renderDepsPanel(sh, clienthost.DependenciesSnapshot{}, true, false, nil, nil)
+	updateDepsPanelVisibility(sh, clienthost.DependenciesSnapshot{}, true)
 	applyUI()
 
 	w.SetOnClosed(func() {
@@ -360,5 +361,12 @@ func Run(opts Options) {
 		}
 	})
 
+	go func() {
+		time.Sleep(50 * time.Millisecond)
+		fyne.Do(func() {
+			refreshDeps()
+			applyUI()
+		})
+	}()
 	w.ShowAndRun()
 }

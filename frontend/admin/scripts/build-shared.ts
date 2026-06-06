@@ -21,6 +21,8 @@ export async function buildAdminUI(options: BuildAdminOptions = {}): Promise<str
     rmSync(outDir, { recursive: true, force: true });
   }
   mkdirSync(assetsDir, { recursive: true });
+  // Keep go:embed static/* compilable if a later build step fails.
+  writeFileSync(join(outDir, ".gitkeep"), "");
 
   const tailwindArgs = [
     "bunx",

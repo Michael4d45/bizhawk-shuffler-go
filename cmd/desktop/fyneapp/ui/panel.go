@@ -74,6 +74,7 @@ func (s *SectionPanel) SetBody(content fyne.CanvasObject) {
 		s.bodyBox.Add(content)
 	}
 	s.bodyBox.Refresh()
+	s.Root.Refresh()
 }
 
 // SetFooter replaces the panel footer strip.

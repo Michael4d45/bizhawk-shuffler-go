@@ -165,18 +165,21 @@ func (c *BizHawkController) LaunchBizHawk(ctx context.Context, dataDir, luaPath 
 		}
 	}
 
-	// On Linux the launcher script expects args relative to the install dir,
-	// and it changes working dir to the install dir. Emulate that by setting
-	// Cmd.Dir to the install dir so relative paths work.
+	// EmuHawkMono.sh cds to the BizHawk install dir; use an absolute --lua path.
 	if luaPath == "" {
 		luaPath = filepath.Join(dataDir, "server.lua")
 	}
+	if absLua, err := filepath.Abs(luaPath); err == nil {
+		luaPath = absLua
+	}
 	args := []string{"--lua=" + luaPath}
 	cmd := exec.CommandContext(ctx, bp, args...)
-	cmd.Dir = dataDir
-	// ensure executable bit on non-windows
-	if runtime.GOOS != "windows" {
-		// try to chmod the script/executable to be executable; ignore errors
+	bizhawkDir := filepath.Dir(bp)
+	if runtime.GOOS == "windows" {
+		cmd.Dir = dataDir
+	} else {
+		// Match EmuHawkMono.sh working directory (install root).
+		cmd.Dir = bizhawkDir
 		_ = os.Chmod(bp, 0o755)
 	}
 	cmd.Stdout = os.Stdout
@@ -447,28 +450,9 @@ func (c *BizHawkController) UpdateBizHawk(progress func(string)) error {
 	tagName := strings.TrimPrefix(rel.TagName, "v")
 	progress(fmt.Sprintf("Latest version is %s", tagName))
 
-	// Find the appropriate asset
-	platformSuffix := installer.GetBizHawkPlatformSuffix()
-	assetName := fmt.Sprintf("BizHawk-%s-%s.zip", tagName, platformSuffix)
-	asset := rel.FindAssetByName(assetName)
+	asset := installer.FindBizHawkReleaseAsset(rel)
 	if asset == nil {
-		// Try alternative naming pattern
-		assetName = fmt.Sprintf("BizHawk-%s-%s.zip", rel.TagName, platformSuffix)
-		asset = rel.FindAssetByName(assetName)
-	}
-
-	if asset == nil {
-		// Fallback: search for any zip with platform suffix
-		for _, a := range rel.Assets {
-			if strings.Contains(a.Name, platformSuffix) && strings.HasSuffix(a.Name, ".zip") {
-				asset = &a
-				break
-			}
-		}
-	}
-
-	if asset == nil {
-		return fmt.Errorf("could not find BizHawk asset for platform %s", platformSuffix)
+		return fmt.Errorf("could not find BizHawk asset for platform %s", installer.GetBizHawkPlatformSuffix())
 	}
 
 	bp := c.cfg["bizhawk_path"]

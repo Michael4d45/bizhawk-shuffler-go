@@ -7,3 +7,5 @@ import _ "embed"
 //
 //go:embed server.lua
 var ServerLua []byte
+
+// LuaSocketCoreLinuxAMD64 is defined in luasocket_linux_amd64.go (linux/amd64) or luasocket_stub.go.

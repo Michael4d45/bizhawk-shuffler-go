@@ -272,27 +272,63 @@ func GetBizHawkLatestRelease() (*Release, error) {
 	return &release, nil
 }
 
+// bizHawkReleaseAssetNames returns GitHub release asset filenames to try for this OS.
+// Linux ships bizhawk-monort as .tar.gz; Windows uses .zip (see BizHawk README).
+func bizHawkReleaseAssetNames(tagName, releaseTag string) []string {
+	suffix := GetBizHawkPlatformSuffix()
+	v := strings.TrimPrefix(tagName, "v")
+	rt := strings.TrimPrefix(releaseTag, "v")
+	names := []string{
+		fmt.Sprintf("BizHawk-%s-%s.zip", v, suffix),
+		fmt.Sprintf("BizHawk-%s-%s.zip", rt, suffix),
+		fmt.Sprintf("BizHawk-%s-%s.tar.gz", v, suffix),
+		fmt.Sprintf("BizHawk-%s-%s.tar.gz", rt, suffix),
+	}
+	if runtime.GOOS == "linux" {
+		// Prefer Linux archive when both zip and tar.gz patterns exist.
+		names = []string{
+			fmt.Sprintf("BizHawk-%s-%s.tar.gz", v, suffix),
+			fmt.Sprintf("BizHawk-%s-%s.tar.gz", rt, suffix),
+			fmt.Sprintf("BizHawk-%s-%s.zip", v, suffix),
+			fmt.Sprintf("BizHawk-%s-%s.zip", rt, suffix),
+		}
+	}
+	return names
+}
+
+// FindBizHawkReleaseAsset picks the platform-appropriate release asset.
+func FindBizHawkReleaseAsset(release *Release) *Asset {
+	if release == nil {
+		return nil
+	}
+	tagName := strings.TrimPrefix(release.TagName, "v")
+	for _, name := range bizHawkReleaseAssetNames(tagName, release.TagName) {
+		if asset := release.FindAssetByName(name); asset != nil {
+			return asset
+		}
+	}
+	platformSuffix := GetBizHawkPlatformSuffix()
+	for i := range release.Assets {
+		a := &release.Assets[i]
+		if !strings.Contains(a.Name, platformSuffix) {
+			continue
+		}
+		lower := strings.ToLower(a.Name)
+		if strings.HasSuffix(lower, ".zip") || strings.HasSuffix(lower, ".tar.gz") {
+			return a
+		}
+	}
+	return nil
+}
+
 // GetBizHawkDownloadURLForVersion returns the download URL for a pinned BizHawk version.
 func GetBizHawkDownloadURLForVersion(version string) (string, error) {
 	release, err := GetBizHawkReleaseByTag(version)
 	if err != nil {
 		return fallbackBizHawkDownloadURL(version), nil
 	}
-	platformSuffix := GetBizHawkPlatformSuffix()
-	tagName := strings.TrimPrefix(release.TagName, "v")
-	patterns := []string{
-		fmt.Sprintf("BizHawk-%s-%s.zip", tagName, platformSuffix),
-		fmt.Sprintf("BizHawk-%s-%s.zip", release.TagName, platformSuffix),
-	}
-	for _, pattern := range patterns {
-		if asset := release.FindAssetByName(pattern); asset != nil {
-			return asset.DownloadURL, nil
-		}
-	}
-	for _, a := range release.Assets {
-		if strings.Contains(a.Name, platformSuffix) && strings.HasSuffix(a.Name, ".zip") {
-			return a.DownloadURL, nil
-		}
+	if asset := FindBizHawkReleaseAsset(release); asset != nil {
+		return asset.DownloadURL, nil
 	}
 	return fallbackBizHawkDownloadURL(version), nil
 }
@@ -300,7 +336,11 @@ func GetBizHawkDownloadURLForVersion(version string) (string, error) {
 func fallbackBizHawkDownloadURL(version string) string {
 	tag := strings.TrimPrefix(version, "v")
 	suffix := GetBizHawkPlatformSuffix()
-	return fmt.Sprintf("https://github.com/TASEmulators/BizHawk/releases/download/%s/BizHawk-%s-%s.zip", tag, tag, suffix)
+	ext := ".zip"
+	if runtime.GOOS == "linux" {
+		ext = ".tar.gz"
+	}
+	return fmt.Sprintf("https://github.com/TASEmulators/BizHawk/releases/download/%s/BizHawk-%s-%s%s", tag, tag, suffix, ext)
 }
 
 // GetBizHawkDownloadURL returns the download URL for the supported pinned version.
