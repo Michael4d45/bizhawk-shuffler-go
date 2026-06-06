@@ -20,6 +20,8 @@ type WSTestClient struct {
 	writeMu sync.Mutex // gorilla/websocket allows one writer at a time
 	// SaveUploadBase, when set, uploads a minimal save on request_save before acking.
 	SaveUploadBase string
+	// SaveUploadHook, when set, runs instead of UploadMinimalSave on request_save.
+	SaveUploadHook func(instanceID string) error
 }
 
 // NewWSTestClient builds a client for the server's /ws endpoint.
@@ -135,7 +137,10 @@ func (c *WSTestClient) respondRequestSave(cmd protocol.Command) {
 			instanceID = id
 		}
 	}
-	if instanceID != "" && c.SaveUploadBase != "" {
+	switch {
+	case c.SaveUploadHook != nil:
+		_ = c.SaveUploadHook(instanceID)
+	case instanceID != "" && c.SaveUploadBase != "":
 		_ = UploadMinimalSave(c.SaveUploadBase, instanceID)
 	}
 	if cmd.ID != "" {

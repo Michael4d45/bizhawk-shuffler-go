@@ -1,6 +1,7 @@
 package integration
 
 import (
+	"archive/zip"
 	"bytes"
 	"encoding/json"
 	"fmt"
@@ -104,12 +105,40 @@ func postGameInstances(t *testing.T, base string, instances []map[string]any) {
 	}
 }
 
-// UploadMinimalSave posts a valid BizHawk savestate for instanceID to /save/upload.
-func UploadMinimalSave(base, instanceID string) error {
-	saveBytes, err := savestate.BuildMinimalBizHawkSavestate()
+// buildTaggedSave builds a minimal valid BizHawk save with a distinct Core.bin tag byte.
+func buildTaggedSave(tag byte) ([]byte, error) {
+	var buf bytes.Buffer
+	w := zip.NewWriter(&buf)
+	add := func(name string, data []byte) error {
+		f, err := w.Create(name)
+		if err != nil {
+			return err
+		}
+		_, err = f.Write(data)
+		return err
+	}
+	if err := add("BizState/BizState 1.0", []byte("3\n")); err != nil {
+		return nil, err
+	}
+	if err := add("BizState/Core.bin", []byte{4, 0, 0, 0, tag}); err != nil {
+		return nil, err
+	}
+	if err := w.Close(); err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
+}
+
+// UploadTaggedSave posts a tagged minimal save for instanceID to /save/upload.
+func UploadTaggedSave(base, instanceID string, tag byte) error {
+	saveBytes, err := buildTaggedSave(tag)
 	if err != nil {
 		return err
 	}
+	return uploadSaveBytes(base, instanceID, saveBytes)
+}
+
+func uploadSaveBytes(base, instanceID string, saveBytes []byte) error {
 	filename := instanceID + ".state"
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
@@ -134,6 +163,15 @@ func UploadMinimalSave(base, instanceID string) error {
 		return fmt.Errorf("upload %s: %s", res.Status, b)
 	}
 	return nil
+}
+
+// UploadMinimalSave posts a valid BizHawk savestate for instanceID to /save/upload.
+func UploadMinimalSave(base, instanceID string) error {
+	saveBytes, err := savestate.BuildMinimalBizHawkSavestate()
+	if err != nil {
+		return err
+	}
+	return uploadSaveBytes(base, instanceID, saveBytes)
 }
 
 func uploadSaveMultipart(t *testing.T, base, filename string, data []byte) *http.Response {

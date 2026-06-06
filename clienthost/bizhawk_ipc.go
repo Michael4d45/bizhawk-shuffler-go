@@ -477,7 +477,10 @@ func (b *BizhawkIPC) processCommand(ctx context.Context, qc *queuedCmd) {
 // Incoming returns the channel with raw lines from Lua for processing
 func (b *BizhawkIPC) Incoming() <-chan string { return b.incoming }
 
-func (b *BizhawkIPC) SendSave(ctx context.Context) error {
+func (b *BizhawkIPC) SendSave(ctx context.Context, instanceID string) error {
+	if instanceID != "" {
+		return b.SendCommand(ctx, "SAVE", instanceID)
+	}
 	return b.SendCommand(ctx, "SAVE")
 }
 

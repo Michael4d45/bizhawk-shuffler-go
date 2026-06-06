@@ -233,8 +233,8 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 			})
 
 			if c.bipc.IsReady() && !skipSave {
-				_ = c.bipc.SendSave(ctx)
-				if err := c.verifySaveWithRetry(c.bipc.instanceID); err != nil {
+				_ = c.bipc.SendSave(ctx, oldInstanceID)
+				if err := c.verifySaveWithRetry(oldInstanceID); err != nil {
 					sendNack(id, "save verification failed: "+err.Error())
 					return
 				}
@@ -242,6 +242,13 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 			if !skipSave {
 				if err := c.EnsureSaveState(oldInstanceID, instanceID); err != nil {
 					sendNack(id, "save state orchestration failed: "+err.Error())
+					return
+				}
+			} else if instanceID != "" {
+				// Server already collected outgoing saves via request_save; still fetch the
+				// incoming instance from the host so Lua does not load a stale local file.
+				if err := c.downloadSaveState(instanceID); err != nil {
+					sendNack(id, "save download failed: "+err.Error())
 					return
 				}
 			}
@@ -435,7 +442,7 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 
 			// Save the current state
 			log.Printf("about to send SAVE command to BizHawk")
-			if err := c.bipc.SendSave(ctx); err != nil {
+			if err := c.bipc.SendSave(ctx, instanceID); err != nil {
 				log.Printf("SendSave failed: %v", err)
 				sendNack(id, "save failed: "+err.Error())
 				return
@@ -540,14 +547,8 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 func (c *Controller) EnsureSaveState(oldInstanceID, instanceID string) error {
 	log.Println("Ensuring save state for instanceID:", instanceID)
 
-	// Create saves directory if it doesn't exist
-	if err := os.MkdirAll("./saves", 0755); err != nil {
-		log.Printf("Failed to create saves directory: %v", err)
-		return err
-	}
-
 	if oldInstanceID != "" {
-		// 1. Upload old instance if it exists (current player's save state)
+		// Upload old instance if it exists (current player's save state).
 		go func() {
 			log.Printf("Uploading save state for old instance: %s", oldInstanceID)
 			err := c.api.UploadSaveState(oldInstanceID)
@@ -558,25 +559,29 @@ func (c *Controller) EnsureSaveState(oldInstanceID, instanceID string) error {
 			}
 		}()
 	}
+	return c.downloadSaveState(instanceID)
+}
+
+// downloadSaveState fetches the latest save for instanceID from the server into ./saves.
+func (c *Controller) downloadSaveState(instanceID string) error {
 	if instanceID == "" {
-		log.Println("No instanceID provided, skipping save state orchestration")
 		return nil
 	}
-
-	// 2. Download new instance save state (synchronous, blocking)
-	log.Printf("Downloading save state for new instance: %s", instanceID)
+	if err := os.MkdirAll("./saves", 0755); err != nil {
+		log.Printf("Failed to create saves directory: %v", err)
+		return err
+	}
+	log.Printf("Downloading save state for instance: %s", instanceID)
 	err := c.api.EnsureSaveState(instanceID)
 	if err != nil {
 		if errors.Is(err, ErrNotFound) || errors.Is(err, ErrFileLocked) {
 			log.Printf("Save state for instance %s not available on server (this is OK, Lua will create one): %v", instanceID, err)
-		} else {
-			log.Printf("Failed to download save state for instance %s: %v", instanceID, err)
-			return err
+			return nil
 		}
-	} else {
-		log.Printf("Successfully downloaded save state for instance %s", instanceID)
+		log.Printf("Failed to download save state for instance %s: %v", instanceID, err)
+		return err
 	}
-
+	log.Printf("Successfully downloaded save state for instance %s", instanceID)
 	return nil
 }
 
