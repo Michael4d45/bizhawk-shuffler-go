@@ -117,7 +117,7 @@ func ApplyPluginSettingsUpdate(bipc *BizhawkIPC, pluginName string, settings map
 		}
 		time.Sleep(pluginSettingsIPCRetryInterval)
 	}
-	return fmt.Errorf("PLUGIN_SETTINGS for %s timed out after %s: %v", pluginName, pluginSettingsIPCTimeout, lastErr)
+	return fmt.Errorf("PLUGIN_SETTINGS for %s timed out after %s: %w", pluginName, pluginSettingsIPCTimeout, lastErr)
 }
 
 func isPluginSettingsIPCRetryable(err error) bool {
