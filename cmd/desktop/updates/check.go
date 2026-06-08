@@ -30,7 +30,7 @@ type ghRelease struct {
 }
 
 // DefaultRepo is the GitHub repository for release checks.
-const DefaultRepo = "michael4d45/bizshuffle"
+const DefaultRepo = "Michael4d45/bizhawk-shuffler-go"
 
 // CheckLatest compares the embedded version with the latest GitHub release tag.
 func CheckLatest(ctx context.Context, repo, current string, client *http.Client) (State, error) {
