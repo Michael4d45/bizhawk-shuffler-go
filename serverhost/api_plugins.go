@@ -173,7 +173,19 @@ func (s *Server) handlePluginSettings(w http.ResponseWriter, r *http.Request, pl
 		}
 
 		settingsKV := filepath.Join(pluginDir, "settings.kv")
-		if err := s.saveSettingsKV(requestSettings, settingsKV); err != nil {
+		existing, err := s.loadSettingsKV(settingsKV)
+		if err != nil {
+			http.Error(w, "failed to load existing settings: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		merged := make(map[string]string, len(existing)+len(requestSettings))
+		for k, v := range existing {
+			merged[k] = v
+		}
+		for k, v := range requestSettings {
+			merged[k] = v
+		}
+		if err := s.saveSettingsKV(merged, settingsKV); err != nil {
 			http.Error(w, "failed to save settings: "+err.Error(), http.StatusInternalServerError)
 			return
 		}
@@ -196,8 +208,8 @@ func (s *Server) handlePluginSettings(w http.ResponseWriter, r *http.Request, pl
 			st.Plugins[pluginName] = plugin
 		})
 
-		// Broadcast settings update to connected clients
-		s.broadcastPluginSettingsUpdate(pluginName, requestSettings)
+		// Broadcast merged settings so clients apply the full effective config.
+		s.broadcastPluginSettingsUpdate(pluginName, merged)
 
 		w.Header().Set("Content-Type", "application/json")
 		if err := json.NewEncoder(w).Encode(map[string]string{"status": "ok"}); err != nil {

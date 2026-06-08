@@ -151,8 +151,10 @@ export function PluginSettingsModal({
           ) : null}
 
           <p className="mb-3 text-xs text-slate-500">
-            Changes are written to <span className="font-mono">settings.kv</span> on the server.
-            Connected clients pick them up on plugin reload.
+            Changes are written to <span className="font-mono">settings.kv</span> on the server and
+            pushed to connected player clients immediately. Running plugins receive updates via{" "}
+            <span className="font-mono">on_settings_changed</span> without restarting BizHawk. Use
+            reload only after editing <span className="font-mono">plugin.lua</span>.
           </p>
 
           <div className="mb-4">

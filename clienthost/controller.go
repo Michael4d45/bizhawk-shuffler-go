@@ -8,8 +8,6 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"sort"
-	"strings"
 	"sync"
 	"time"
 
@@ -460,38 +458,15 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 			sendAck(id)
 		}(cmd.ID)
 	case protocol.CmdStateUpdate:
-		// Handle plugin settings updates
-		go func() {
-			if payload, ok := cmd.Payload.(map[string]any); ok {
-				if pluginName, ok := payload["plugin_name"].(string); ok {
-					if settingsMap, ok := payload["settings"].(map[string]any); ok {
-						// Convert map[string]any to map[string]string
-						settings := make(map[string]string)
-						for k, v := range settingsMap {
-							if str, ok := v.(string); ok {
-								settings[k] = str
-							} else {
-								settings[k] = fmt.Sprintf("%v", v)
-							}
-						}
-						// Save plugin settings
-						if err := savePluginSettingsToFile(pluginName, settings); err != nil {
-							log.Printf("failed to save plugin settings for %s: %v", pluginName, err)
-						} else {
-							log.Printf("updated plugin settings for %s", pluginName)
-							// Notify BizHawk Lua script to reload plugin settings
-							ctx2, cancel2 := context.WithTimeout(ctx, 10*time.Second)
-							defer cancel2()
-							if err := c.bipc.SendPluginSettings(ctx2, pluginName); err != nil {
-								log.Printf("failed to send PLUGIN_SETTINGS command to BizHawk for %s: %v", pluginName, err)
-							} else {
-								log.Printf("sent PLUGIN_SETTINGS command to BizHawk for %s", pluginName)
-							}
-						}
-					}
-				}
+		go func(payload any) {
+			pluginName, settings, ok := ParsePluginSettingsPayload(payload)
+			if !ok {
+				return
 			}
-		}()
+			if err := ApplyPluginSettingsUpdate(c.bipc, pluginName, settings); err != nil {
+				log.Printf("failed to apply plugin settings for %s: %v", pluginName, err)
+			}
+		}(cmd.Payload)
 		sendAck(cmd.ID)
 	case protocol.CmdPluginReload:
 		// Handle plugin reload request
@@ -655,61 +630,6 @@ func (c *Controller) ClearSaves() {
 	for _, subdir := range subdirs {
 		clearDir(filepath.Join(bizhawkDir, subdir))
 	}
-}
-
-// savePluginSettingsToFile saves plugin settings to settings.kv file
-func savePluginSettingsToFile(pluginName string, settings map[string]string) error {
-	pluginDir := filepath.Join("./plugins", pluginName)
-	if err := os.MkdirAll(pluginDir, 0755); err != nil {
-		return fmt.Errorf("failed to create plugin dir: %w", err)
-	}
-
-	settingsKV := filepath.Join(pluginDir, "settings.kv")
-	tmp := settingsKV + ".tmp"
-	f, err := os.Create(tmp)
-	if err != nil {
-		return fmt.Errorf("failed to create temp file: %w", err)
-	}
-	defer func() { _ = f.Close() }()
-
-	// Ensure status exists
-	if _, exists := settings["status"]; !exists {
-		settings["status"] = "disabled"
-	}
-
-	// Write status first
-	if _, err := fmt.Fprintf(f, "status = %s\n", settings["status"]); err != nil {
-		return fmt.Errorf("failed to write status: %w", err)
-	}
-
-	// Write other keys in sorted order
-	keys := make([]string, 0, len(settings))
-	for k := range settings {
-		if k != "status" {
-			keys = append(keys, k)
-		}
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		// Escape newlines in values
-		val := strings.ReplaceAll(settings[k], "\n", "\\n")
-		if _, err := fmt.Fprintf(f, "%s = %s\n", k, val); err != nil {
-			return fmt.Errorf("failed to write setting %s: %w", k, err)
-		}
-	}
-
-	if err := f.Sync(); err != nil {
-		return fmt.Errorf("failed to sync file: %w", err)
-	}
-	if err := f.Close(); err != nil {
-		return fmt.Errorf("failed to close file: %w", err)
-	}
-
-	if err := os.Rename(tmp, settingsKV); err != nil {
-		return fmt.Errorf("failed to rename file: %w", err)
-	}
-
-	return nil
 }
 
 // verifySaveWithRetry waits for BizHawk to write a valid savestate after SAVE.
