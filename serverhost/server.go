@@ -16,10 +16,12 @@ import (
 // Lock ownership:
 //   - connMu: websocket registries (conns, playerClients, adminClients)
 //   - mu: server state, pending acks, swap tracking, plugins in memory
+//   - saveSwapMu: serializes save-mode swap orchestration (collect saves, reassign, send)
 //   - liveConns: lock-free snapshot for shutdown socket close
 type Server struct {
 	mu                   sync.RWMutex
 	connMu               sync.RWMutex
+	saveSwapMu           sync.Mutex
 	pendingInstancecount int
 	state                protocol.ServerState
 	conns                map[*websocket.Conn]*wsClient

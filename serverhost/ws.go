@@ -703,6 +703,96 @@ func (s *Server) sendSwap(player protocol.Player, opts SwapSendOptions) {
 	}(player, opts)
 }
 
+const swapInFlightWait = 25 * time.Second
+
+// sendSwapSync delivers a swap command and blocks until the client acks/nacks or times out.
+// Used by save-mode orchestration so server assignments are not left ahead of the client.
+func (s *Server) sendSwapSync(player protocol.Player, opts SwapSendOptions) error {
+	player = s.currentPlayer(player.Name)
+	if player.Game == "" {
+		return fmt.Errorf("swap %s: no game assigned", player.Name)
+	}
+	if !s.PlayerReadyForSwap(player) {
+		return fmt.Errorf("swap %s: not ready (connected=%v bizhawk_ready=%v)",
+			player.Name, player.Connected, player.BizhawkReady)
+	}
+	if !s.ShouldSendSwap(player, opts.Force) {
+		return nil
+	}
+
+	deadline := time.Now().Add(swapInFlightWait)
+	for {
+		busy := false
+		s.withLock(func() {
+			_, busy = s.swapInFlight[player.Name]
+		})
+		if !busy {
+			break
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("swap %s: timed out waiting for prior swap to finish", player.Name)
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+
+	s.withLock(func() {
+		s.swapInFlight[player.Name] = struct{}{}
+	})
+	defer s.withLock(func() { delete(s.swapInFlight, player.Name) })
+
+	player = s.currentPlayer(player.Name)
+	if !s.PlayerReadyForSwap(player) {
+		return fmt.Errorf("swap %s: not ready before send", player.Name)
+	}
+
+	payload := map[string]any{"game": player.Game}
+	if player.InstanceID != "" {
+		payload["instance_id"] = player.InstanceID
+	}
+	if opts.SkipSave {
+		payload["skip_save"] = true
+	}
+	cmd := protocol.Command{
+		Cmd:     protocol.CmdSwap,
+		Payload: payload,
+		ID:      fmt.Sprintf("swap-%d-%s", time.Now().UnixNano(), player.Name),
+	}
+	log.Printf("[swap] sync -> %s game=%q instance=%q skip_save=%v", player.Name, player.Game, player.InstanceID, opts.SkipSave)
+	obslog.Event(obslog.Swap, "send_sync", map[string]string{
+		"player":      player.Name,
+		"game":        player.Game,
+		"instance_id": player.InstanceID,
+		"skip_save":   fmt.Sprintf("%v", opts.SkipSave),
+	})
+	res, err := s.sendAndWait(player, cmd, 20*time.Second)
+	if err != nil {
+		return err
+	}
+	if res != "ack" {
+		return fmt.Errorf("swap %s: client responded %q", player.Name, res)
+	}
+	s.recordSwapApplied(player.Name, player)
+	return nil
+}
+
+func (s *Server) sendSwapAllSync(opts SwapSendOptions) error {
+	playersMap := map[string]protocol.Player{}
+	s.withRLock(func() {
+		maps.Copy(playersMap, s.state.Players)
+	})
+	opts.Force = true
+	for _, p := range playersMap {
+		if !p.Connected {
+			continue
+		}
+		p = s.currentPlayer(p.Name)
+		if err := s.sendSwapSync(p, opts); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (s *Server) sendSwapAll(opts SwapSendOptions) {
 	playersMap := map[string]protocol.Player{}
 	s.withRLock(func() {

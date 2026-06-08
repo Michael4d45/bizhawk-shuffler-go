@@ -432,6 +432,9 @@ func (h *SaveModeHandler) waitForSwapGate(timeout time.Duration) bool {
 // The "better random" setting (PreventSameGameSwap) attempts to avoid assigning the same game
 // to players who just played it, improving variety.
 func (h *SaveModeHandler) HandleSwap() error {
+	h.server.saveSwapMu.Lock()
+	defer h.server.saveSwapMu.Unlock()
+
 	if h.waitForFileCheck() {
 		return nil
 	}
@@ -475,6 +478,8 @@ func (h *SaveModeHandler) HandleSwap() error {
 	rand.Shuffle(len(gameInstances), func(i, j int) {
 		gameInstances[i], gameInstances[j] = gameInstances[j], gameInstances[i]
 	})
+
+	beforePlayers := h.server.snapshotAllPlayers()
 
 	h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
 		// Clear all players' assignments for a fresh round-robin assignment
@@ -521,7 +526,10 @@ func (h *SaveModeHandler) HandleSwap() error {
 		}
 	})
 
-	h.server.sendSwapAll(SwapSendOptions{SkipSave: true})
+	if err := h.server.sendSwapAllSync(SwapSendOptions{SkipSave: true}); err != nil {
+		h.server.restorePlayers(beforePlayers)
+		log.Printf("[SaveMode] mass swap aborted, restored player assignments: %v", err)
+	}
 	return nil
 }
 
@@ -561,6 +569,9 @@ func (h *SaveModeHandler) SetupState() error {
 }
 
 func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceID string) error {
+	h.server.saveSwapMu.Lock()
+	defer h.server.saveSwapMu.Unlock()
+
 	if instanceID == "" {
 		h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
 			p, ok := st.Players[player]
@@ -578,6 +589,7 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 	var foundPlayer *protocol.Player
 	var ok bool
 	var p protocol.Player
+	beforePlayers := h.server.snapshotAllPlayers()
 	h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
 		for i, inst := range st.GameSwapInstances {
 			if inst.ID == instanceID {
@@ -613,6 +625,7 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 		return errors.New("instance not found")
 	}
 
+	swapOpts := SwapSendOptions{SkipSave: true, Force: true}
 	if foundPlayer != nil {
 		displaced := h.server.currentPlayer(foundPlayer.Name)
 		if h.server.PlayerReadyForSwap(displaced) {
@@ -620,14 +633,22 @@ func (h *SaveModeHandler) HandlePlayerSwap(player string, game string, instanceI
 			h.server.RequestPendingSaves()
 			if h.server.WaitForPendingSaves(60 * time.Second) {
 				log.Printf("[SaveMode] timed out waiting for displaced player %s save", displaced.Name)
+				h.server.restorePlayers(beforePlayers)
 				return nil
 			}
-			h.server.sendSwap(displaced, SwapSendOptions{SkipSave: true})
+			if err := h.server.sendSwapSync(displaced, swapOpts); err != nil {
+				h.server.restorePlayers(beforePlayers)
+				log.Printf("[SaveMode] displaced swap failed for %s, restored assignments: %v", displaced.Name, err)
+				return nil
+			}
 		}
 	} else {
 		h.server.setInstanceFileState(foundInst.ID, protocol.FileStateNone)
 	}
-	h.server.sendSwap(p, SwapSendOptions{SkipSave: true})
+	if err := h.server.sendSwapSync(p, swapOpts); err != nil {
+		h.server.restorePlayers(beforePlayers)
+		log.Printf("[SaveMode] player swap failed for %s, restored assignments: %v", p.Name, err)
+	}
 	return nil
 }
 
@@ -752,6 +773,9 @@ func (h *SaveModeHandler) getRandomInstanceForPlayer(player protocol.Player) (pr
 
 // HandleRandomSwapForPlayer performs a random swap for a specific player in save mode (TS parity).
 func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
+	h.server.saveSwapMu.Lock()
+	defer h.server.saveSwapMu.Unlock()
+
 	if h.waitForFileCheck() {
 		return nil
 	}
@@ -797,6 +821,13 @@ func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 
 		player.InstanceID = instance.ID
 		player.Game = instance.Game
+
+		snapNames := []string{player.Name}
+		if hasOtherPlayer {
+			snapNames = append(snapNames, otherPlayer.Name)
+		}
+		beforePlayers := h.server.snapshotPlayers(snapNames...)
+
 		h.server.UpdateStateAndPersist(func(st *protocol.ServerState) {
 			if hasOtherPlayer {
 				for name, pl := range st.Players {
@@ -813,7 +844,11 @@ func (h *SaveModeHandler) HandleRandomSwapForPlayer(playerName string) error {
 			}
 		})
 
-		h.server.sendSwap(player, SwapSendOptions{SkipSave: true})
+		if err := h.server.sendSwapSync(player, SwapSendOptions{SkipSave: true, Force: true}); err != nil {
+			h.server.restorePlayers(beforePlayers)
+			log.Printf("[SaveMode] random swap failed for %s, restored assignments: %v", player.Name, err)
+			break
+		}
 		delete(pending, player.Name)
 
 		if !hasOtherPlayer {
