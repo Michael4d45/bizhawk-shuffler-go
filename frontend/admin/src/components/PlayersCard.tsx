@@ -11,7 +11,6 @@ import { playerCompletionCount } from "../gameStats.js";
 import { playerStatusBadge } from "../status.js";
 import type { Player, ServerState } from "../types.js";
 import { useOptionalPlayerDrag } from "../PlayerDragContext.js";
-import { ConfigModal } from "./ConfigModal.js";
 import { MessageComposerModal } from "./MessageComposerModal.js";
 import { DraggablePlayerChip } from "./DraggablePlayerChip.js";
 import { ActionRow, Badge, Button, Card, EmptyState, FieldLabel, Input, Select } from "./ui.js";
@@ -36,8 +35,6 @@ export function PlayersCard({ state, trigger, pushLog, refreshState }: Props) {
   const [messageTarget, setMessageTarget] = useState<
     { type: "player"; player: string } | { type: "all" } | null
   >(null);
-  const [configPlayer, setConfigPlayer] = useState<string | null>(null);
-
   const players = sortedPlayers(state);
   const isSync = state?.mode !== "save";
   const dnd = useOptionalPlayerDrag();
@@ -48,11 +45,6 @@ export function PlayersCard({ state, trigger, pushLog, refreshState }: Props) {
     const body = isSync ? { player: name, game: sel } : { player: name, instance_id: sel };
     await post("/api/swap_player", body);
     await refreshState();
-  };
-
-  const openConfig = async (name: string) => {
-    setConfigPlayer(name);
-    await trigger("/api/check_player_config", { player: name });
   };
 
   return (
@@ -291,9 +283,6 @@ export function PlayersCard({ state, trigger, pushLog, refreshState }: Props) {
                       >
                         Message
                       </Button>
-                      <Button variant="ghost" onClick={() => void openConfig(name)}>
-                        Config
-                      </Button>
                       <Button
                         variant="danger"
                         onClick={() => void trigger("/api/remove_player", { player: name })}
@@ -314,13 +303,6 @@ export function PlayersCard({ state, trigger, pushLog, refreshState }: Props) {
         target={messageTarget}
         onClose={() => setMessageTarget(null)}
         onSent={(msg) => pushLog(msg)}
-      />
-      <ConfigModal
-        open={configPlayer !== null}
-        playerName={configPlayer ?? ""}
-        state={state}
-        onClose={() => setConfigPlayer(null)}
-        onLog={pushLog}
       />
     </>
   );

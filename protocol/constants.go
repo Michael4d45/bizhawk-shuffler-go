@@ -38,7 +38,6 @@ func DefaultServerState() ServerState {
 		CountdownEnabled:    false,
 		MinIntervalSecs:     5,
 		MaxIntervalSecs:     10,
-		ConfigKeys:          []string{"DisplayFps"},
 		MainGames:           []GameEntry{},
 		Games:               []string{},
 		GameSwapInstances:   []GameSwapInstance{},

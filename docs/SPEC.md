@@ -46,9 +46,7 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 | Host-controlled flow   | Web admin + optional swap timer; players mostly passive after connect |
 | WebSocket + HTTP split | Real-time commands over WS; ROMs/saves/plugins over HTTP              |
 
-**Not implemented (or stubbed):** see [docs/ROADMAP.md](ROADMAP.md).
-
-- **`check_config`**, **`update_config`** on the player client — ack-only stubs (no config probe or apply yet).
+**Planned work:** see [docs/ROADMAP.md](ROADMAP.md) (empty when nothing is scoped).
 
 ---
 
@@ -276,10 +274,8 @@ sequenceDiagram
 | Games update  | `games_update`      | `games`, `main_games`, `game_instances`                          |
 | Clear saves   | `clear_saves`       | Wipe local saves                                                 |
 | Request save  | `request_save`      | Payload: `instance_id`                                           |
-| Plugin reload | `plugin_reload` | Payload: `plugin_name`                                 |
-| Check config  | `check_config`  | Payload: `config_keys[]` — **client stub** (acks only) |
-| Update config | `update_config`     | Payload: `config_updates` — **client stub** (acks only)          |
-| State update  | `state_update`      | Plugin settings to players; `updated_at` to admins               |
+| Plugin reload | `plugin_reload` | Payload: `plugin_name`                                           |
+| State update  | `state_update`  | Plugin settings to players; `updated_at` to admins               |
 
 ### 6.5 Client → server messages
 
@@ -290,7 +286,6 @@ sequenceDiagram
 | `games_update_ack` | `has_files`, optional `errors[]`                            |
 | `status_update`    | `bizhawk_ready` changes                                     |
 | `lua_command`      | Parsed `LuaCommand`: `swap`, `swap_me`, `message`           |
-| `config_response`  | Reply to `check_config`                                     |
 
 ### 6.6 Admin WebSocket
 
@@ -356,13 +351,11 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | POST        | `/api/games/{game}/mark_completed_all`  | Mark game completed for all players             |
 | POST        | `/api/instances/{instance}/mark_completed_all` | Mark instance completed for all players  |
 
-### 7.3 Messaging & config
+### 7.3 Messaging
 
-| Method | Path                                                    |
-| ------ | ------------------------------------------------------- |
-| POST   | `/api/message_player`, `/api/message_all`               |
-| POST   | `/api/check_player_config`, `/api/update_player_config` |
-| POST   | `/api/set_config_keys`                                  |
+| Method | Path                                      |
+| ------ | ----------------------------------------- |
+| POST   | `/api/message_player`, `/api/message_all` |
 
 ### 7.4 Plugins
 

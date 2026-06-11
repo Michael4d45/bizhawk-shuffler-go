@@ -381,26 +381,6 @@ func (s *Server) handleWS(w http.ResponseWriter, r *http.Request) {
 				fmt.Printf("[ERROR] Invalid payload type for CmdTypeLua: %T\n", cmd.Payload)
 			}
 			continue
-		case protocol.CmdConfigResponse:
-			// Handle config response from client
-			if pl, ok := cmd.Payload.(map[string]any); ok {
-				name := ""
-				s.withConnRLock(func() {
-					name = s.findPlayerNameForClientLocked(client)
-				})
-				if name != "" {
-					if configValues, ok := pl["config_values"].(map[string]any); ok {
-						// Store config values on the player state
-						s.UpdateStateAndPersist(func(st *protocol.ServerState) {
-							if player, exists := st.Players[name]; exists {
-								player.ConfigValues = configValues
-								st.Players[name] = player
-							}
-						})
-					}
-				}
-			}
-			continue
 		default:
 			log.Printf("client message: %+v", cmd)
 		}

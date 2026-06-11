@@ -122,10 +122,6 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/open_plugins_folder", s.handleOpenPluginsFolder)
 	mux.HandleFunc("/api/message_player", s.apiMessagePlayer)
 	mux.HandleFunc("/api/message_all", s.apiMessageAll)
-	// Config management endpoints
-	mux.HandleFunc("/api/check_player_config", s.apiCheckPlayerConfig)
-	mux.HandleFunc("/api/update_player_config", s.apiUpdatePlayerConfig)
-	mux.HandleFunc("/api/set_config_keys", s.apiSetConfigKeys)
 	// Save state management endpoints
 	mux.HandleFunc("/save/upload", s.handleSaveUpload)
 	mux.HandleFunc("/save/no-save", s.handleNoSaveState)

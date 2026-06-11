@@ -230,12 +230,6 @@ func (s *Server) loadState() {
 	if tmp.Players == nil {
 		tmp.Players = map[string]protocol.Player{}
 	}
-	if tmp.ConfigKeys == nil {
-		// Initialize default config keys if not set
-		tmp.ConfigKeys = []string{
-			"DisplayFps",
-		}
-	}
 	tmp.UpdatedAt = time.Now()
 	for name, player := range tmp.Players {
 		player.Connected = false

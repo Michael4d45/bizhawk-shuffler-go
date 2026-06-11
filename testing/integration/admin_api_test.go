@@ -138,32 +138,12 @@ func TestAdminAPIParityPlayerMessaging(t *testing.T) {
 	}
 }
 
-func TestAdminAPIParityConfigAndFiles(t *testing.T) {
+func TestAdminAPIParityFilesAndPlugins(t *testing.T) {
 	ts := StartTestServer(t)
 	seedAdminAPITest(t, ts.URL)
 	base := ts.URL
 
-	checkBody, _ := json.Marshal(map[string]string{"player": "p1"})
-	res, err := http.Post(base+"/api/check_player_config", "application/json", bytes.NewReader(checkBody))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	if res.StatusCode != http.StatusBadRequest {
-		t.Fatalf("POST /api/check_player_config status %d, want 400", res.StatusCode)
-	}
-
-	updateBody, _ := json.Marshal(map[string]string{"player": "p1", "config": "{}"})
-	res, err = http.Post(base+"/api/update_player_config", "application/json", bytes.NewReader(updateBody))
-	if err != nil {
-		t.Fatal(err)
-	}
-	_ = res.Body.Close()
-	if res.StatusCode != http.StatusOK && res.StatusCode != http.StatusBadRequest && res.StatusCode != http.StatusInternalServerError {
-		t.Fatalf("POST /api/update_player_config status %d", res.StatusCode)
-	}
-
-	res, err = http.Get(base + "/files/list.json")
+	res, err := http.Get(base + "/files/list.json")
 	if err != nil {
 		t.Fatal(err)
 	}

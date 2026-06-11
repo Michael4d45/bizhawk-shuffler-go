@@ -7,7 +7,6 @@ export type CommandName =
   | "games_update_ack"
   | "status_update"
   | "lua_command"
-  | "config_response"
   | "hello_admin"
   | "ping"
   | "start"
@@ -18,8 +17,6 @@ export type CommandName =
   | "clear_saves"
   | "request_save"
   | "plugin_reload"
-  | "check_config"
-  | "update_config"
   | "state_update";
 
 export interface Command {
@@ -43,7 +40,6 @@ export interface Player {
   ping_ms?: number;
   completed_games?: string[];
   completed_instances?: string[];
-  config_values?: Record<string, unknown>;
 }
 
 export type FileState = "none" | "pending" | "ready";
@@ -86,5 +82,4 @@ export interface ServerState {
   player_name_hash_assignment: boolean;
   countdown_enabled: boolean;
   swap_seed?: number;
-  config_keys?: string[];
 }

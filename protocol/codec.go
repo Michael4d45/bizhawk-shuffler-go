@@ -7,13 +7,13 @@ import (
 
 var clientToServer = map[CommandName]bool{
 	CmdHello: true, CmdAck: true, CmdNack: true, CmdGamesUpdateAck: true,
-	CmdStatusUpdate: true, CmdTypeLua: true, CmdConfigResponse: true, CmdHelloAdmin: true,
+	CmdStatusUpdate: true, CmdTypeLua: true, CmdHelloAdmin: true,
 }
 
 var serverToClient = map[CommandName]bool{
 	CmdPing: true, CmdResume: true, CmdPause: true, CmdSwap: true, CmdMessage: true,
 	CmdGamesUpdate: true, CmdClearSaves: true, CmdRequestSave: true, CmdPluginReload: true,
-	CmdCheckConfig: true, CmdUpdateConfig: true, CmdStateUpdate: true,
+	CmdStateUpdate: true,
 }
 
 func EncodeCommand(cmd Command) (string, error) {

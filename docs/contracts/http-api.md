@@ -52,15 +52,12 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | POST        | `/api/games/{game}/mark_completed_all`            | Mark game completed for all players             |
 | POST        | `/api/instances/{instance}/mark_completed_all`    | Mark instance completed for all players         |
 
-## Messaging & config
+## Messaging
 
-| Method | Path                                                    |
-| ------ | ------------------------------------------------------- |
-| POST   | `/api/message_player`                                   |
-| POST   | `/api/message_all`                                      |
-| POST   | `/api/check_player_config`                              |
-| POST   | `/api/update_player_config`                             |
-| POST   | `/api/set_config_keys`                                  |
+| Method | Path                 |
+| ------ | -------------------- |
+| POST   | `/api/message_player` |
+| POST   | `/api/message_all`    |
 
 ## Plugins
 

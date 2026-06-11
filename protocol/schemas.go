@@ -18,8 +18,7 @@ const (
 	CmdNack           CommandName = "nack"
 	CmdGamesUpdateAck CommandName = "games_update_ack"
 	CmdStatusUpdate   CommandName = "status_update"
-	CmdTypeLua        CommandName = "lua_command"
-	CmdConfigResponse CommandName = "config_response"
+	CmdTypeLua CommandName = "lua_command"
 
 	// From Server to Client
 	CmdPing             CommandName = "ping"
@@ -31,8 +30,6 @@ const (
 	CmdClearSaves       CommandName = "clear_saves"
 	CmdRequestSave      CommandName = "request_save"
 	CmdPluginReload CommandName = "plugin_reload"
-	CmdCheckConfig  CommandName = "check_config"
-	CmdUpdateConfig     CommandName = "update_config"
 
 	// From Admin to Server
 	CmdHelloAdmin CommandName = "hello_admin"
@@ -186,8 +183,6 @@ type ServerState struct {
 	CountdownEnabled bool `json:"countdown_enabled"`
 	// SwapSeed is used for deterministic random game selection in sync mode
 	SwapSeed int64 `json:"swap_seed,omitempty"`
-	// ConfigKeys defines the BizHawk config keys that can be managed via the UI
-	ConfigKeys []string `json:"config_keys,omitempty"`
 }
 
 // GameEntry describes a single catalog entry in the server's main game list.
@@ -212,8 +207,6 @@ type Player struct {
 	CompletedGames []string `json:"completed_games,omitempty"`
 	// CompletedInstances lists instance IDs that this player has completed (for save mode)
 	CompletedInstances []string `json:"completed_instances,omitempty"`
-	// ConfigValues stores the player's BizHawk config values for managed keys
-	ConfigValues map[string]any `json:"config_values,omitempty"`
 }
 
 type GameSwapInstance struct {

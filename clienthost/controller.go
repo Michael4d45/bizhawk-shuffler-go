@@ -39,47 +39,20 @@ type Controller struct {
 
 	// ipcMu serializes BizHawk IPC (swap, request_save) — TS commandChain parity.
 	ipcMu sync.Mutex
-
-	// restartBizhawk is called to restart BizHawk after config updates
-	restartBizhawk func()
-	// closeBizhawk is called to close BizHawk
-	closeBizhawk func()
-	// terminateBizhawkForConfig is called to terminate BizHawk for config updates (without cancelling client context)
-	terminateBizhawkForConfig func()
-	// launchBizhawk is called to launch BizHawk (normal launch, resets restart mode)
-	launchBizhawk func()
-	// launchBizhawkForConfig is called to launch BizHawk after config update (preserves restart mode)
-	launchBizhawkForConfig func()
-	// setRestartMode is called to set BizHawk restart mode
-	setRestartMode func(bool)
 }
 
 func NewController(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(protocol.Command) error) *Controller {
-	return NewControllerWithHelloAckAndCallbacks(cfg, bipc, api, writeJSON, nil, nil, nil, nil, nil, nil, nil)
+	return NewControllerWithHelloAck(cfg, bipc, api, writeJSON, nil)
 }
 
 func NewControllerWithHelloAck(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(protocol.Command) error, helloAck chan struct{}) *Controller {
-	return NewControllerWithHelloAckAndCallbacks(cfg, bipc, api, writeJSON, helloAck, nil, nil, nil, nil, nil, nil)
-}
-
-func NewControllerWithHelloAckAndRestart(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(protocol.Command) error, helloAck chan struct{}, restartBizhawk func()) *Controller {
-	return NewControllerWithHelloAckAndCallbacks(cfg, bipc, api, writeJSON, helloAck, restartBizhawk, nil, nil, nil, nil, nil)
-}
-
-func NewControllerWithHelloAckAndCallbacks(cfg Config, bipc *BizhawkIPC, api *API, writeJSON func(protocol.Command) error, helloAck chan struct{}, restartBizhawk func(), closeBizhawk func(), terminateBizhawkForConfig func(), launchBizhawk func(), launchBizhawkForConfig func(), setRestartMode func(bool)) *Controller {
 	c := &Controller{
-		cfg:                       cfg,
-		bipc:                      bipc,
-		api:                       api,
-		writeJSON:                 writeJSON,
-		mainGames:                 make([]protocol.GameEntry, 0),
-		helloAck:                  helloAck,
-		restartBizhawk:            restartBizhawk,
-		closeBizhawk:              closeBizhawk,
-		terminateBizhawkForConfig: terminateBizhawkForConfig,
-		launchBizhawk:             launchBizhawk,
-		launchBizhawkForConfig:    launchBizhawkForConfig,
-		setRestartMode:            setRestartMode,
+		cfg:       cfg,
+		bipc:      bipc,
+		api:       api,
+		writeJSON: writeJSON,
+		mainGames: make([]protocol.GameEntry, 0),
+		helloAck:  helloAck,
 	}
 	c.progressTracking = NewProgressTrackingAPI(api, c)
 	return c
@@ -108,20 +81,6 @@ func (c *Controller) OnBizhawkReady(ctx context.Context) {
 		return
 	}
 	c.Handle(ctx, pending)
-}
-
-// SetRestartBizhawkCallback sets the callback function to restart BizHawk
-func (c *Controller) SetRestartBizhawkCallback(restartFunc func()) {
-	c.restartBizhawk = restartFunc
-}
-
-// SetBizhawkCallbacks sets the callback functions for BizHawk control
-func (c *Controller) SetBizhawkCallbacks(closeFunc func(), terminateForConfigFunc func(), launchFunc func(), launchForConfigFunc func(), setRestartModeFunc func(bool)) {
-	c.closeBizhawk = closeFunc
-	c.terminateBizhawkForConfig = terminateForConfigFunc
-	c.launchBizhawk = launchFunc
-	c.launchBizhawkForConfig = launchForConfigFunc
-	c.setRestartMode = setRestartModeFunc
 }
 
 // Handle processes a single incoming command. It launches goroutines for
@@ -499,8 +458,6 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 				}
 			}
 		}()
-		sendAck(cmd.ID)
-	case protocol.CmdCheckConfig, protocol.CmdUpdateConfig:
 		sendAck(cmd.ID)
 	default:
 		sendAck(cmd.ID)
