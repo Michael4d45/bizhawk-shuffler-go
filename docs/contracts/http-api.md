@@ -2,7 +2,7 @@
 
 Routes implemented by `serverhost` — see `RegisterRoutes` in `serverhost/server.go`.
 
-Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as noted.
+Base: `http://{host}:{port}`. Mutations return HTTP 200 with an empty body, plain `"ok"`, or JSON such as `{"result":"ok"}` / `{"status":"ok"}` depending on the handler.
 
 ## WebSocket
 

@@ -1,6 +1,6 @@
 # BizShuffle (Go)
 
-Coordinated retro-gaming session host for BizHawk. Behavior spec: [docs/SPEC.md](docs/SPEC.md). Planned stubs: [docs/ROADMAP.md](docs/ROADMAP.md).
+Coordinated retro-gaming session host for BizHawk. Behavior spec: [docs/SPEC.md](docs/SPEC.md).
 
 ## Requirements
 
@@ -29,10 +29,10 @@ On Windows without Make: `.\build.ps1` (same outputs under `dist\`).
 
 ## Run
 
-**Headless server** (defaults `--data-dir` to `%USERPROFILE%\BizShuffle`):
+**Headless server** (defaults `--data-dir` to `%USERPROFILE%\BizShuffle`, bind `0.0.0.0:8080`):
 
 ```bash
-go run ./cmd/server -- --host 127.0.0.1 --port 8080
+go run ./cmd/server -- --host 127.0.0.1 --port 8080   # LAN-only example
 ```
 
 **Desktop (Host + Join):**

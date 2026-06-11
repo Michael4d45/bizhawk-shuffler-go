@@ -8,8 +8,12 @@
    - Close Lua IPC (`BizhawkIPC.Close`)
    - Terminate BizHawk (`BizHawkController.Terminate`)
 2. **Host session** — `hostsession.Session.Stop()`:
-   - `Server.BeginShutdown()` / drain WebSockets
-   - Close listener and HTTP server
+   - `Server.BeginShutdown()`
+   - Close listener (stop accepting)
+   - Cancel session context (in-flight `/ws` handlers)
+   - `Server.Shutdown()` — drain WebSockets (up to 3s)
+   - `http.Server.Close()` — not graceful `Shutdown` (avoids blocking on open `/ws`)
+   - Wait for serve goroutine
 
 `StopJoinSession` also waits 300ms settle delay before a re-join.
 

@@ -103,11 +103,11 @@ games["game name"] = {
 - Use BizHawk's Hex Editor to inspect memory
 - Consult RAM maps (DataCrystal, ROM-hacking wiki, etc.)
 - Use memory watch tools to find changing values
-- Enable the probe feature (AUTO_PROBE_ON_START) to discover changed bytes
+- Set `AUTO_PROBE_ON_START = true` in `plugin.lua` to discover changed bytes
 
 ## Plugin Structure
 
 - `plugin.lua` - Main plugin code with hook functions
-- `meta.kv` - Plugin metadata and configuration options
+- `meta.kv` - Plugin metadata and admin UI setting hints (`setting.*`)
 - `settings.kv` - User settings (status, command_type, enabled_types)
 - `README.md` - This documentation file

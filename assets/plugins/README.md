@@ -1,6 +1,6 @@
 # Plugins Directory
 
-Bundled sample plugins for **BizShuffle**. At runtime the server loads plugins from `{dataDir}/plugins/` (copy or sync from this folder).
+Bundled sample plugins for **BizShuffle**. Copy into `{dataDir}/plugins/` on the host; the server loads from there and clients sync over HTTP (`/api/plugins`, `/files/plugins/`).
 
 ## Structure
 

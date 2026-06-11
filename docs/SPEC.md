@@ -46,8 +46,6 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 | Host-controlled flow   | Web admin + optional swap timer; players mostly passive after connect |
 | WebSocket + HTTP split | Real-time commands over WS; ROMs/saves/plugins over HTTP              |
 
-**Planned work:** see [docs/ROADMAP.md](ROADMAP.md) (empty when nothing is scoped).
-
 ---
 
 ## 3. System Architecture
@@ -93,21 +91,21 @@ root/
 ├── protocol/, obslog/, savestate/, assets/, serverhost/, clienthost/, testing/
 ├── frontend/admin/, assets/server.lua (embedded via assets/embed.go)
 ├── roms/, saves/, plugins/, state.json, config.json, BizHawk/   (runtime, ~/BizShuffle)
-└── docs/SPEC.md, docs/contracts/, docs/ROADMAP.md
+└── docs/SPEC.md, docs/contracts/
 ```
 
 **Package direction:** `cmd/*` → `serverhost` / `clienthost` → `protocol` + `assets` (BizHawk Lua embed). Server and client packages do not import each other. Session state lives on `serverhost.Server`.
 
 ### 3.3 Deployment topology
 
-**LAN / Internet:** Server binds `host`/`port` (flags, `state.json`, or default `127.0.0.1:8080`). Players and the desktop shell connect using a manual `http://` base URL. Firewall: inbound TCP on server port (default **8080**). No built-in TLS; HTTPS/WSS only if user fronts with a proxy or uses ports 443/8443.
+**LAN / Internet:** Server binds `host`/`port` from flags, `state.json`, or defaults — headless `cmd/server` uses `0.0.0.0:8080`; desktop Host uses `bind_host` in `config.json` (default `127.0.0.1`). Players and the desktop shell connect using a manual `http://` base URL. Firewall: inbound TCP on server port (default **8080**). No built-in TLS; HTTPS/WSS only if user fronts with a proxy or uses ports 443/8443.
 
 ### 3.4 Concurrency model
 
 | Process | Mechanism                                                                                                              |
 | ------- | ---------------------------------------------------------------------------------------------------------------------- |
 | Server  | Goroutines + `net/http`; mutex/debounced persistence in `serverhost`; per-WS handlers; swap scheduler |
-| Client  | WS reconnect loop; `Controller` handles swap/downloads; `BizhawkIpc` TCP client with ACK timeout                       |
+| Client  | WS reconnect loop; `Controller` handles swap/downloads; `BizhawkIPC` TCP client with ACK timeout                      |
 | Lua     | Single-threaded frame loop; synchronous IPC handling                                                                   |
 
 ### 3.5 Key design tradeoffs
@@ -129,7 +127,7 @@ root/
 
 ### 4.2 Client (`clienthost/`)
 
-**Owns:** `config.json` (desktop shell + player runtime keys), WebSocket client, `Controller` (downloads, swaps, plugins), `BizhawkIpc`, `PluginSyncManager`, desktop entrypoints.
+**Owns:** `config.json` (desktop shell + player runtime keys), WebSocket client, `Controller` (downloads, swaps, plugins), `BizhawkIPC`, `PluginSyncManager`, desktop entrypoints.
 
 **Does not own:** Authoritative game assignment (executes server `swap` payload).
 
@@ -141,7 +139,7 @@ root/
 
 ### 4.4 Web admin (`frontend/admin/`)
 
-**Owns:** Session controls, players, games/instances (mode-dependent), plugins, messaging, config check UI.
+**Owns:** Session controls, players, games/instances (mode-dependent), plugins, messaging.
 
 **Does not own:** Business rules (server enforces).
 
@@ -203,7 +201,7 @@ go run ./cmd/desktop   # Host and/or Join with GUI
 | Panel   | Key actions                                                                                            |
 | ------- | ------------------------------------------------------------------------------------------------------ |
 | Session | Start/pause, do swap, auto swaps, better random, countdown, clear saves, mode, interval                |
-| Players | Add/remove, swap, random, message, config check, drag-drop instances (save mode)                      |
+| Players | Add/remove, swap, random, message, drag-drop instances (save mode)                                   |
 | Games   | Catalog, auto setup (`POST /api/mode/setup`), sync checkboxes, instances (save mode), open roms folder |
 | Plugins | Enable/disable, reload, settings modal, open plugins folder                                            |
 | Logs    | Local action log (200 entries)                                                                         |
@@ -269,7 +267,8 @@ sequenceDiagram
 | ------------- | ------------------- | ---------------------------------------------------------------- |
 | Resume        | `start`             | Unpause BizHawk                                                  |
 | Pause         | `pause`             | Pause BizHawk                                                    |
-| Swap          | `swap`              | Payload: `game`, optional `instance_id`                          |
+| Ping          | _(WS control frame)_ | Not JSON — server sends Ping with Unix-ns payload; client Pong echoes it for RTT |
+| Swap          | `swap`              | Payload: `game`, optional `instance_id`, optional `skip_save`      |
 | Message       | `message`           | Overlay: `message`, `duration`, `x`, `y`, `fontsize`, `fg`, `bg` |
 | Games update  | `games_update`      | `games`, `main_games`, `game_instances`                          |
 | Clear saves   | `clear_saves`       | Wipe local saves                                                 |
@@ -290,7 +289,7 @@ sequenceDiagram
 ### 6.6 Admin WebSocket
 
 - `hello_admin` with `name` → registered in `adminClients`.
-- Receives `state_update` (`updated_at`), mirrored player commands, `lua_command` broadcasts.
+- Receives `state_update` (`updated_at`), mirrored player-targeted commands (wrapped as `{ "player", "original_payload" }`), and client-originated `lua_command` only when forwarded by the server (plugin `message` uses player broadcast, not admin).
 
 ### 6.7 BizHawk Lua IPC (localhost)
 
@@ -313,7 +312,7 @@ sequenceDiagram
 
 ## 7. REST API Reference
 
-Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as noted.
+Base: `http://{host}:{port}`. Mutations return HTTP 200 with an empty body, plain `"ok"`, or JSON such as `{"result":"ok"}` / `{"status":"ok"}` depending on the handler.
 
 ### 7.1 Session & scheduling
 
@@ -466,7 +465,7 @@ Plugins call `SendCommand(kind, fields)` → client forwards `lua_command` → s
 | --------- | ------------------------------------ |
 | `swap`    | `performSwap()`                      |
 | `swap_me` | `performRandomSwapForPlayer(sender)` |
-| `message` | Broadcast to all players/admins      |
+| `message` | Broadcast `lua_command` to all connected players (player client auto-acks today; use `/api/message_*` for admin-driven overlays) |
 
 ---
 
@@ -480,7 +479,7 @@ Plugins call `SendCommand(kind, fields)` → client forwards `lua_command` → s
 | `host`, `port`                                             | Bind hints                                           |
 | `min/max_interval_secs`, `next_swap_at`                    | Scheduler                                            |
 | `main_games`, `games`, `game_instances`                    | Catalog                                              |
-| `players`                                                  | Per-player game, instance, ping, completions, config |
+| `players`                                                  | Per-player game, instance, ping, completions, `connected`, `has_files`, `bizhawk_ready` |
 | `prevent_same_game_swap`, `countdown_enabled`, `swap_seed` | Swap behavior                                        |
 | `plugins`                                                  | In-memory only; **omitted on save**                  |
 
@@ -567,4 +566,4 @@ Tagged releases publish four assets: `bizshuffle-server` and `bizshuffle-desktop
 
 ---
 
-_Unified spec — reflects repository implementation. For quick-start user instructions, see `README.md`. For planned stubs, see `docs/ROADMAP.md`._
+_Unified spec — reflects repository implementation. For quick-start user instructions, see `README.md`._
