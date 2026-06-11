@@ -94,6 +94,7 @@ func (s *Server) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("/api/mode/setup", s.apiModeSetup)
 	mux.HandleFunc("/api/mode", s.apiMode)
 	mux.HandleFunc("/api/toggle_prevent_same_game", s.apiTogglePreventSameGame)
+	mux.HandleFunc("/api/toggle_player_name_hash", s.apiTogglePlayerNameHash)
 	mux.HandleFunc("/files/", s.handleFiles)
 	mux.HandleFunc("/upload", s.handleUpload)
 	mux.HandleFunc("/files/list.json", s.handleFilesList)

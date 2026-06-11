@@ -4,18 +4,6 @@ Planned work not yet in the codebase. See [SPEC.md](SPEC.md) for what ships toda
 
 ---
 
-## Player-name hashing for game assignment
-
-**Problem:** In save mode, instance assignment is driven by shuffle / first-free / preference tiers. Some designs want deterministic mapping from player name → instance or game (e.g. same name always gets the same slot until swapped).
-
-**Today:** `serverhost/game_modes.go` uses `findAvailableInstanceForPlayer`, round-robin over shuffled instances, and random preference logic — no hash of `player.Name`.
-
-**Likely direction:** Add optional mode or flag on `ServerState`; hash name to index into `game_instances` with collision fallback to current round-robin. Must not break sync mode (single game for all).
-
-**Touches:** `serverhost/game_modes.go`, `protocol.ServerState`, admin mode/settings UI, tests in `serverhost/game_modes_test.go` and `testing/integration/`.
-
----
-
 ## `check_config` / `update_config` (WebSocket)
 
 **Problem:** Admin **Config** on a player should read and write keys in that player’s local `config.json` (paths, names, etc.) without manual file edit on the player machine.

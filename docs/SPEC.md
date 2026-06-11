@@ -48,7 +48,6 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 
 **Not implemented (or stubbed):** see [docs/ROADMAP.md](ROADMAP.md).
 
-- **Player-name hashing** for game assignment — save mode uses first-free instance, shuffled round-robin, and preference-based random selection.
 - **`check_config`**, **`update_config`** on the player client — ack-only stubs (no config probe or apply yet).
 
 ---
@@ -332,6 +331,7 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | POST     | `/api/toggle_swaps`             | —                             | Toggle `swap_enabled`                    |
 | POST     | `/api/toggle_countdown`         | —                             | Toggle 3-2-1 before auto swap            |
 | POST     | `/api/toggle_prevent_same_game` | —                             | Toggle better random                     |
+| POST     | `/api/toggle_player_name_hash`  | —                             | Toggle save-mode name-hash assignment    |
 | POST     | `/api/do_swap`                  | —                             | Async full swap                          |
 | POST     | `/api/random_swap`              | `{ "player": "name" }`        | Per-player random swap                   |
 | GET/POST | `/api/mode`                     | `{ "mode": "sync" \| "save" }` | Game mode (POST body)                    |
@@ -400,7 +400,7 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | Same game for all       | Yes                           | No — per instance                            |
 | `instance_id` on swap   | Empty                         | Required                                     |
 | Save HTTP orchestration | Minimal                       | Core                                         |
-| Selection               | `SwapSeed` + `selectNextGame` | Instance shuffle + preference tiers          |
+| Selection               | `SwapSeed` + `selectNextGame` | Shuffle + preference tiers; optional name hash |
 | Setup                   | Merges `main_games` → `games` | Creates `GameSwapInstance` per catalog entry |
 
 Handlers: sync and save mode logic in `serverhost/` (`game_modes.go`).
@@ -415,7 +415,8 @@ Handlers: sync and save mode logic in `serverhost/` (`game_modes.go`).
 
 **`GameSwapInstance`:** `id`, `game`, `file_state` (`none`|`pending`|`ready`), `pending_player`.
 
-- `HandleSwap`: `SetPendingAllFiles`, shuffle instances, round-robin assign via `findAvailableInstanceForPlayer`.
+- `HandleSwap`: `SetPendingAllFiles`, then assign instances (shuffled round-robin by default; stable name-hash index when `player_name_hash_assignment` is on, with preference-tier fallback).
+- `GetPlayer` (new join): first-free instance, or hash-preferred when name hash is enabled (save mode only).
 - `HandlePlayerSwap`: requires `instance_id`; may re-swap previous owner.
 - `HandleRandomSwapForPlayer`: may chain through previous instance owners.
 

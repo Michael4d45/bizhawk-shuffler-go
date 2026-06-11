@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log"
 	"math/rand"
+	"slices"
 	"time"
 
 	"github.com/michael4d45/bizshuffle/protocol"
@@ -395,6 +396,40 @@ func (h *SaveModeHandler) findAvailableInstanceForPlayer(
 	return -1, false
 }
 
+func (h *SaveModeHandler) instanceAvailableAt(
+	player protocol.Player,
+	gameInstances []protocol.GameSwapInstance,
+	assignedInstances map[int]bool,
+	idx int,
+) (int, bool) {
+	if idx < 0 || idx >= len(gameInstances) {
+		return -1, false
+	}
+	completedInstances, completedGames := h.buildCompletedMaps(player)
+	inst := gameInstances[idx]
+	if assignedInstances[idx] || completedInstances[inst.ID] || completedGames[inst.Game] {
+		return -1, false
+	}
+	return idx, true
+}
+
+// findInstanceForPlayer picks an instance using optional name-hash preference, then preference tiers.
+func (h *SaveModeHandler) findInstanceForPlayer(
+	player protocol.Player,
+	gameInstances []protocol.GameSwapInstance,
+	assignedInstances map[int]bool,
+	preventSame bool,
+	useNameHash bool,
+) (int, bool) {
+	if useNameHash && len(gameInstances) > 0 {
+		preferred := playerNameHashIndex(player.Name, len(gameInstances))
+		if idx, ok := h.instanceAvailableAt(player, gameInstances, assignedInstances, preferred); ok {
+			return idx, true
+		}
+	}
+	return h.findAvailableInstanceForPlayer(player, gameInstances, assignedInstances, preventSame)
+}
+
 // waitForFileCheck waits until no pending save files or in-flight swap commands (TS parity: 30s).
 func (h *SaveModeHandler) waitForFileCheck() bool {
 	return h.waitForSwapGate(30 * time.Second)
@@ -440,14 +475,18 @@ func (h *SaveModeHandler) HandleSwap() error {
 	}
 
 	var preventSame bool
-	h.server.withRLock(func() { preventSame = h.server.state.PreventSameGameSwap })
+	var useNameHash bool
+	h.server.withRLock(func() {
+		preventSame = h.server.state.PreventSameGameSwap
+		useNameHash = h.server.state.PlayerNameHashAssignment
+	})
 
 	// Ensure there are instances to swap between
 	if len(h.server.state.GameSwapInstances) == 0 {
 		return errors.New("no game instances available for swap")
 	}
 
-	log.Printf("[SaveMode] Starting full swap (preventSame=%v)", preventSame)
+	log.Printf("[SaveMode] Starting full swap (preventSame=%v nameHash=%v)", preventSame, useNameHash)
 
 	h.server.SetPendingAllFiles()
 	h.server.RequestPendingSaves()
@@ -474,10 +513,13 @@ func (h *SaveModeHandler) HandleSwap() error {
 		copy(gameInstances, h.server.state.GameSwapInstances)
 	})
 
-	// Shuffle instances for randomness
-	rand.Shuffle(len(gameInstances), func(i, j int) {
-		gameInstances[i], gameInstances[j] = gameInstances[j], gameInstances[i]
-	})
+	if useNameHash {
+		slices.Sort(players)
+	} else {
+		rand.Shuffle(len(gameInstances), func(i, j int) {
+			gameInstances[i], gameInstances[j] = gameInstances[j], gameInstances[i]
+		})
+	}
 
 	beforePlayers := h.server.snapshotAllPlayers()
 
@@ -507,7 +549,7 @@ func (h *SaveModeHandler) HandleSwap() error {
 			}
 
 			// Find the best available instance for this player
-			assignedIdx, found := h.findAvailableInstanceForPlayer(tempPlayer, gameInstances, assignedInstances, preventSame)
+			assignedIdx, found := h.findInstanceForPlayer(tempPlayer, gameInstances, assignedInstances, preventSame, useNameHash)
 			if found {
 				inst := gameInstances[assignedIdx]
 				player.Game = inst.Game
@@ -534,6 +576,47 @@ func (h *SaveModeHandler) HandleSwap() error {
 }
 
 func (h *SaveModeHandler) GetPlayer(player string) protocol.Player {
+	var useNameHash bool
+	var gameInstances []protocol.GameSwapInstance
+	var existing protocol.Player
+	h.server.withRLock(func() {
+		useNameHash = h.server.state.PlayerNameHashAssignment
+		gameInstances = make([]protocol.GameSwapInstance, len(h.server.state.GameSwapInstances))
+		copy(gameInstances, h.server.state.GameSwapInstances)
+		if p, ok := h.server.state.Players[player]; ok {
+			existing = p
+		} else {
+			existing = protocol.Player{Name: player}
+		}
+	})
+
+	if len(gameInstances) == 0 {
+		return protocol.Player{Name: player}
+	}
+
+	assignedInstances := make(map[int]bool)
+	h.server.withRLock(func() {
+		for i, inst := range gameInstances {
+			for _, p := range h.server.state.Players {
+				if p.InstanceID == inst.ID {
+					assignedInstances[i] = true
+					break
+				}
+			}
+		}
+	})
+
+	if useNameHash {
+		if idx, ok := h.findInstanceForPlayer(existing, gameInstances, assignedInstances, false, true); ok {
+			inst := gameInstances[idx]
+			return protocol.Player{
+				Name:       player,
+				Game:       inst.Game,
+				InstanceID: inst.ID,
+			}
+		}
+	}
+
 	var result protocol.Player
 	h.server.withRLock(func() {
 		assigned := map[string]struct{}{}

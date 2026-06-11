@@ -46,6 +46,7 @@ func TestAdminAPIParitySessionControls(t *testing.T) {
 		"/api/toggle_swaps",
 		"/api/toggle_countdown",
 		"/api/toggle_prevent_same_game",
+		"/api/toggle_player_name_hash",
 		"/api/mode/setup",
 	}
 	for _, path := range paths {

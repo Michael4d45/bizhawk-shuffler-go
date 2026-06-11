@@ -180,6 +180,8 @@ type ServerState struct {
 	GameSwapInstances []GameSwapInstance `json:"game_instances,omitempty"`
 	// PreventSameGameSwap prevents players from being swapped to the same game they're currently playing
 	PreventSameGameSwap bool `json:"prevent_same_game_swap"`
+	// PlayerNameHashAssignment (save mode) prefers instance index from hashing player name before round-robin fallback
+	PlayerNameHashAssignment bool `json:"player_name_hash_assignment"`
 	// CountdownEnabled enables a 3-2-1 countdown before auto swaps
 	CountdownEnabled bool `json:"countdown_enabled"`
 	// SwapSeed is used for deterministic random game selection in sync mode

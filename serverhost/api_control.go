@@ -158,6 +158,15 @@ func (s *Server) apiTogglePreventSameGame(w http.ResponseWriter, r *http.Request
 	}
 }
 
+func (s *Server) apiTogglePlayerNameHash(w http.ResponseWriter, r *http.Request) {
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		st.PlayerNameHashAssignment = !st.PlayerNameHashAssignment
+	})
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}
+
 func (s *Server) apiToggleCountdown(w http.ResponseWriter, r *http.Request) {
 	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
 		st.CountdownEnabled = !st.CountdownEnabled

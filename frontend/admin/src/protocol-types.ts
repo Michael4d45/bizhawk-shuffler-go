@@ -83,6 +83,7 @@ export interface ServerState {
   games?: string[];
   game_instances?: GameSwapInstance[];
   prevent_same_game_swap: boolean;
+  player_name_hash_assignment: boolean;
   countdown_enabled: boolean;
   swap_seed?: number;
   config_keys?: string[];

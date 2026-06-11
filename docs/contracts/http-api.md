@@ -19,6 +19,7 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | POST     | `/api/toggle_swaps`             | Toggle `swap_enabled`                      |
 | POST     | `/api/toggle_countdown`         | Toggle 3-2-1 before auto swap              |
 | POST     | `/api/toggle_prevent_same_game` | Toggle better random                       |
+| POST     | `/api/toggle_player_name_hash`  | Toggle save-mode player name hash assignment |
 | POST     | `/api/do_swap`                  | Async full swap                            |
 | POST     | `/api/random_swap`              | Body `{ "player": "name" }`                |
 | GET/POST | `/api/mode`                     | Body `{ "mode": "sync" \| "save" }` on POST |
