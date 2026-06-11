@@ -196,19 +196,136 @@ go run ./cmd/desktop   # Host and/or Join with GUI
 | `name`         | Player name for `hello`                                                       |
 | `bizhawk_path` | Cached path to managed `EmuHawk` under `{dataDir}/BizHawk` (external paths are cleared) |
 
-### 5.5 Web admin workflows
+### 5.5 Admin console display (web)
 
-| Panel   | Key actions                                                                                            |
-| ------- | ------------------------------------------------------------------------------------------------------ |
-| Session | Start/pause, do swap, auto swaps, better random, countdown, clear saves, mode, interval                |
-| Players | Add/remove, swap, random, message, drag-drop instances (save mode)                                   |
-| Games   | Catalog, auto setup (`POST /api/mode/setup`), sync checkboxes, instances (save mode), open roms folder |
-| Plugins | Enable/disable, reload, settings modal, open plugins folder                                            |
-| Logs    | Local action log (200 entries)                                                                         |
+The admin UI is a single-page React app served at `/`. It polls `GET /state.json` and maintains an admin WebSocket (`hello_admin`) for live updates. Layout: sticky header, then a two-column grid (session + games), full-width players, then plugins + activity log.
 
-### 5.6 Client UI
+#### 5.5.1 Global chrome
 
-Desktop shell: bind host/port, **Host (server + admin)**, server URL, player name, dependencies panel, **Join**. BizHawk launches only on Join after dependencies are satisfied.
+| Element | Display |
+| ------- | ------- |
+| **Swap progress bar** | Fixed 1px bar at top of viewport; fills left→right toward next auto-swap; emerald normally, amber when ≥95% elapsed |
+| **Title** | “BizShuffle” label + “Admin Console” heading |
+| **Status badges** | Session running/stopped; WebSocket live/offline; game mode (`sync` / `save`); next swap countdown (`H:MM:SS` or `M:SS`, or “Due” / “—”); player counts **ready/online/total** (ready = connected + `bizhawk_ready`) |
+| **Refresh** | Manual state reload; “Updated {local timestamp}” from `state.updated_at` |
+
+#### 5.5.2 Session control card
+
+| Area | Display / actions |
+| ---- | ----------------- |
+| **Subtitle** | “Swap timer · {countdown} until next swap” |
+| **Inline badges** | Running/stopped; “Auto swaps off” when disabled; “Countdown on” when 3-2-1 enabled |
+| **Share with friends** | Collapsible panel from `GET /api/share_urls`: LAN URLs, WAN URL (port-forward note), copy buttons; addresses masked until revealed; warning when bound to `127.0.0.1` only |
+| **Game mode** | Dropdown: sync swap (all same game) / save swap (per-player saves) |
+| **Primary actions** | Start, Pause, Do Swap, Auto setup |
+| **Toggles** | Auto Swaps, Better Random, Name hash (save mode assignment), Countdown — each shows On/Off state |
+| **Maintenance** | Clear Saves, Reset session |
+| **Swap interval** | Current min–max (seconds); editable min/max fields + Save |
+
+#### 5.5.3 Games & ROMs card
+
+Mode-dependent subtitle and body:
+
+**Sync mode**
+
+| Element | Display |
+| ------- | ------- |
+| Subtitle | `{enabled} enabled of {catalog} in catalog` |
+| ROM upload | File picker + Upload (`POST /upload`) |
+| Game list | One row per `main_games` entry: checkbox (in rotation), filename, badges for players on game / completions count |
+| Per-game actions | Swap all, Mark done (all players) |
+| Toolbar | Expand/collapse list, Open ROMs folder, Catalog modal, Auto setup |
+
+**Save mode**
+
+| Element | Display |
+| ------- | ------- |
+| Subtitle | `{N} save instances` |
+| Instance list | Per `game_instances` entry: instance ID, game file, file-state badge (`none` / `pending` / `ready`, with pending player name), assigned/unassigned, completion count, assigned player chip |
+| Drag-and-drop | Draggable player chips between instances; dashed “Unassigned players” drop zone to clear assignment |
+| Per-instance actions | Mark done all, Remove |
+| Add instance | Instance ID + game file select (auto-suggests ID from filename) + Add |
+| ROM upload | Same as sync mode |
+
+**Catalog modal** (sync only): edit `main_games` metadata (file, display fields) and persist via `POST /api/games`.
+
+#### 5.5.4 Players card
+
+| Element | Display |
+| ------- | ------- |
+| Subtitle | `{N} registered` |
+| Header actions | Message all, Clear completions (all players) |
+| Add player | Name field + Add (`POST /api/add_player`) |
+| Per-player row | Name (draggable chip in save mode); status badge (Offline / Connected / Ready); Has files / Missing files; completion count; WebSocket ping (ms); current game and instance ID |
+| Completed (expandable) | Lists completed games and instances with remove (×); dropdowns to add completions |
+| Per-player actions | Select game (sync) or instance (save) + Swap; Random; Message; Remove |
+
+**Message composer modal:** text, duration, position (x/y), font size, foreground/background colors → `POST /api/message_player` or `/api/message_all` (BizHawk on-screen overlay).
+
+#### 5.5.5 Plugins card
+
+| Element | Display |
+| ------- | ------- |
+| Subtitle | `{N} installed` (from `GET /api/plugins`) |
+| Toolbar | Expand/collapse, Refresh, Open folder |
+| Per-plugin row | Name, status badge (`enabled` / `disabled` / `error`), description, version · author · BizHawk version |
+| Per-plugin actions | Enable/Disable, Reload, Edit (settings modal), Delete |
+
+**Plugin settings modal:** fields driven by `meta.kv` `setting.*` hints; persists via `POST /api/plugins/{name}/settings`.
+
+#### 5.5.6 Activity log card
+
+| Element | Display |
+| ------- | ------- |
+| Subtitle | `{N} recent events` |
+| Log lines | Timestamp + message; color-coded success (`ok`), failure (`failed`), neutral; **local UI only** (not server logs); capped at **200** entries |
+
+### 5.6 Desktop shell display (Fyne)
+
+The desktop app (`cmd/desktop`) is a two-column shell: **Host** on the left, **Join** (or **Dependencies**) on the right. BizHawk is launched only when the user taps **Join**, after dependencies pass.
+
+#### 5.6.1 Header and footer
+
+| Element | Display |
+| ------- | ------- |
+| **Header** | “BizShuffle” title bar |
+| **Status bar** | Single line below main content: info / success / warning / error messages (host start, join progress, install status, connection loss) |
+| **Footer left** | App version label; Check updates; Download update (shown when a newer release is available) |
+| **Footer right** | Open data folder |
+
+#### 5.6.2 Host panel
+
+| Field / control | Purpose |
+| --------------- | ------- |
+| Bind host | Listen address for embedded server (default `127.0.0.1`; use `0.0.0.0` for LAN) |
+| Port (0 = free) | Server port; `0` picks an ephemeral port |
+| **Host (server + admin)** | Starts embedded `serverhost`, opens admin URL in browser; auto-fills Join server URL when empty |
+| **Stop host** | Shown while hosting; stops embedded server |
+
+Fields persist to `config.json` (`bind_host`, `host_port`, `server`, `name`) on change (debounced ~400ms).
+
+#### 5.6.3 Join panel
+
+| Field / control | Purpose |
+| --------------- | ------- |
+| Server URL | HTTP base for remote or local session (placeholder `http://127.0.0.1:8080`) |
+| Player name | Username sent in WebSocket `hello` |
+| **Join** | Validates URL + name; blocked while dependencies fail or another operation is in progress; launches BizHawk + player client |
+
+Join is disabled when: dependencies are checking, any required dependency is missing, install in progress, or host/join operation is busy.
+
+#### 5.6.4 Dependencies panel
+
+Shown in place of the Join panel when dependencies are checking, items need install, or play is blocked.
+
+| Element | Display |
+| ------- | ------- |
+| Checking | “Checking dependencies…” + indeterminate progress |
+| Per dependency | Label, detail text, per-item install button (e.g. BizHawk, VC++ on Windows, system Mono on Linux) |
+| Install all | Shown when two or more items need install |
+| Blocked footer | `PlayBlockedMessage` when Join cannot proceed |
+
+On successful Join, status shows connected server URL and player name; connection loss surfaces a warning in the status bar.
 
 ### 5.7 Session lifecycle
 
