@@ -9,7 +9,7 @@
 ## Ack contract
 
 - Recipient sends `{ "cmd": "ack", "id": "<same>" }` or `nack` with `payload.reason`
-- Server `sendAndWait`: 20s timeout (`SWAP_WAIT_MS`)
+- Server `sendAndWait`: **20s** timeout (`serverhost/ws.go`; used for `swap` and similar paths)
 
 ## Ping
 

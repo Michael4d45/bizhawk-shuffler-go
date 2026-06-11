@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/michael4d45/bizshuffle/protocol"
-	"github.com/michael4d45/bizshuffle/testing/fakes"
+	"github.com/michael4d45/bizshuffle/clienthost/faketest"
 )
 
 func TestParsePluginSettingsPayload(t *testing.T) {
@@ -52,7 +52,7 @@ func TestApplyPluginSettingsUpdateWritesFileAndNotifiesBizHawk(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bipc.Close() })
 
-	peer, err := fakes.StartFakeLuaPeerOnPort(bipc.Port(), nil)
+	peer, err := faketest.StartFakeLuaPeerOnPort(bipc.Port(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -105,7 +105,7 @@ func TestControllerHandlesPluginSettingsStateUpdate(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bipc.Close() })
 
-	peer, err := fakes.StartFakeLuaPeerOnPort(bipc.Port(), nil)
+	peer, err := faketest.StartFakeLuaPeerOnPort(bipc.Port(), nil)
 	if err != nil {
 		t.Fatal(err)
 	}

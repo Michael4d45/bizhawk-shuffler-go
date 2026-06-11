@@ -291,12 +291,6 @@ export function PlayersCard({ state, trigger, pushLog, refreshState }: Props) {
                       >
                         Message
                       </Button>
-                      <Button
-                        variant="ghost"
-                        onClick={() => void trigger("/api/fullscreen_toggle", { player: name })}
-                      >
-                        Fullscreen
-                      </Button>
                       <Button variant="ghost" onClick={() => void openConfig(name)}>
                         Config
                       </Button>

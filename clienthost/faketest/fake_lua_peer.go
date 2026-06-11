@@ -1,4 +1,4 @@
-package fakes
+package faketest
 
 import (
 	"bufio"

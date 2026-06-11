@@ -69,10 +69,6 @@ func (c Config) normalizeServer() {
 // EnsureDefaults populates default values for commonly used keys if missing.
 func (c Config) EnsureDefaults() error {
 	// bizhawk_path should be set by installer or manually
-	// Client expects BizHawk to be pre-installed
-	if c["auto_open_bizhawk"] == "" {
-		c["auto_open_bizhawk"] = "true"
-	}
 	return nil
 }
 

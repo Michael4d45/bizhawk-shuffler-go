@@ -12,7 +12,7 @@ import (
 	"github.com/michael4d45/bizshuffle/clienthost"
 	"github.com/michael4d45/bizshuffle/protocol"
 	"github.com/michael4d45/bizshuffle/savestate"
-	"github.com/michael4d45/bizshuffle/testing/fakes"
+	"github.com/michael4d45/bizshuffle/clienthost/faketest"
 )
 
 // Mass swap must download the other player's freshly uploaded save instead of reusing
@@ -82,7 +82,7 @@ func TestSaveModeMassSwapDownloadsIncomingSave(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bipc.Close() })
 
-	peer, err := fakes.StartFakeLuaPeerOnPort(bipc.Port(), &fakes.FakeLuaSaveOpts{
+	peer, err := faketest.StartFakeLuaPeerOnPort(bipc.Port(), &faketest.FakeLuaSaveOpts{
 		SavesDir:   clientDir,
 		InstanceID: chronoInstanceID,
 	})

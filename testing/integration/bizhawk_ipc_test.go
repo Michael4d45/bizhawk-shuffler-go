@@ -6,11 +6,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/michael4d45/bizshuffle/testing/fakes"
+	"github.com/michael4d45/bizshuffle/clienthost/faketest"
 )
 
 func TestFakeLuaPeerAcceptsLines(t *testing.T) {
-	peer, port, err := fakes.StartFakeLuaPeer()
+	peer, port, err := faketest.StartFakeLuaPeer()
 	if err != nil {
 		t.Fatal(err)
 	}

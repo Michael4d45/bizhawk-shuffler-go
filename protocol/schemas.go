@@ -30,9 +30,8 @@ const (
 	CmdGamesUpdate      CommandName = "games_update"
 	CmdClearSaves       CommandName = "clear_saves"
 	CmdRequestSave      CommandName = "request_save"
-	CmdPluginReload     CommandName = "plugin_reload"
-	CmdFullscreenToggle CommandName = "fullscreen_toggle"
-	CmdCheckConfig      CommandName = "check_config"
+	CmdPluginReload CommandName = "plugin_reload"
+	CmdCheckConfig  CommandName = "check_config"
 	CmdUpdateConfig     CommandName = "update_config"
 
 	// From Admin to Server

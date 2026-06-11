@@ -46,13 +46,11 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 | Host-controlled flow   | Web admin + optional swap timer; players mostly passive after connect |
 | WebSocket + HTTP split | Real-time commands over WS; ROMs/saves/plugins over HTTP              |
 
-**Not implemented (or stubbed):**
+**Not implemented (or stubbed):** see [docs/ROADMAP.md](ROADMAP.md).
 
 - `POST /api/reset` — use pause, clear saves, and player management instead.
 - **Player-name hashing** for game assignment — save mode uses first-free instance, shuffled round-robin, and preference-based random selection.
-- **`fullscreen_toggle`**, **`check_config`**, **`update_config`** on the player client — ack-only stubs (no Alt+Enter, no config probe yet).
-- **`auto_open_bizhawk`** in `config.json` — default is written but not read by current runtime code.
-- **Separate player CLI binary** — not shipped; use `cmd/desktop` **Join** for BizHawk + WebSocket player.
+- **`check_config`**, **`update_config`** on the player client — ack-only stubs (no config probe or apply yet).
 
 ---
 
@@ -67,7 +65,7 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 | **BizHawk + Lua** | `EmuHawk` + `server.lua`                                         | Emulation, swap/save, plugin hooks; TCP to player client on localhost                     |
 | **Web admin**     | `frontend/admin/` → `serverhost/static/`                         | React SPA; REST + admin WebSocket                                                         |
 | **Desktop shell** | `cmd/desktop` (Fyne)                                             | **Host** (embedded server + admin), **Join** (deps panel + BizHawk + player client)       |
-| **Plugins**       | `plugins/*`                                                      | Lua extensions; server is source of truth, clients sync files                             |
+| **Plugins**       | `assets/plugins/*` (bundled); `{dataDir}/plugins/` (runtime)     | Lua extensions; server is source of truth, clients sync files                             |
 
 ```mermaid
 flowchart TB
@@ -96,13 +94,13 @@ flowchart TB
 ```
 root/
 ├── cmd/server, desktop/
-├── protocol/, domain/, savestate/, assets/, serverhost/, clienthost/, testing/
+├── protocol/, domain/, obslog/, savestate/, assets/, serverhost/, clienthost/, testing/
 ├── frontend/admin/, assets/server.lua (embedded via assets/embed.go)
 ├── roms/, saves/, plugins/, state.json, config.json, BizHawk/   (runtime, ~/BizShuffle)
-└── docs/SPEC.md, docs/contracts/
+└── docs/SPEC.md, docs/contracts/, docs/ROADMAP.md
 ```
 
-**Package direction:** `cmd/*` → `serverhost` / `clienthost` → `domain` + `protocol` + `assets` (BizHawk Lua embed). Server and client packages do not import each other.
+**Package direction:** `cmd/*` → `serverhost` / `clienthost` → `protocol` + `assets` (BizHawk Lua embed). Server and client packages do not import each other. `domain/` exists but is **not imported** by server or client today (session logic lives on `serverhost.Server`).
 
 ### 3.3 Deployment topology
 
@@ -173,7 +171,7 @@ root/
 | Platform              | Notes                                                                     |
 | --------------------- | ------------------------------------------------------------------------- |
 | **Windows** (primary) | BizHawk `EmuHawk.exe`; desktop app auto-downloads BizHawk when missing    |
-| **Linux** (secondary) | Headless server; client CLI where supported                               |
+| **Linux** (secondary) | Headless server; desktop **Join** needs system **Mono** on PATH (`EmuHawkMono.sh`) |
 | **Build**             | Go 1.26+; [Bun](https://bun.sh) for `make build-admin`; CGO for desktop (Fyne) |
 
 ### 5.3 Installation flows
@@ -182,7 +180,7 @@ root/
 
 1. Data directory defaults to `%USERPROFILE%\BizShuffle\` (or `~/BizShuffle`).
 2. **Host** — starts embedded `serverhost`, opens admin in a browser window. Does not launch BizHawk or the player client.
-3. **Join** — blocked until the dependencies panel reports BizHawk (and VC++ on Windows) OK. User installs via **Install BizHawk** / **Install VC++** (downloads official BizHawk zip into `{dataDir}/BizHawk`). Then: reserve Lua port → `lua_server_port.txt` → launch `EmuHawk` with `server.lua` → WebSocket player connects to the server URL.
+3. **Join** — blocked until the dependencies panel reports BizHawk OK (and VC++ on Windows, or system Mono on Linux). User installs via **Install BizHawk** / **Install VC++** where supported (downloads official BizHawk zip into `{dataDir}/BizHawk` on Windows). Then: reserve Lua port → `lua_server_port.txt` → launch `EmuHawk` / `EmuHawkMono.sh` with `server.lua` → WebSocket player connects to the server URL.
 4. Enter the server URL manually in the desktop **Join** form (or use the URL auto-filled after **Host** on the same machine).
 
 **Manual / headless:**
@@ -201,16 +199,15 @@ go run ./cmd/desktop   # Host and/or Join with GUI
 | `bind_host`                 | Desktop Host bind address (default `127.0.0.1`) |
 | `host_port`                 | Desktop Host port (`0` = pick a free port)    |
 | `server`                    | HTTP base; `ws://` normalized to `http://`    |
-| `name`                      | Player name for `hello`                       |
-| `bizhawk_path`      | Cached path to managed `EmuHawk` under `{dataDir}/BizHawk` (external paths are cleared) |
-| `auto_open_bizhawk` | Default `"true"` — **not read** by current client runtime                               |
+| `name`         | Player name for `hello`                                                       |
+| `bizhawk_path` | Cached path to managed `EmuHawk` under `{dataDir}/BizHawk` (external paths are cleared) |
 
 ### 5.5 Web admin workflows
 
 | Panel   | Key actions                                                                                            |
 | ------- | ------------------------------------------------------------------------------------------------------ |
 | Session | Start/pause, do swap, auto swaps, better random, countdown, clear saves, mode, interval                |
-| Players | Add/remove, swap, random, message, fullscreen, config check, drag-drop instances (save mode)           |
+| Players | Add/remove, swap, random, message, config check, drag-drop instances (save mode)                      |
 | Games   | Catalog, auto setup (`POST /api/mode/setup`), sync checkboxes, instances (save mode), open roms folder |
 | Plugins | Enable/disable, reload, settings modal, open plugins folder                                            |
 | Logs    | Local action log (200 entries)                                                                         |
@@ -281,10 +278,9 @@ sequenceDiagram
 | Games update  | `games_update`      | `games`, `main_games`, `game_instances`                          |
 | Clear saves   | `clear_saves`       | Wipe local saves                                                 |
 | Request save  | `request_save`      | Payload: `instance_id`                                           |
-| Plugin reload | `plugin_reload`     | Payload: `plugin_name`                                           |
-| Fullscreen    | `fullscreen_toggle` | Alt+Enter (Windows)                                              |
-| Check config  | `check_config`      | Payload: `config_keys[]`                                         |
-| Update config | `update_config`     | Payload: `config_updates` (JSON string)                          |
+| Plugin reload | `plugin_reload` | Payload: `plugin_name`                                 |
+| Check config  | `check_config`  | Payload: `config_keys[]` — **client stub** (acks only) |
+| Update config | `update_config`     | Payload: `config_updates` — **client stub** (acks only)          |
 | State update  | `state_update`      | Plugin settings to players; `updated_at` to admins               |
 
 ### 6.5 Client → server messages
@@ -328,19 +324,20 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 
 ### 7.1 Session & scheduling
 
-| Method   | Path                            | Body                   | Effect                                   |
-| -------- | ------------------------------- | ---------------------- | ---------------------------------------- | --------- |
-| POST     | `/api/start`                    | —                      | `running=true`; broadcast `start`        |
-| POST     | `/api/pause`                    | —                      | `running=false`; broadcast `pause`       |
-| POST     | `/api/clear_saves`              | —                      | Trash `./saves`; broadcast `clear_saves` |
-| POST     | `/api/toggle_swaps`             | —                      | Toggle `swap_enabled`                    |
-| POST     | `/api/toggle_countdown`         | —                      | Toggle 3-2-1 before auto swap            |
-| POST     | `/api/toggle_prevent_same_game` | —                      | Toggle better random                     |
-| POST     | `/api/do_swap`                  | —                      | Async full swap                          |
-| POST     | `/api/random_swap`              | `{ "player": "name" }` | Per-player random swap                   |
-| GET/POST | `/api/mode`                     | `{ "mode": "sync"      | "save" }`                                | Game mode |
-| POST     | `/api/mode/setup`               | —                      | Scan `./roms/`, setup catalog            |
-| GET/POST | `/api/interval`                 | min/max seconds        | Scheduler bounds                         |
+| Method   | Path                            | Body                          | Effect                                   |
+| -------- | ------------------------------- | ----------------------------- | ---------------------------------------- |
+| POST     | `/api/start`                    | —                             | `running=true`; broadcast `start`        |
+| POST     | `/api/pause`                    | —                             | `running=false`; broadcast `pause`       |
+| POST     | `/api/clear_saves`              | —                             | Trash `./saves`; broadcast `clear_saves` |
+| POST     | `/api/toggle_swaps`             | —                             | Toggle `swap_enabled`                    |
+| POST     | `/api/toggle_countdown`         | —                             | Toggle 3-2-1 before auto swap            |
+| POST     | `/api/toggle_prevent_same_game` | —                             | Toggle better random                     |
+| POST     | `/api/do_swap`                  | —                             | Async full swap                          |
+| POST     | `/api/random_swap`              | `{ "player": "name" }`        | Per-player random swap                   |
+| GET/POST | `/api/mode`                     | `{ "mode": "sync" \| "save" }` | Game mode (POST body)                    |
+| POST     | `/api/mode/setup`               | —                             | Scan `./roms/`, setup catalog            |
+| GET/POST | `/api/interval`                 | min/max seconds               | Scheduler bounds                         |
+| GET      | `/api/share_urls`               | —                             | LAN/WAN URLs for admin share panel       |
 
 ### 7.2 Games & players
 
@@ -351,14 +348,17 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | POST        | `/api/swap_player`                      | `{ player, game?, instance_id? }`               |
 | POST        | `/api/swap_all_to_game`                 | `{ game }`                                      |
 | POST        | `/api/add_player`, `/api/remove_player` | Player registry                                 |
-| POST/DELETE | `/api/players/{player}/completed_*`     | Completion tracking                             |
+| POST/DELETE | `/api/players/{player}/completed_games` | Body/query `game`                               |
+| POST/DELETE | `/api/players/{player}/completed_instances` | Body/query `instance`                       |
+| POST        | `/api/players/remove_all_completions` | Clear all players' completions                  |
+| POST        | `/api/games/{game}/mark_completed_all`  | Mark game completed for all players             |
+| POST        | `/api/instances/{instance}/mark_completed_all` | Mark instance completed for all players  |
 
 ### 7.3 Messaging & config
 
 | Method | Path                                                    |
 | ------ | ------------------------------------------------------- |
 | POST   | `/api/message_player`, `/api/message_all`               |
-| POST   | `/api/fullscreen_toggle`                                |
 | POST   | `/api/check_player_config`, `/api/update_player_config` |
 | POST   | `/api/set_config_keys`                                  |
 
@@ -380,8 +380,9 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | GET    | `/files/{path}`         | Download from `./roms/`            |
 | GET    | `/files/plugins/{path}` | Plugin files                       |
 | POST   | `/upload`               | Multipart `file` → `./roms/`       |
+| GET    | `/api/BizhawkFiles.zip` | BizHawk-related bundle for clients |
 | GET    | `/save/{filename}`      | Save download (30s wait for ready) |
-| POST   | `/save/upload`          | Multipart save                     |
+| POST   | `/save/upload`          | Multipart `save` (+ optional `filename`) |
 | POST   | `/save/no-save`         | Form `instance_id` → `none`        |
 | GET    | `/state.json`           | `{ "state": ServerState }`         |
 | GET    | `/`                     | Admin UI                           |
@@ -424,7 +425,7 @@ Handlers: sync and save mode logic in `serverhost/` (`game_modes.go`).
 
 Runs when `running && swap_enabled`:
 
-1. Random interval in `[min_interval_secs, max_interval_secs]` (defaults 5–10 in new server; fallback **300s** if both zero).
+1. Random interval in `[min_interval_secs, max_interval_secs]` (new server defaults: min **5**, max **300**; fallback **300s** if both zero).
 2. Optional countdown (`countdown_enabled`, interval ≥ 3s): messages 3, 2, 1 then `performSwap()`.
 3. `schedulerCh` wakes loop on start/pause/toggle.
 
@@ -543,7 +544,7 @@ Tagged releases publish four assets: `bizshuffle-server` and `bizshuffle-desktop
 | Save swap failures    | `file_state` stuck `pending`; client logs; file locks on Windows              |
 | Plugin not applied    | Admin status; client plugin sync logs                                         |
 
-**Logs:** Client `logs/` (with `-v`); server stdout; admin Logs panel.
+**Logs:** Desktop client `{dataDir}/desktop.log`; headless server stdout; admin Logs panel (local UI only).
 
 **Recovery:** Delete/edit `config.json` or `state.json` while stopped.
 
@@ -557,7 +558,8 @@ Tagged releases publish four assets: `bizshuffle-server` and `bizshuffle-desktop
 | Desktop entry    | `cmd/desktop`, `cmd/desktop/fyneapp/`                                                      |
 | Desktop Join     | `cmd/desktop`, `clienthost/join_session.go`                                                |
 | Types / protocol | `protocol/schemas.go`, `codec.go`, `kv.go`, `lua_plugin.go`                                |
-| Domain session   | `domain/session.go`                                                                        |
+| Domain session   | `domain/session.go` (unused by server/client today)                                        |
+| Observability    | `obslog/`                                                                                  |
 | WebSocket        | `serverhost/ws.go`, `clienthost/wsclient.go`, `clienthost/controller.go`                   |
 | REST routes      | `serverhost/server.go`, `serverhost/api_*.go`                                              |
 | Game modes       | `serverhost/game_modes.go`                                                                 |
@@ -570,4 +572,4 @@ Tagged releases publish four assets: `bizshuffle-server` and `bizshuffle-desktop
 
 ---
 
-_Unified spec — reflects repository implementation. For quick-start user instructions, see `README.md`._
+_Unified spec — reflects repository implementation. For quick-start user instructions, see `README.md`. For planned stubs, see `docs/ROADMAP.md`._

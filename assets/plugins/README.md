@@ -1,14 +1,10 @@
 # Plugins Directory
 
-This directory contains Lua plugins for BizHawk Shuffler.
+Bundled sample plugins for **BizShuffle**. At runtime the server loads plugins from `{dataDir}/plugins/` (copy or sync from this folder).
 
 ## Structure
 
-All plugins are stored directly in this directory with their metadata.
-
-## Basic Plugin Structure
-
-Each plugin should be in its own subdirectory:
+Each plugin lives in its own subdirectory:
 
 ```
 plugins/my-plugin/

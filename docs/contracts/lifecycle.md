@@ -1,10 +1,17 @@
 # Lifecycle
 
-## Shutdown order
+## Shutdown order (desktop app exit)
 
-1. Stop join session (`JoinSession.Stop` — WebSocket client, Lua IPC, BizHawk process)
-2. Flush pending saves / disconnect Lua
-3. Stop embedded server (desktop Host)
+1. **Join session** — `JoinSession.Stop()` (`clienthost/join_session.go`):
+   - Cancel session context
+   - Stop WebSocket client
+   - Close Lua IPC (`BizhawkIPC.Close`)
+   - Terminate BizHawk (`BizHawkController.Terminate`)
+2. **Host session** — `hostsession.Session.Stop()`:
+   - `Server.BeginShutdown()` / drain WebSockets
+   - Close listener and HTTP server
+
+`StopJoinSession` also waits 300ms settle delay before a re-join.
 
 ## Desktop Host
 
@@ -15,10 +22,10 @@ No player client or BizHawk on this path.
 
 ## Desktop Join
 
-1. Dependencies panel: BizHawk (+ VC++ on Windows) satisfied
+1. Dependencies panel: BizHawk (+ VC++ on Windows, Mono on Linux) satisfied
 2. Reserve Lua port → write `lua_server_port.txt` under `dataDir`
-3. `EnsureServerLua` → launch `EmuHawk` with `{dataDir}/server.lua`
-4. `StartJoinSession` → WebSocket `hello` to server URL
+3. `EnsureServerLua` → launch `EmuHawk` / `EmuHawkMono.sh` with `{dataDir}/server.lua`
+4. `StartJoinSession` → WebSocket `hello` to server URL (30s connect timeout)
 
 To host and play on one machine: **Host**, then **Join** using the hosted URL (auto-filled when the server URL field is empty).
 

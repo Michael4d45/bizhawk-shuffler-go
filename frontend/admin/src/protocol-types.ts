@@ -18,7 +18,6 @@ export type CommandName =
   | "clear_saves"
   | "request_save"
   | "plugin_reload"
-  | "fullscreen_toggle"
   | "check_config"
   | "update_config"
   | "state_update";

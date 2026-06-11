@@ -1,6 +1,6 @@
 # BizShuffle (Go)
 
-Coordinated retro-gaming session host for BizHawk. Behavior spec: [docs/SPEC.md](docs/SPEC.md).
+Coordinated retro-gaming session host for BizHawk. Behavior spec: [docs/SPEC.md](docs/SPEC.md). Planned stubs: [docs/ROADMAP.md](docs/ROADMAP.md).
 
 ## Requirements
 
@@ -78,7 +78,8 @@ make check-all       # same, but continues after failures (triage)
 |------|------|
 | `protocol/` | WS types, codec, KV, Lua |
 | `assets/` | BizHawk `server.lua` (embedded) + sample plugins |
-| `domain/` | Pure session logic |
+| `domain/` | Session types (not wired into server/client yet) |
+| `obslog/` | Structured logging helpers |
 | `savestate/` | `.state` zip verification |
 | `serverhost/` | HTTP/WS server + embedded admin |
 | `clienthost/` | Player session library (BizHawk IPC, deps, Join) |
@@ -93,5 +94,5 @@ make check-all       # same, but continues after failures (triage)
 3. **Join** while BizHawk/VC++/Mono missing — Join disabled with deps message; install via panel (or **Install all** where supported).
 4. **Join** with valid server URL — staged status messages; session connects (or times out after 30s with a clear error).
 5. Close BizHawk — status shows disconnect message.
-6. **Refresh servers** / wait 5s — LAN list updates; hosted session marked `(hosting)`.
+6. **Host** then **Join** on same machine — server URL auto-fills when the field was empty.
 7. **Check updates** — version label; opens release download when a newer GitHub release exists.

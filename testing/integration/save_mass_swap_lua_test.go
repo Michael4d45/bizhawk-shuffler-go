@@ -10,7 +10,7 @@ import (
 
 	"github.com/michael4d45/bizshuffle/clienthost"
 	"github.com/michael4d45/bizshuffle/protocol"
-	"github.com/michael4d45/bizshuffle/testing/fakes"
+	"github.com/michael4d45/bizshuffle/clienthost/faketest"
 )
 
 // TS parity: packages/testing/src/integration/save-swap-two-player.test.ts uses real
@@ -64,7 +64,7 @@ func TestSaveModeMassSwapSendsAtMostOneSavePerPlayerToLua(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = bipc.Close() })
 
-	peer, err := fakes.StartFakeLuaPeerOnPort(bipc.Port(), &fakes.FakeLuaSaveOpts{
+	peer, err := faketest.StartFakeLuaPeerOnPort(bipc.Port(), &faketest.FakeLuaSaveOpts{
 		SavesDir:   clientDir,
 		InstanceID: chronoInstanceID,
 	})

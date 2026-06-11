@@ -1,11 +1,11 @@
 # Example Plugin
 
-This is an example plugin for BizHawk Shuffler that demonstrates basic plugin functionality.
+This is an example plugin for BizShuffle that demonstrates basic plugin functionality.
 
 ## Features
 
 - Logs messages when loaded and initialized
-- Hooks into game start events
+- Demonstrates `on_init`, `on_frame`, and `on_settings_changed` hooks
 - Shows the basic plugin structure
 
 ## Usage
@@ -17,7 +17,8 @@ This is an example plugin for BizHawk Shuffler that demonstrates basic plugin fu
 ## Plugin Structure
 
 - `plugin.lua` - Main plugin code with hook functions
-- `meta.kv` - Plugin metadata and configuration (key=value pairs)
+- `meta.kv` - Plugin metadata (key=value pairs)
+- `settings.kv` - User settings (`status=enabled|disabled`, optional custom keys)
 - `README.md` - This documentation file
 
 This plugin serves as a template for developing more complex plugins.

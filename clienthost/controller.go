@@ -500,18 +500,6 @@ func (c *Controller) Handle(ctx context.Context, cmd protocol.Command) {
 			}
 		}()
 		sendAck(cmd.ID)
-	case protocol.CmdFullscreenToggle:
-		go func(id string) {
-			log.Printf("handling fullscreen toggle command")
-			// Execute keyTap("enter", "alt") to toggle fullscreen (Windows only)
-			if err := keyTap("enter", "alt"); err != nil {
-				log.Printf("failed to toggle fullscreen: %v", err)
-				sendNack(id, "failed to toggle fullscreen: "+err.Error())
-				return
-			}
-			log.Printf("fullscreen toggle executed (Alt+Enter)")
-			sendAck(id)
-		}(cmd.ID)
 	case protocol.CmdCheckConfig, protocol.CmdUpdateConfig:
 		sendAck(cmd.ID)
 	default:
