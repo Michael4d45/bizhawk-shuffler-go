@@ -77,6 +77,15 @@ func TestAdminAPIParitySessionControls(t *testing.T) {
 	if res.StatusCode != http.StatusOK {
 		t.Fatalf("POST /api/do_swap status %d", res.StatusCode)
 	}
+
+	res, err = http.Post(base+"/api/reset", "application/json", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_ = res.Body.Close()
+	if res.StatusCode != http.StatusOK {
+		t.Fatalf("POST /api/reset status %d", res.StatusCode)
+	}
 }
 
 func TestAdminAPIParityPlayerMessaging(t *testing.T) {

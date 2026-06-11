@@ -14,6 +14,7 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | -------- | ------------------------------- | ------------------------------------------ |
 | POST     | `/api/start`                    | `running=true`; broadcast `start`          |
 | POST     | `/api/pause`                    | `running=false`; broadcast `pause`         |
+| POST     | `/api/reset`                    | Optional `{ pause, clear_saves, clear_completions }` (default true) |
 | POST     | `/api/clear_saves`              | Trash `./saves`; broadcast `clear_saves`   |
 | POST     | `/api/toggle_swaps`             | Toggle `swap_enabled`                      |
 | POST     | `/api/toggle_countdown`         | Toggle 3-2-1 before auto swap              |

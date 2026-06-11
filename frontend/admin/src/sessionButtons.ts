@@ -10,4 +10,5 @@ export const SESSION_BUTTONS = [
   },
   { label: "Countdown", path: "/api/toggle_countdown", toggle: "countdown_enabled" as const },
   { label: "Clear Saves", path: "/api/clear_saves" },
+  { label: "Reset session", path: "/api/reset" },
 ] as const;

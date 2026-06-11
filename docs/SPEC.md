@@ -48,7 +48,6 @@ BizShuffle is a **single-session** coordination server for groups playing throug
 
 **Not implemented (or stubbed):** see [docs/ROADMAP.md](ROADMAP.md).
 
-- `POST /api/reset` — use pause, clear saves, and player management instead.
 - **Player-name hashing** for game assignment — save mode uses first-free instance, shuffled round-robin, and preference-based random selection.
 - **`check_config`**, **`update_config`** on the player client — ack-only stubs (no config probe or apply yet).
 
@@ -328,6 +327,7 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | -------- | ------------------------------- | ----------------------------- | ---------------------------------------- |
 | POST     | `/api/start`                    | —                             | `running=true`; broadcast `start`        |
 | POST     | `/api/pause`                    | —                             | `running=false`; broadcast `pause`       |
+| POST     | `/api/reset`                    | optional flags (see below)    | Composite reset (defaults: all on)       |
 | POST     | `/api/clear_saves`              | —                             | Trash `./saves`; broadcast `clear_saves` |
 | POST     | `/api/toggle_swaps`             | —                             | Toggle `swap_enabled`                    |
 | POST     | `/api/toggle_countdown`         | —                             | Toggle 3-2-1 before auto swap            |
@@ -338,6 +338,8 @@ Base: `http://{host}:{port}`. Most mutations return plain `"ok"` or JSON as note
 | POST     | `/api/mode/setup`               | —                             | Scan `./roms/`, setup catalog            |
 | GET/POST | `/api/interval`                 | min/max seconds               | Scheduler bounds                         |
 | GET      | `/api/share_urls`               | —                             | LAN/WAN URLs for admin share panel       |
+
+`POST /api/reset` body (all optional, default `true`): `pause`, `clear_saves`, `clear_completions`. Order: pause → clear completions → trash `./saves`, reset instance `file_state`, broadcast `clear_saves`.
 
 ### 7.2 Games & players
 

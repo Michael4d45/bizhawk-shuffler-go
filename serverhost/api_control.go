@@ -28,6 +28,60 @@ func (s *Server) apiStart(w http.ResponseWriter, r *http.Request) {
 
 // apiPause toggles running=false and notifies clients
 func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
+	s.pauseSession()
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}
+
+func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
+	s.clearSavesAndNotifyClients()
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}
+
+type resetRequest struct {
+	Pause            *bool `json:"pause"`
+	ClearSaves       *bool `json:"clear_saves"`
+	ClearCompletions *bool `json:"clear_completions"`
+}
+
+func resetBoolDefault(v *bool, def bool) bool {
+	if v == nil {
+		return def
+	}
+	return *v
+}
+
+// apiReset: POST composite session reset (pause, clear saves, clear completions by default).
+func (s *Server) apiReset(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	var req resetRequest
+	if r.Body != nil && r.ContentLength != 0 {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			http.Error(w, "bad json: "+err.Error(), http.StatusBadRequest)
+			return
+		}
+	}
+	if resetBoolDefault(req.Pause, true) {
+		s.pauseSession()
+	}
+	if resetBoolDefault(req.ClearCompletions, true) {
+		s.clearAllPlayerCompletions()
+	}
+	if resetBoolDefault(req.ClearSaves, true) {
+		s.clearSavesAndNotifyClients()
+	}
+	if _, err := w.Write([]byte("ok")); err != nil {
+		fmt.Printf("write response error: %v\n", err)
+	}
+}
+
+func (s *Server) pauseSession() {
 	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
 		st.Running = false
 	})
@@ -36,16 +90,25 @@ func (s *Server) apiPause(w http.ResponseWriter, r *http.Request) {
 	case s.schedulerCh <- struct{}{}:
 	default:
 	}
-	if _, err := w.Write([]byte("ok")); err != nil {
-		fmt.Printf("write response error: %v\n", err)
-	}
 }
 
-func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
+func (s *Server) clearAllPlayerCompletions() {
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		if st.Players == nil {
+			return
+		}
+		for name, player := range st.Players {
+			player.CompletedGames = []string{}
+			player.CompletedInstances = []string{}
+			st.Players[name] = player
+		}
+	})
+}
+
+func (s *Server) clearSavesAndNotifyClients() {
 	savesDir := "./saves"
 	if _, err := os.Stat(savesDir); err == nil {
 		trash := fmt.Sprintf("%s.trash.%d", savesDir, time.Now().Unix())
-		// Retry rename up to 3 times with small delay to handle Windows file locking issues
 		var renameErr error
 		for i := range 3 {
 			if renameErr = os.Rename(savesDir, trash); renameErr == nil {
@@ -60,10 +123,14 @@ func (s *Server) apiClearSaves(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	_ = os.MkdirAll(savesDir, 0755)
+	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
+		s.pendingInstancecount = 0
+		for i := range st.GameSwapInstances {
+			st.GameSwapInstances[i].FileState = protocol.FileStateNone
+			st.GameSwapInstances[i].PendingPlayer = ""
+		}
+	})
 	s.broadcastToPlayers(protocol.Command{Cmd: protocol.CmdClearSaves, ID: fmt.Sprintf("%d", time.Now().UnixNano())})
-	if _, err := w.Write([]byte("ok")); err != nil {
-		fmt.Printf("write response error: %v\n", err)
-	}
 }
 
 func (s *Server) apiToggleSwaps(w http.ResponseWriter, r *http.Request) {

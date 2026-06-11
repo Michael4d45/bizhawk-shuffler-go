@@ -369,16 +369,7 @@ func (s *Server) apiRemoveAllCompletions(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	s.UpdateStateAndPersist(func(st *protocol.ServerState) {
-		if st.Players == nil {
-			return
-		}
-		for playerName, player := range st.Players {
-			player.CompletedGames = []string{}
-			player.CompletedInstances = []string{}
-			st.Players[playerName] = player
-		}
-	})
+	s.clearAllPlayerCompletions()
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(map[string]string{"result": "ok"}); err != nil {
 		fmt.Printf("encode response error: %v\n", err)

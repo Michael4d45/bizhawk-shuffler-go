@@ -4,21 +4,6 @@ Planned work not yet in the codebase. See [SPEC.md](SPEC.md) for what ships toda
 
 ---
 
-## `POST /api/reset`
-
-**Problem:** Hosts sometimes want a single “back to clean slate” action (pause, clear catalog progress, wipe saves, disconnect players) without clicking several admin controls.
-
-**Today:** No route is registered. Admins use `POST /api/pause`, `POST /api/clear_saves`, player remove/add, and completion endpoints separately.
-
-**Options:**
-
-1. **Composite endpoint** — one `POST /api/reset` that pauses, clears saves, optionally clears `completed_*` lists, and broadcasts `clear_saves` + `pause`. Body flags for which sub-steps to run.
-2. **Document-only** — keep the multi-step workflow; remove reset from any “not implemented” lists if we explicitly reject a one-shot API.
-
-**Touches:** `serverhost/server.go`, `serverhost/api_control.go`, admin UI (optional button), integration test for ordering (pause before clear vs after).
-
----
-
 ## Player-name hashing for game assignment
 
 **Problem:** In save mode, instance assignment is driven by shuffle / first-free / preference tiers. Some designs want deterministic mapping from player name → instance or game (e.g. same name always gets the same slot until swapped).
