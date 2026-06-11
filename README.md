@@ -78,7 +78,6 @@ make check-all       # same, but continues after failures (triage)
 |------|------|
 | `protocol/` | WS types, codec, KV, Lua |
 | `assets/` | BizHawk `server.lua` (embedded) + sample plugins |
-| `domain/` | Session types (not wired into server/client yet) |
 | `obslog/` | Structured logging helpers |
 | `savestate/` | `.state` zip verification |
 | `serverhost/` | HTTP/WS server + embedded admin |

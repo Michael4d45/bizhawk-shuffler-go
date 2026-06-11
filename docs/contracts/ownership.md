@@ -17,5 +17,3 @@ Reflects **implemented** types in this repository (see `serverhost/`, `clienthos
 | Plugin file sync      | `clienthost.PluginSyncManager` (`plugin_sync.go`)                     |
 | BizHawk Lua runtime   | `assets/server.lua` (embedded; copied to `{dataDir}/server.lua`)      |
 | Structured log hints  | `obslog/` (URL/share helpers; not session authority)                |
-
-**Not wired today:** `domain/ServerSession` exists as a standalone package but is **not imported** by `serverhost` or `clienthost`. Session authority lives on `serverhost.Server` directly.

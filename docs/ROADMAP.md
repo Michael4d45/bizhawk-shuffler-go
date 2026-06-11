@@ -51,21 +51,6 @@ Planned work not yet in the codebase. See [SPEC.md](SPEC.md) for what ships toda
 
 ---
 
-## `domain/ServerSession`
-
-**Problem:** Session mutation logic is embedded in `serverhost.Server` (`UpdateStateAndPersist`, mutex rules). `domain/ServerSession` (`domain/session.go`) is a small, testable state wrapper but **nothing imports it**.
-
-**Today:** Duplicate concepts — `domain` has `Snapshot` / `Update`; server duplicates patterns inline.
-
-**Options:**
-
-1. **Wire in** — `serverhost.Server` holds `*domain.ServerSession` for state reads/writes; persistence and WS stay in serverhost.
-2. **Delete** — remove `domain/` if we accept serverhost as the only session owner (update `go.work`, Makefile `GO_MOD_DIRS`, arch tests).
-
-**Touches:** `serverhost/state.go`, `domain/session.go`, `testing/arch/domain_no_io_test.go`.
-
----
-
 ## Retry backoff policy
 
 **Problem:** Retries use **fixed** delays today. Older docs sometimes described exponential or staged backoff.

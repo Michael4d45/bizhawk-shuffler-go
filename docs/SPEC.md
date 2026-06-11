@@ -94,13 +94,13 @@ flowchart TB
 ```
 root/
 ├── cmd/server, desktop/
-├── protocol/, domain/, obslog/, savestate/, assets/, serverhost/, clienthost/, testing/
+├── protocol/, obslog/, savestate/, assets/, serverhost/, clienthost/, testing/
 ├── frontend/admin/, assets/server.lua (embedded via assets/embed.go)
 ├── roms/, saves/, plugins/, state.json, config.json, BizHawk/   (runtime, ~/BizShuffle)
 └── docs/SPEC.md, docs/contracts/, docs/ROADMAP.md
 ```
 
-**Package direction:** `cmd/*` → `serverhost` / `clienthost` → `protocol` + `assets` (BizHawk Lua embed). Server and client packages do not import each other. `domain/` exists but is **not imported** by server or client today (session logic lives on `serverhost.Server`).
+**Package direction:** `cmd/*` → `serverhost` / `clienthost` → `protocol` + `assets` (BizHawk Lua embed). Server and client packages do not import each other. Session state lives on `serverhost.Server`.
 
 ### 3.3 Deployment topology
 
@@ -558,7 +558,6 @@ Tagged releases publish four assets: `bizshuffle-server` and `bizshuffle-desktop
 | Desktop entry    | `cmd/desktop`, `cmd/desktop/fyneapp/`                                                      |
 | Desktop Join     | `cmd/desktop`, `clienthost/join_session.go`                                                |
 | Types / protocol | `protocol/schemas.go`, `codec.go`, `kv.go`, `lua_plugin.go`                                |
-| Domain session   | `domain/session.go` (unused by server/client today)                                        |
 | Observability    | `obslog/`                                                                                  |
 | WebSocket        | `serverhost/ws.go`, `clienthost/wsclient.go`, `clienthost/controller.go`                   |
 | REST routes      | `serverhost/server.go`, `serverhost/api_*.go`                                              |

@@ -30,8 +30,8 @@ DEADCODE ?= deadcode
 SERVER_BIN := $(BIN)/bizshuffle-server$(EXE)
 DESKTOP_BIN := $(BIN)/bizshuffle-desktop$(EXE)
 # go.work has no root module; quality targets use explicit package/module lists.
-GO_PKGS := ./assets/... ./protocol/... ./domain/... ./obslog/... ./savestate/... ./serverhost/... ./clienthost/... ./testing/... ./cmd/server/... ./cmd/desktop/...
-GO_MOD_DIRS := assets protocol domain obslog savestate serverhost clienthost testing cmd/server cmd/desktop
+GO_PKGS := ./assets/... ./protocol/... ./obslog/... ./savestate/... ./serverhost/... ./clienthost/... ./testing/... ./cmd/server/... ./cmd/desktop/...
+GO_MOD_DIRS := assets protocol obslog savestate serverhost clienthost testing cmd/server cmd/desktop
 
 # Portable directory create (Windows make may not have mkdir in PATH).
 ifeq ($(OS),Windows_NT)
@@ -41,7 +41,7 @@ ensure_coverage_dir = mkdir -p $(COVERAGE_DIR)
 endif
 
 .PHONY: all test test-race lint lint-prereq lint-vet lint-timed lint-modules lint-one \
-	lint-protocol lint-domain lint-savestate lint-serverhost lint-clienthost lint-testing \
+	lint-protocol lint-savestate lint-serverhost lint-clienthost lint-testing \
 	lint-cmd-server lint-cmd-desktop \
 	vet fmt fix mod-tidy tools-install coverage coverage-html vuln deadcode check check-all \
 	build-admin build-server build-desktop build-luasocket-linux-amd64 clean
@@ -134,10 +134,10 @@ mod-tidy:
 	done
 
 # Per-module lint: make lint-protocol, lint-cmd-desktop, … (see lint-one).
-.PHONY: lint-one lint-protocol lint-domain lint-savestate lint-assets lint-serverhost \
+.PHONY: lint-one lint-protocol lint-savestate lint-assets lint-serverhost \
 	lint-clienthost lint-testing lint-cmd-server lint-cmd-desktop
 
-LINT_MOD_TARGETS := lint-protocol lint-domain lint-savestate lint-assets lint-serverhost \
+LINT_MOD_TARGETS := lint-protocol lint-savestate lint-assets lint-serverhost \
 	lint-clienthost lint-testing lint-cmd-server lint-cmd-desktop
 
 lint-one:
@@ -145,8 +145,6 @@ lint-one:
 
 lint-protocol:
 	@$(MAKE) lint-one DIR=protocol
-lint-domain:
-	@$(MAKE) lint-one DIR=domain
 lint-savestate:
 	@$(MAKE) lint-one DIR=savestate
 lint-assets:
@@ -188,7 +186,6 @@ coverage-html: coverage
 vuln:
 	@command -v $(GOVULNCHECK) >/dev/null 2>&1 || (echo "govulncheck not found; run: make tools-install" && exit 1)
 	@echo "==> protocol" && $(GOVULNCHECK) -C protocol ./...
-	@echo "==> domain" && $(GOVULNCHECK) -C domain ./...
 	@echo "==> savestate" && $(GOVULNCHECK) -C savestate ./...
 	@echo "==> serverhost" && $(GOVULNCHECK) -C serverhost ./...
 	@echo "==> clienthost" && $(GOVULNCHECK) -C clienthost ./...

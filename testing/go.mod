@@ -20,7 +20,6 @@ require (
 replace (
 	github.com/michael4d45/bizshuffle/assets => ../assets
 	github.com/michael4d45/bizshuffle/clienthost => ../clienthost
-	github.com/michael4d45/bizshuffle/domain => ../domain
 	github.com/michael4d45/bizshuffle/obslog => ../obslog
 	github.com/michael4d45/bizshuffle/protocol => ../protocol
 	github.com/michael4d45/bizshuffle/savestate => ../savestate
